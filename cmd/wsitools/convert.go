@@ -81,6 +81,16 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	}
 	defer src.Close()
 
+	for _, lvl := range src.Levels() {
+		if compressionTagFor(lvl.Compression()) == 0 {
+			return fmt.Errorf("level %d: source compression %s has no standard TIFF Compression tag; cannot tile-copy",
+				lvl.Index(), lvl.Compression())
+		}
+	}
+	if len(src.Levels()) == 0 {
+		return fmt.Errorf("source has no pyramid levels")
+	}
+
 	md := src.Metadata()
 	opts := cogwsi.Options{
 		BigTIFF:      bigTIFFMode,
