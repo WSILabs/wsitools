@@ -19,7 +19,9 @@ var convertCmd = &cobra.Command{
 into a new container without decoding or re-encoding. In v0.6 the only
 supported target is COG-WSI (--to cog-wsi).
 
-See docs/superpowers/specs/2026-05-20-cog-wsi-format.md for the format spec.`,
+COG-WSI is an extension of Cloud Optimized GeoTIFF for whole-slide images:
+header-front IFDs, reverse-order tile data (lowest-resolution overview
+first), and an associated-image (label/macro/thumbnail) tail section.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConvert,
 }

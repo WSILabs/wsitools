@@ -11,6 +11,7 @@ func TestConvertHelpListsRequiredFlags(t *testing.T) {
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
 	rootCmd.SetArgs([]string{"convert", "--help"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
