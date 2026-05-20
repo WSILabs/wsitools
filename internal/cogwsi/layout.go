@@ -179,7 +179,11 @@ func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 	//   TileOffsets:     N entries × (4 or 8) bytes
 	//   TileByteCounts:  N entries × (4 or 8) bytes
 	//   JPEGTables:      raw bytes (if present)
-	//   BitsPerSample:   if SamplesPerPixel > 1, may be external (we'll always emit external for safety)
+	//   BitsPerSample:   SamplesPerPixel=3 → 3×2=6 bytes; > 4 byte classic inline cap → external
+	//   WSIImageType:    "pyramid\0" = 8 bytes; > 4 byte classic inline cap → external
+	//
+	// BigTIFF has an 8-byte inline cap, so BitsPerSample (6 bytes) and
+	// WSIImageType (8 bytes) both fit inline. Classic TIFF needs them external.
 	var external uint64
 	entrySize := uint64(4)
 	if big {
@@ -190,10 +194,20 @@ func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 	if lv.JPEGTables != nil {
 		external += uint64(len(lv.JPEGTables))
 	}
+	if !big {
+		// BitsPerSample: 3 SHORTs = 6 bytes (> 4-byte classic inline cap).
+		external += 6
+		// WSIImageType ASCII: "pyramid\0" = 8 bytes (> 4-byte classic inline cap).
+		// IsL0 levels' 2048-byte budget below already covers this.
+		if !lv.IsL0 {
+			external += 8
+		}
+	}
 	if lv.IsL0 {
 		// Reserve a generous allowance for ImageDescription, Make, Model,
-		// Software, DateTime, SourceFormat, ToolsVersion, MPP-X/Y, Magnification.
-		// 2 KiB is a comfortable upper bound for these ASCII tags + 3 doubles.
+		// Software, DateTime, SourceFormat, ToolsVersion, MPP-X/Y, Magnification,
+		// BitsPerSample, and WSIImageType.
+		// 2 KiB is a comfortable upper bound for these tags combined.
 		external += 2048
 	}
 	return ifd, external
