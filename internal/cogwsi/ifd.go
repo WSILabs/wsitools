@@ -83,16 +83,21 @@ func (b *ifdBuilder) AddLong8(tag uint16, vals []uint64) {
 }
 
 // AddTileOffsets / AddTileByteCounts pick LONG or LONG8 depending on bigtiff.
-func (b *ifdBuilder) AddTileOffsets(tag uint16, offsets []uint64) {
+// Returns an error if any offset exceeds the classic TIFF 4 GiB limit.
+func (b *ifdBuilder) AddTileOffsets(tag uint16, offsets []uint64) error {
 	if b.bigtiff {
 		b.AddLong8(tag, offsets)
-		return
+		return nil
 	}
 	asLong := make([]uint32, len(offsets))
 	for i, o := range offsets {
+		if o > 0xFFFFFFFF {
+			return fmt.Errorf("cogwsi: tile offset %d (tag %d, index %d) overflows classic TIFF; BigTIFF promotion missed", o, tag, i)
+		}
 		asLong[i] = uint32(o)
 	}
 	b.AddLong(tag, asLong)
+	return nil
 }
 
 // AddASCII appends an ASCII entry with the trailing NUL count + 1.
@@ -121,7 +126,7 @@ func (b *ifdBuilder) AddDouble(tag uint16, vals []float64) {
 //
 // External entries' value fields are filled in with their final absolute
 // offsets.
-func (b *ifdBuilder) Encode(ifdOffset uint64, bo binary.ByteOrder) (ifd, ext []byte, err error) {
+func (b *ifdBuilder) Encode(ifdOffset uint64) (ifd, ext []byte, err error) {
 	if !b.bigtiff && ifdOffset > 0xFFFFFFFF {
 		return nil, nil, fmt.Errorf("classic TIFF ifd offset overflow: %d", ifdOffset)
 	}
@@ -147,16 +152,16 @@ func (b *ifdBuilder) Encode(ifdOffset uint64, bo binary.ByteOrder) (ifd, ext []b
 			continue
 		}
 		// Write offset into inlineValue, then append payload to extBuf.
-		setOffset(sorted[i].inlineValue[:], cursor, b.bigtiff, bo)
+		setOffset(sorted[i].inlineValue[:], cursor, b.bigtiff)
 		extBuf = append(extBuf, sorted[i].externalRaw...)
 		cursor += uint64(len(sorted[i].externalRaw))
 	}
 
 	// Write entry_count.
 	if b.bigtiff {
-		bo.PutUint64(ifd[0:8], uint64(len(sorted)))
+		binary.LittleEndian.PutUint64(ifd[0:8], uint64(len(sorted)))
 	} else {
-		bo.PutUint16(ifd[0:2], uint16(len(sorted)))
+		binary.LittleEndian.PutUint16(ifd[0:2], uint16(len(sorted)))
 	}
 
 	// Write entries.
@@ -165,14 +170,14 @@ func (b *ifdBuilder) Encode(ifdOffset uint64, bo binary.ByteOrder) (ifd, ext []b
 		off = 2
 	}
 	for _, e := range sorted {
-		bo.PutUint16(ifd[off:off+2], e.tag)
-		bo.PutUint16(ifd[off+2:off+4], e.tiffType)
+		binary.LittleEndian.PutUint16(ifd[off:off+2], e.tag)
+		binary.LittleEndian.PutUint16(ifd[off+2:off+4], e.tiffType)
 		if b.bigtiff {
-			bo.PutUint64(ifd[off+4:off+12], e.count)
+			binary.LittleEndian.PutUint64(ifd[off+4:off+12], e.count)
 			copy(ifd[off+12:off+20], e.inlineValue[:8])
 			off += bigTIFFTagEntrySize
 		} else {
-			bo.PutUint32(ifd[off+4:off+8], uint32(e.count))
+			binary.LittleEndian.PutUint32(ifd[off+4:off+8], uint32(e.count))
 			copy(ifd[off+8:off+12], e.inlineValue[:4])
 			off += classicTagEntrySize
 		}
@@ -181,10 +186,10 @@ func (b *ifdBuilder) Encode(ifdOffset uint64, bo binary.ByteOrder) (ifd, ext []b
 	return ifd, extBuf, nil
 }
 
-func setOffset(slot []byte, val uint64, bigtiff bool, bo binary.ByteOrder) {
+func setOffset(slot []byte, val uint64, bigtiff bool) {
 	if bigtiff {
-		bo.PutUint64(slot[:8], val)
+		binary.LittleEndian.PutUint64(slot[:8], val)
 	} else {
-		bo.PutUint32(slot[:4], uint32(val))
+		binary.LittleEndian.PutUint32(slot[:4], uint32(val))
 	}
 }

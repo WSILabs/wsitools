@@ -9,7 +9,7 @@ func TestIFDBuilderClassicSimple(t *testing.T) {
 	b := newIFDBuilder(false /*bigtiff*/)
 	b.AddShort(256 /*ImageWidth*/, []uint16{512})
 	b.AddShort(257 /*ImageLength*/, []uint16{384})
-	ifd, ext, err := b.Encode(100 /*ifdOffset*/, binary.LittleEndian)
+	ifd, ext, err := b.Encode(100 /*ifdOffset*/)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestIFDBuilderBigTIFFLongArray(t *testing.T) {
 	b := newIFDBuilder(true /*bigtiff*/)
 	offsets := []uint64{1000, 2000, 3000}
 	b.AddLong8(324 /*TileOffsets*/, offsets)
-	ifd, ext, err := b.Encode(100, binary.LittleEndian)
+	ifd, ext, err := b.Encode(100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestIFDBuilderASCIIInline(t *testing.T) {
 	// Short string fits inline (≤4 bytes classic, ≤8 BigTIFF).
 	b := newIFDBuilder(false)
 	b.AddASCII(305 /*Software*/, "go")
-	ifd, ext, err := b.Encode(100, binary.LittleEndian)
+	ifd, ext, err := b.Encode(100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestIFDBuilderASCIIExternal(t *testing.T) {
 	b := newIFDBuilder(false)
 	long := "this string is more than four bytes long"
 	b.AddASCII(270 /*ImageDescription*/, long)
-	ifd, ext, err := b.Encode(100, binary.LittleEndian)
+	ifd, ext, err := b.Encode(100)
 	if err != nil {
 		t.Fatal(err)
 	}
