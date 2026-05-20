@@ -184,6 +184,40 @@ func TestWriterCloseReverseOrderTileData(t *testing.T) {
 	}
 }
 
+func TestWriterAbortAfterCloseLeavesOutputIntact(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.tiff")
+	w, err := cogwsi.Create(out, cogwsi.Options{ToolsVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, _ := w.AddLevel(cogwsi.LevelSpec{
+		ImageWidth: 8, ImageHeight: 8, TileWidth: 8, TileHeight: 8,
+		Compression: 1, Photometric: 2, SamplesPerPixel: 3,
+		BitsPerSample: []uint16{8, 8, 8}, IsL0: true,
+	})
+	if err := h.WriteTile(0, 0, []byte("xxxxxxxx")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	stat, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("output missing after Close: %v", err)
+	}
+	preSize := stat.Size()
+	// Calling Abort after a successful Close must be a no-op.
+	_ = w.Abort()
+	stat2, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("output deleted by Abort-after-Close: %v", err)
+	}
+	if stat2.Size() != preSize {
+		t.Fatalf("output size changed after Abort-after-Close: pre=%d post=%d", preSize, stat2.Size())
+	}
+}
+
 func readTileOffsets(path string) (l0, l1 uint64, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -156,6 +156,9 @@ func (w *Writer) AddAssociated(spec AssociatedSpec) error {
 // idempotent. Use as a deferred cleanup in callers that want to discard the
 // in-progress write.
 func (w *Writer) Abort() error {
+	if w.closed {
+		return nil // successful Close (or prior Abort) — leave the finished output alone
+	}
 	if w.out != nil {
 		_ = w.out.Close()
 		w.out = nil
@@ -321,6 +324,7 @@ func (w *Writer) Close() error {
 	w.out = nil
 	for _, lv := range w.levels {
 		_ = lv.spool.Remove()
+		lv.spool = nil
 	}
 	_ = os.Remove(w.spoolDir)
 	return nil
