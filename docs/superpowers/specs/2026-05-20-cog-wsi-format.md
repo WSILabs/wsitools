@@ -138,7 +138,9 @@ Each pyramid IFD MUST be tiled (no strips) and MUST carry the following tags:
 | `TileOffsets`                  | 324     | Computed during finalize.                  |
 | `TileByteCounts`               | 325     | Per-tile byte length from source.          |
 | `NewSubfileType`               | 254     | 0 for the full-resolution IFD; 1 for overview IFDs (reduced-resolution image). |
-| `WSIImageType` (private)       | 65000   | ASCII `pyramid`.                           |
+| `WSIImageType` (private)       | 65080   | ASCII `pyramid`.                           |
+| `WSILevelIndex` (private)      | 65081   | LONG; 0-based pyramid level index.         |
+| `WSILevelCount` (private)      | 65082   | LONG; total pyramid level count.           |
 
 `JPEGTables` (tag 347) MUST be preserved when the source IFD used it
 (abbreviated-JPEG mode). Tile streams MUST remain abbreviated; writers MUST
@@ -164,26 +166,35 @@ NOT promote them to standalone JPEG.
   overview first, smallest last).
 - Pyramid IFD count and per-level dimensions MUST equal the source's.
 
-### 5.2 WSI extension tags (pyramid IFDs)
+### 5.2 Metadata tags (L0 / pyramid IFD 0 only)
 
-The following private tags MAY appear on pyramid IFD 0 (only). Readers MUST
-treat absence as "unknown".
+Standard TIFF metadata tags MAY appear on the L0 IFD when known from
+source; readers MUST treat absence as "unknown":
 
-| Tag                | TIFF ID | Type      | Meaning                                  |
-|--------------------|---------|-----------|------------------------------------------|
-| `WSIImageType`     | 65000   | ASCII     | `pyramid` for IFD 0.                     |
-| `WSIMPPX`          | 65001   | DOUBLE    | Microns per pixel, X axis, IFD 0.        |
-| `WSIMPPY`          | 65002   | DOUBLE    | Microns per pixel, Y axis, IFD 0.        |
-| `WSIMagnification` | 65003   | DOUBLE    | Optical magnification (e.g. 40.0).       |
-| `WSIScannerMake`   | 65004   | ASCII     | Scanner manufacturer.                    |
-| `WSIScannerModel`  | 65005   | ASCII     | Scanner model.                           |
-| `WSIScannerSoftware`| 65006  | ASCII     | Scanner software string.                 |
-| `WSIAcquisitionDateTime` | 65007 | ASCII | ISO-8601 datetime.                       |
-| `WSISourceFormat`  | 65008   | ASCII     | Original source container (`svs`, `philips`, etc.). |
+| Tag                  | TIFF ID | Type   | Meaning                                  |
+|----------------------|---------|--------|------------------------------------------|
+| `Make`               | 271     | ASCII  | Scanner manufacturer.                    |
+| `Model`              | 272     | ASCII  | Scanner model.                           |
+| `Software`           | 305     | ASCII  | Scanner software string.                 |
+| `DateTime`           | 306     | ASCII  | Acquisition datetime, `YYYY:MM:DD HH:MM:SS`. |
+| `ImageDescription`   | 270     | ASCII  | Optional `wsitools/<version> convert source=<fmt>` provenance string. Readers MUST NOT rely on this for machine-readable metadata. |
 
-The exact tag IDs above are reserved by wsitools and consistent with tags
-already emitted by `internal/wsiwriter`. They are placed in the private tag
-range (≥ 32768) per the TIFF spec.
+The following wsitools private tags (range ≥ 65000) MAY appear:
+
+| Tag                | TIFF ID | Type   | IFDs        | Meaning                              |
+|--------------------|---------|--------|-------------|--------------------------------------|
+| `WSIImageType`     | 65080   | ASCII  | every IFD   | Image kind (see §5, §6).             |
+| `WSILevelIndex`    | 65081   | LONG   | pyramid only| 0-based pyramid level index.         |
+| `WSILevelCount`    | 65082   | LONG   | pyramid only| Total pyramid level count.           |
+| `WSISourceFormat`  | 65083   | ASCII  | L0 only     | Original source container (`svs`, `philips`, etc.). |
+| `WSIToolsVersion`  | 65084   | ASCII  | L0 only     | The wsitools version that wrote the file. |
+| `WSIMPPX`          | 65085   | DOUBLE | L0 only     | Microns per pixel, X axis.           |
+| `WSIMPPY`          | 65086   | DOUBLE | L0 only     | Microns per pixel, Y axis.           |
+| `WSIMagnification` | 65087   | DOUBLE | L0 only     | Optical magnification (e.g. 40.0).   |
+
+Tag IDs 65080–65084 are already reserved and emitted by `internal/wsiwriter`
+in the current wsitools codebase. Tag IDs 65085–65087 are introduced by this
+specification.
 
 The `ImageDescription` tag (270) MAY be present and SHOULD contain a
 `wsitools/<version> convert source=<fmt>` provenance string; readers MUST NOT
