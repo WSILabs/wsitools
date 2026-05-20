@@ -8,7 +8,7 @@ A Swiss-army knife of utilities for whole-slide imaging (WSI) files used in digi
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 
-## v0.4 — what's here
+## v0.6 — what's here
 
 **Write-side**
 
@@ -20,6 +20,11 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   Five codec targets: `jpeg`, `jpegxl`, `avif`, `webp`, `htj2k`. Six source formats:
   SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE, generic-TIFF. NDPI, OME-OneFrame,
   and Leica SCN error cleanly with `ErrUnsupportedFormat`.
+- `wsitools convert --to cog-wsi` — losslessly copy a WSI into the
+  COG-WSI container (Cloud Optimized GeoTIFF + WSI extensions). Tile
+  bytes are copied verbatim; no decode, no re-encode. See
+  `docs/superpowers/specs/2026-05-20-cog-wsi-format.md` for the
+  format spec.
 
 **Read-side (v0.4)**
 
@@ -105,6 +110,26 @@ wsitools transcode --codec webp --codec-opt webp.lossless=true -o out.tiff in.sv
 
 # HTJ2K
 wsitools transcode --codec htj2k -o out.tiff in.svs
+```
+
+### Convert
+
+Losslessly copy a WSI into the COG-WSI container (no decode / re-encode):
+
+```sh
+wsitools convert --to cog-wsi -o slide.cog.tiff slide.svs
+```
+
+Skip label/macro/thumbnail/overview:
+
+```sh
+wsitools convert --to cog-wsi --no-associated -o slide.cog.tiff slide.tiff
+```
+
+Force BigTIFF (default `auto` promotes when predicted output > 2 GiB):
+
+```sh
+wsitools convert --to cog-wsi --bigtiff on -o slide.cog.tiff slide.svs
 ```
 
 ### Inspection

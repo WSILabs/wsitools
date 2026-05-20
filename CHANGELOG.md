@@ -2,7 +2,30 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0]
+
+### Added
+
+- New `wsitools convert` command for lossless, bit-exact tile-copy
+  conversion between WSI containers. v0.6 target: `--to cog-wsi`.
+  Compressed tile bytes are copied verbatim from source — no decode,
+  no re-encode. Associated images (label/macro/thumbnail/overview)
+  are passed through with their original compression.
+  - Supported source formats: SVS, Philips-TIFF, OME-TIFF (tiled),
+    BIF, IFE, generic-TIFF. NDPI / Leica SCN / OME-OneFrame return
+    `ErrUnsupportedFormat`.
+  - Flags: `--to cog-wsi` (required), `-o/--output` (required),
+    `-f/--force`, `--bigtiff auto|on|off` (default `auto`),
+    `--no-associated`.
+- New COG-WSI v0.1 format specification — extension of GeoTIFF
+  Cloud Optimized TIFF with WSI extension tags and an
+  associated-image tail section. Defines layout, ghost area,
+  pyramid + associated IFD requirements, and conformance rules.
+  See `docs/superpowers/specs/2026-05-20-cog-wsi-format.md`.
+- New `internal/cogwsi` writer package implementing the COG-WSI
+  format using a per-level spool staging strategy.
+- New private TIFF tag IDs reserved by wsitools: `WSIMPPX`=65085,
+  `WSIMPPY`=65086, `WSIMagnification`=65087 (all DOUBLE).
 
 ## [0.5.0] — 2026-05-10
 
