@@ -2,7 +2,7 @@ package cogwsi
 
 import "github.com/cornish/wsitools/internal/wsiwriter"
 
-// WSI tag IDs reused from internal/wsiwriter (range 65080–65084).
+// WSI tag IDs aliased from internal/wsiwriter (range 65080–65084).
 const (
 	TagWSIImageType    = wsiwriter.TagWSIImageType
 	TagWSILevelIndex   = wsiwriter.TagWSILevelIndex
@@ -18,7 +18,7 @@ const (
 	TagWSIMagnification uint16 = 65087
 )
 
-// WSIImageType canonical values, re-exported from wsiwriter.
+// WSIImageType canonical values used by COG-WSI v0.1 (subset of wsiwriter's).
 const (
 	WSIImageTypePyramid   = wsiwriter.WSIImageTypePyramid
 	WSIImageTypeLabel     = wsiwriter.WSIImageTypeLabel

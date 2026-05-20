@@ -3,22 +3,25 @@ package cogwsi
 import "testing"
 
 func TestNewTagIDsDoNotCollide(t *testing.T) {
-	ids := map[uint16]string{
-		TagWSIImageType:     "WSIImageType",
-		TagWSILevelIndex:    "WSILevelIndex",
-		TagWSILevelCount:    "WSILevelCount",
-		TagWSISourceFormat:  "WSISourceFormat",
-		TagWSIToolsVersion:  "WSIToolsVersion",
-		TagWSIMPPX:          "WSIMPPX",
-		TagWSIMPPY:          "WSIMPPY",
-		TagWSIMagnification: "WSIMagnification",
+	pairs := []struct {
+		name string
+		id   uint16
+	}{
+		{"WSIImageType", TagWSIImageType},
+		{"WSILevelIndex", TagWSILevelIndex},
+		{"WSILevelCount", TagWSILevelCount},
+		{"WSISourceFormat", TagWSISourceFormat},
+		{"WSIToolsVersion", TagWSIToolsVersion},
+		{"WSIMPPX", TagWSIMPPX},
+		{"WSIMPPY", TagWSIMPPY},
+		{"WSIMagnification", TagWSIMagnification},
 	}
 	seen := map[uint16]string{}
-	for id, name := range ids {
-		if prev, dup := seen[id]; dup {
-			t.Errorf("tag id %d used by both %s and %s", id, prev, name)
+	for _, p := range pairs {
+		if prev, dup := seen[p.id]; dup {
+			t.Errorf("tag id %d used by both %s and %s", p.id, prev, p.name)
 		}
-		seen[id] = name
+		seen[p.id] = p.name
 	}
 }
 
