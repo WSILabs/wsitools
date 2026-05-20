@@ -144,6 +144,19 @@ Each pyramid IFD MUST be tiled (no strips) and MUST carry the following tags:
 (abbreviated-JPEG mode). Tile streams MUST remain abbreviated; writers MUST
 NOT promote them to standalone JPEG.
 
+> **Note on cloud optimization.** Preserving `JPEGTables` does not defeat
+> COG's range-fetch model. A COG-aware client always performs an initial
+> head-range fetch (~16 KiB) to read the IFD index; the `JPEGTables` value
+> lives inside that block and is parsed once and cached. Subsequent tile
+> range fetches return abbreviated tile bytes which the client decodes by
+> prepending the cached `JPEGTables`. No additional network round-trip per
+> tile is incurred. Standalone tiles would actually waste bandwidth by
+> repeating ~500–700 bytes of JPEG headers per tile (significant for
+> pyramids with tens of thousands of tiles). GDAL's COG driver itself
+> emits abbreviated tiles with `JPEGTables` by default; every TIFF-aware
+> WSI reader (Aperio, OpenSlide, libtiff, opentile-go) handles this
+> mode. COG-WSI follows the same convention.
+
 ### 5.1 IFD ordering
 
 - IFD 0 is the full-resolution pyramid level.
