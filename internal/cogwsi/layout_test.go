@@ -71,4 +71,57 @@ func TestLayoutHonorsBigTIFFOverride(t *testing.T) {
 	if off.BigTIFF {
 		t.Errorf("BigTIFFOff override ignored")
 	}
+	// BigTIFF IFD record size > classic IFD record size for the same tag count.
+	classicSize := ifdRecordSize(15, false)
+	bigSize := ifdRecordSize(15, true)
+	if bigSize <= classicSize {
+		t.Errorf("BigTIFF IFD record size %d should exceed classic %d for same tag count", bigSize, classicSize)
+	}
+	// BigTIFF header should be 16 bytes vs 8 for classic.
+	if on.HeaderSize != 16 {
+		t.Errorf("BigTIFFOn HeaderSize: got %d want 16", on.HeaderSize)
+	}
+	if off.HeaderSize != 8 {
+		t.Errorf("BigTIFFOff HeaderSize: got %d want 8", off.HeaderSize)
+	}
+}
+
+func TestLayoutAssociatedImagesPlacedAfterPyramid(t *testing.T) {
+	in := layoutInput{
+		Levels: []levelLayoutInput{
+			{TileBytes: []uint32{100, 100}, TileCount: 2, TileGeometry: tileGeom{TileW: 256, TileH: 256, ImgW: 512, ImgH: 256}},
+		},
+		Associated: []associatedLayoutInput{
+			{Bytes: 5000, Width: 1024, Height: 512, Kind: "label"},
+			{Bytes: 2000, Width: 512, Height: 256, Kind: "macro"},
+		},
+		BigTIFFMode: BigTIFFAuto,
+	}
+	plan, err := planLayout(in)
+	if err != nil {
+		t.Fatalf("planLayout: %v", err)
+	}
+	if len(plan.Associated) != 2 {
+		t.Fatalf("plan.Associated length: got %d want 2", len(plan.Associated))
+	}
+	// Find the maximum pyramid tile offset.
+	var maxPyramidOff uint64
+	for _, lv := range plan.Levels {
+		for _, off := range lv.TileOffsets {
+			if off > maxPyramidOff {
+				maxPyramidOff = off
+			}
+		}
+	}
+	for i, a := range plan.Associated {
+		if a.DataOffset <= maxPyramidOff {
+			t.Errorf("associated %d data offset %d must be > max pyramid tile offset %d", i, a.DataOffset, maxPyramidOff)
+		}
+		if a.IFDOffset >= plan.HeadBlockEnd {
+			t.Errorf("associated %d IFD offset %d must be < HeadBlockEnd %d", i, a.IFDOffset, plan.HeadBlockEnd)
+		}
+		if a.DataOffset%16 != 0 {
+			t.Errorf("associated %d data offset %d not 16-aligned", i, a.DataOffset)
+		}
+	}
 }
