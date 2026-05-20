@@ -1,7 +1,9 @@
 package cogwsi
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
@@ -170,7 +172,287 @@ func (w *Writer) Abort() error {
 	return nil
 }
 
-// Close is implemented in Task 8.
+// Close finalizes the file: serializes the ghost area, all IFDs, and
+// external tag arrays at the file head with patched-up tile offsets;
+// streams spool files into the output in reverse level order (smallest
+// level first); appends associated-image data; removes spool files.
+//
+// On error, removes spool files and the partial output.
 func (w *Writer) Close() error {
-	return fmt.Errorf("Writer.Close: not yet implemented")
+	if w.closed {
+		return fmt.Errorf("writer already closed")
+	}
+	defer func() { w.closed = true }()
+
+	// Build layoutInput.
+	in := layoutInput{BigTIFFMode: w.opts.BigTIFF}
+	for i, lv := range w.levels {
+		entries := lv.spool.Entries()
+		bytesLen := make([]uint32, len(entries))
+		for j, e := range entries {
+			bytesLen[j] = e.Length
+		}
+		in.Levels = append(in.Levels, levelLayoutInput{
+			TileBytes:    bytesLen,
+			TileCount:    uint32(len(entries)),
+			TileGeometry: tileGeom{TileW: lv.spec.TileWidth, TileH: lv.spec.TileHeight, ImgW: lv.spec.ImageWidth, ImgH: lv.spec.ImageHeight},
+			Compression:  lv.spec.Compression,
+			JPEGTables:   lv.spec.JPEGTables,
+			IsL0:         i == 0,
+		})
+	}
+	for _, a := range w.assoc {
+		in.Associated = append(in.Associated, associatedLayoutInput{
+			Bytes:       uint32(len(a.spec.Bytes)),
+			Width:       a.spec.Width,
+			Height:      a.spec.Height,
+			Compression: a.spec.Compression,
+			Kind:        a.spec.Kind,
+		})
+	}
+
+	plan, err := planLayout(in)
+	if err != nil {
+		w.abortInternal()
+		return err
+	}
+
+	totalLevels := len(w.levels)
+
+	// Build IFD bytes for each level and associated image.
+	type ifdBlob struct {
+		offset uint64
+		ifd    []byte
+		ext    []byte
+	}
+	var blobs []ifdBlob
+
+	for i, lv := range w.levels {
+		b := newIFDBuilder(plan.BigTIFF)
+		if err := populateLevelIFD(b, lv.spec, plan.Levels[i].TileOffsets, lv.spool.Entries(), w.opts, i, totalLevels); err != nil {
+			w.abortInternal()
+			return fmt.Errorf("populate IFD L%d: %w", i, err)
+		}
+		ifd, ext, err := b.Encode(plan.Levels[i].IFDOffset)
+		if err != nil {
+			w.abortInternal()
+			return fmt.Errorf("encode IFD L%d: %w", i, err)
+		}
+		blobs = append(blobs, ifdBlob{offset: plan.Levels[i].IFDOffset, ifd: ifd, ext: ext})
+	}
+	for i, a := range w.assoc {
+		b := newIFDBuilder(plan.BigTIFF)
+		populateAssocIFD(b, a.spec, plan.Associated[i].DataOffset)
+		ifd, ext, err := b.Encode(plan.Associated[i].IFDOffset)
+		if err != nil {
+			w.abortInternal()
+			return fmt.Errorf("encode IFD assoc%d: %w", i, err)
+		}
+		blobs = append(blobs, ifdBlob{offset: plan.Associated[i].IFDOffset, ifd: ifd, ext: ext})
+	}
+
+	// Patch next_ifd_offset chain.
+	for i := 0; i < len(blobs)-1; i++ {
+		patchNextIFD(blobs[i].ifd, blobs[i+1].offset, plan.BigTIFF)
+	}
+
+	// Write head block.
+	if err := writeHeader(w.out, plan); err != nil {
+		w.abortInternal()
+		return err
+	}
+	ghostBytes, _ := defaultGhost().Marshal()
+	if _, err := w.out.WriteAt(ghostBytes, int64(plan.GhostOffset)); err != nil {
+		w.abortInternal()
+		return fmt.Errorf("write ghost: %w", err)
+	}
+	for _, b := range blobs {
+		if _, err := w.out.WriteAt(b.ifd, int64(b.offset)); err != nil {
+			w.abortInternal()
+			return fmt.Errorf("write IFD: %w", err)
+		}
+		if len(b.ext) > 0 {
+			if _, err := w.out.WriteAt(b.ext, int64(b.offset)+int64(len(b.ifd))); err != nil {
+				w.abortInternal()
+				return fmt.Errorf("write IFD external: %w", err)
+			}
+		}
+	}
+
+	// Stream level spools in reverse order (smallest first).
+	for i := len(w.levels) - 1; i >= 0; i-- {
+		lv := w.levels[i]
+		entries := lv.spool.Entries()
+		if err := lv.spool.Rewind(); err != nil {
+			w.abortInternal()
+			return fmt.Errorf("rewind L%d: %w", i, err)
+		}
+		for j, e := range entries {
+			off := int64(plan.Levels[i].TileOffsets[j])
+			buf := make([]byte, e.Length)
+			if _, err := io.ReadFull(lv.spool, buf); err != nil {
+				w.abortInternal()
+				return fmt.Errorf("read L%d tile %d: %w", i, j, err)
+			}
+			if _, err := w.out.WriteAt(buf, off); err != nil {
+				w.abortInternal()
+				return fmt.Errorf("write L%d tile %d: %w", i, j, err)
+			}
+		}
+	}
+
+	// Write associated images.
+	for i, a := range w.assoc {
+		if _, err := w.out.WriteAt(a.spec.Bytes, int64(plan.Associated[i].DataOffset)); err != nil {
+			w.abortInternal()
+			return fmt.Errorf("write assoc %d: %w", i, err)
+		}
+	}
+
+	// Sync, close, cleanup.
+	if err := w.out.Sync(); err != nil {
+		w.abortInternal()
+		return fmt.Errorf("fsync: %w", err)
+	}
+	if err := w.out.Close(); err != nil {
+		w.abortInternal()
+		return fmt.Errorf("close output: %w", err)
+	}
+	w.out = nil
+	for _, lv := range w.levels {
+		_ = lv.spool.Remove()
+	}
+	_ = os.Remove(w.spoolDir)
+	return nil
+}
+
+// abortInternal is like Abort but does not set closed (the deferred set
+// in Close handles that). Removes output + spool, best-effort.
+func (w *Writer) abortInternal() {
+	if w.out != nil {
+		_ = w.out.Close()
+		w.out = nil
+	}
+	for _, lv := range w.levels {
+		if lv.spool != nil {
+			_ = lv.spool.Remove()
+			lv.spool = nil
+		}
+	}
+	_ = os.RemoveAll(w.spoolDir)
+	_ = os.Remove(w.path)
+}
+
+func writeHeader(f *os.File, plan layoutPlan) error {
+	hdr := make([]byte, plan.HeaderSize)
+	hdr[0], hdr[1] = 'I', 'I'
+	if plan.BigTIFF {
+		binary.LittleEndian.PutUint16(hdr[2:4], 0x002B)
+		binary.LittleEndian.PutUint16(hdr[4:6], 8) // offset size
+		binary.LittleEndian.PutUint16(hdr[6:8], 0) // constant zero
+		binary.LittleEndian.PutUint64(hdr[8:16], plan.FirstIFDOffset)
+	} else {
+		binary.LittleEndian.PutUint16(hdr[2:4], 0x002A)
+		binary.LittleEndian.PutUint32(hdr[4:8], uint32(plan.FirstIFDOffset))
+	}
+	_, err := f.WriteAt(hdr, 0)
+	return err
+}
+
+func patchNextIFD(ifd []byte, next uint64, big bool) {
+	if big {
+		binary.LittleEndian.PutUint64(ifd[len(ifd)-8:], next)
+	} else {
+		binary.LittleEndian.PutUint32(ifd[len(ifd)-4:], uint32(next))
+	}
+}
+
+// populateLevelIFD fills an ifdBuilder with the tags for a pyramid level.
+// levelIdx is the 0-based index of this level; totalLevels is the total
+// pyramid depth. These are used for WSILevelIndex and WSILevelCount tags.
+func populateLevelIFD(b *ifdBuilder, spec LevelSpec, tileOffsets []uint64, entries []spoolEntry, opts Options, levelIdx, totalLevels int) error {
+	subfile := uint32(1) // reduced-resolution
+	if levelIdx == 0 {
+		subfile = 0
+	}
+	b.AddLong(254 /*NewSubfileType*/, []uint32{subfile})
+	b.AddLong(256 /*ImageWidth*/, []uint32{spec.ImageWidth})
+	b.AddLong(257 /*ImageLength*/, []uint32{spec.ImageHeight})
+	b.AddShort(258 /*BitsPerSample*/, spec.BitsPerSample)
+	b.AddShort(259 /*Compression*/, []uint16{spec.Compression})
+	b.AddShort(262 /*PhotometricInterpretation*/, []uint16{spec.Photometric})
+	b.AddShort(277 /*SamplesPerPixel*/, []uint16{spec.SamplesPerPixel})
+	b.AddShort(284 /*PlanarConfiguration*/, []uint16{1})
+	b.AddLong(322 /*TileWidth*/, []uint32{spec.TileWidth})
+	b.AddLong(323 /*TileLength*/, []uint32{spec.TileHeight})
+	if err := b.AddTileOffsets(324 /*TileOffsets*/, tileOffsets); err != nil {
+		return err
+	}
+	byteCounts := make([]uint32, len(entries))
+	for i, e := range entries {
+		byteCounts[i] = e.Length
+	}
+	b.AddLong(325 /*TileByteCounts*/, byteCounts)
+	if spec.JPEGTables != nil {
+		b.AddBytes(347 /*JPEGTables*/, spec.JPEGTables)
+	}
+	b.AddASCII(TagWSIImageType, WSIImageTypePyramid)
+	b.AddLong(TagWSILevelIndex, []uint32{uint32(levelIdx)})
+	b.AddLong(TagWSILevelCount, []uint32{uint32(totalLevels)})
+	if levelIdx == 0 {
+		if opts.Metadata.SourceImageDesc != "" {
+			b.AddASCII(270 /*ImageDescription*/, opts.Metadata.SourceImageDesc)
+		}
+		if opts.Metadata.Make != "" {
+			b.AddASCII(271 /*Make*/, opts.Metadata.Make)
+		}
+		if opts.Metadata.Model != "" {
+			b.AddASCII(272 /*Model*/, opts.Metadata.Model)
+		}
+		if opts.Metadata.Software != "" {
+			b.AddASCII(305 /*Software*/, opts.Metadata.Software)
+		}
+		if !opts.Metadata.AcquisitionDateTime.IsZero() {
+			b.AddASCII(306 /*DateTime*/, opts.Metadata.AcquisitionDateTime.Format("2006:01:02 15:04:05"))
+		}
+		if opts.Metadata.SourceFormat != "" {
+			b.AddASCII(TagWSISourceFormat, opts.Metadata.SourceFormat)
+		}
+		if opts.ToolsVersion != "" {
+			b.AddASCII(TagWSIToolsVersion, opts.ToolsVersion)
+		}
+		if opts.Metadata.MPPX > 0 {
+			b.AddDouble(TagWSIMPPX, []float64{opts.Metadata.MPPX})
+		}
+		if opts.Metadata.MPPY > 0 {
+			b.AddDouble(TagWSIMPPY, []float64{opts.Metadata.MPPY})
+		}
+		if opts.Metadata.Magnification > 0 {
+			b.AddDouble(TagWSIMagnification, []float64{opts.Metadata.Magnification})
+		}
+	}
+	return nil
+}
+
+// populateAssocIFD fills an ifdBuilder for an associated image. Associated
+// images use strip-based encoding (1 strip covering the full image).
+func populateAssocIFD(b *ifdBuilder, spec AssociatedSpec, dataOffset uint64) {
+	b.AddLong(254 /*NewSubfileType*/, []uint32{1})
+	b.AddLong(256, []uint32{spec.Width})
+	b.AddLong(257, []uint32{spec.Height})
+	if len(spec.BitsPerSample) == 0 {
+		spec.BitsPerSample = []uint16{8, 8, 8}
+	}
+	b.AddShort(258, spec.BitsPerSample)
+	b.AddShort(259, []uint16{spec.Compression})
+	b.AddShort(262, []uint16{spec.Photometric})
+	if spec.SamplesPerPixel == 0 {
+		spec.SamplesPerPixel = 3
+	}
+	b.AddShort(277, []uint16{spec.SamplesPerPixel})
+	b.AddShort(284, []uint16{1})
+	b.AddLong(273 /*StripOffsets*/, []uint32{uint32(dataOffset)})
+	b.AddLong(279 /*StripByteCounts*/, []uint32{uint32(len(spec.Bytes))})
+	b.AddLong(278 /*RowsPerStrip*/, []uint32{spec.Height})
+	b.AddASCII(TagWSIImageType, spec.Kind)
 }
