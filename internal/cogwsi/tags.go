@@ -1,6 +1,14 @@
 package cogwsi
 
-import "github.com/cornish/wsitools/internal/wsiwriter"
+import (
+	"errors"
+
+	"github.com/cornish/wsitools/internal/wsiwriter"
+)
+
+// ErrInvalidAssocKind is returned by AddAssociated when the Kind field is not
+// one of the COG-WSI v0.1 allowed values (label, macro, thumbnail, overview).
+var ErrInvalidAssocKind = errors.New("invalid associated image kind")
 
 // WSI tag IDs aliased from internal/wsiwriter (range 65080–65084).
 const (
@@ -26,3 +34,14 @@ const (
 	WSIImageTypeOverview  = wsiwriter.WSIImageTypeOverview
 	WSIImageTypeThumbnail = wsiwriter.WSIImageTypeThumbnail
 )
+
+// validAssocKinds is the COG-WSI v0.1 set of allowed WSIImageType values
+// for associated-image IFDs (spec §6). Stricter than the wsiwriter set,
+// which permits additional kinds (probability/map/associated) that are
+// not yet part of COG-WSI v0.1.
+var validAssocKinds = map[string]bool{
+	WSIImageTypeLabel:     true,
+	WSIImageTypeMacro:     true,
+	WSIImageTypeThumbnail: true,
+	WSIImageTypeOverview:  true,
+}

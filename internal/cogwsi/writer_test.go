@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cornish/wsitools/internal/cogwsi"
@@ -233,6 +234,29 @@ func readTileOffsets(path string) (l0, l1 uint64, err error) {
 	}
 	l1, _, err = firstTileOffset(data, ifd1)
 	return l0, l1, err
+}
+
+func TestWriterAddAssociatedRejectsInvalidKind(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.tiff")
+	w, err := cogwsi.Create(out, cogwsi.Options{ToolsVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Abort()
+	err = w.AddAssociated(cogwsi.AssociatedSpec{Kind: "probability", Bytes: []byte("x")})
+	if err == nil {
+		t.Fatalf("expected error for kind=probability")
+	}
+	if !strings.Contains(err.Error(), "invalid associated kind") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// Valid kinds: label, macro, thumbnail, overview.
+	for _, kind := range []string{"label", "macro", "thumbnail", "overview"} {
+		if err := w.AddAssociated(cogwsi.AssociatedSpec{Kind: kind, Bytes: []byte("x")}); err != nil {
+			t.Errorf("kind=%s: unexpected error: %v", kind, err)
+		}
+	}
 }
 
 func firstTileOffset(data []byte, ifdOff uint64) (uint64, uint64, error) {

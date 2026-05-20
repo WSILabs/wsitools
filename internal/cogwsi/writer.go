@@ -148,6 +148,9 @@ func (w *Writer) AddAssociated(spec AssociatedSpec) error {
 	if w.closed {
 		return fmt.Errorf("writer closed")
 	}
+	if !validAssocKinds[spec.Kind] {
+		return fmt.Errorf("cogwsi: invalid associated kind %q (want one of label|macro|thumbnail|overview): %w", spec.Kind, ErrInvalidAssocKind)
+	}
 	w.assoc = append(w.assoc, assocSpooled{spec: spec})
 	return nil
 }
@@ -245,7 +248,10 @@ func (w *Writer) Close() error {
 	}
 	for i, a := range w.assoc {
 		b := newIFDBuilder(plan.BigTIFF)
-		populateAssocIFD(b, a.spec, plan.Associated[i].DataOffset)
+		if err := populateAssocIFD(b, a.spec, plan.Associated[i].DataOffset); err != nil {
+			w.abortInternal()
+			return fmt.Errorf("populate assoc IFD %d: %w", i, err)
+		}
 		ifd, ext, err := b.Encode(plan.Associated[i].IFDOffset)
 		if err != nil {
 			w.abortInternal()
@@ -440,7 +446,17 @@ func populateLevelIFD(b *ifdBuilder, spec LevelSpec, tileOffsets []uint64, entri
 
 // populateAssocIFD fills an ifdBuilder for an associated image. Associated
 // images use strip-based encoding (1 strip covering the full image).
-func populateAssocIFD(b *ifdBuilder, spec AssociatedSpec, dataOffset uint64) {
+// In classic-TIFF mode it returns an error if the data offset or byte count
+// would overflow a uint32; in BigTIFF mode it uses LONG8 for both fields.
+func populateAssocIFD(b *ifdBuilder, spec AssociatedSpec, dataOffset uint64) error {
+	if !b.bigtiff {
+		if dataOffset > 0xFFFFFFFF {
+			return fmt.Errorf("cogwsi: associated image data offset %d overflows classic TIFF", dataOffset)
+		}
+		if uint64(len(spec.Bytes)) > 0xFFFFFFFF {
+			return fmt.Errorf("cogwsi: associated image byte count %d overflows classic TIFF", len(spec.Bytes))
+		}
+	}
 	b.AddLong(254 /*NewSubfileType*/, []uint32{1})
 	b.AddLong(256, []uint32{spec.Width})
 	b.AddLong(257, []uint32{spec.Height})
@@ -455,8 +471,14 @@ func populateAssocIFD(b *ifdBuilder, spec AssociatedSpec, dataOffset uint64) {
 	}
 	b.AddShort(277, []uint16{spec.SamplesPerPixel})
 	b.AddShort(284, []uint16{1})
-	b.AddLong(273 /*StripOffsets*/, []uint32{uint32(dataOffset)})
-	b.AddLong(279 /*StripByteCounts*/, []uint32{uint32(len(spec.Bytes))})
+	if b.bigtiff {
+		b.AddLong8(273 /*StripOffsets*/, []uint64{dataOffset})
+		b.AddLong8(279 /*StripByteCounts*/, []uint64{uint64(len(spec.Bytes))})
+	} else {
+		b.AddLong(273 /*StripOffsets*/, []uint32{uint32(dataOffset)})
+		b.AddLong(279 /*StripByteCounts*/, []uint32{uint32(len(spec.Bytes))})
+	}
 	b.AddLong(278 /*RowsPerStrip*/, []uint32{spec.Height})
 	b.AddASCII(TagWSIImageType, spec.Kind)
+	return nil
 }

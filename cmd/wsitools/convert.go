@@ -163,6 +163,11 @@ func runConvert(cmd *cobra.Command, args []string) error {
 				Photometric: 2,
 				Bytes:       bs,
 			}); err != nil {
+				if errors.Is(err, cogwsi.ErrInvalidAssocKind) {
+					slog.Warn("skipping associated image with unsupported kind",
+						"kind", a.Kind(), "reason", err)
+					continue
+				}
 				w.Abort()
 				return fmt.Errorf("add associated %s: %w", a.Kind(), err)
 			}
