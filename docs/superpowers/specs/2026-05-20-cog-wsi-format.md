@@ -211,8 +211,30 @@ Each associated IFD MUST carry:
 | Tag             | Required value                                                |
 |-----------------|----------------------------------------------------------------|
 | `Compression`   | Preserved verbatim from source.                                |
-| `NewSubfileType`| 1 (reduced-resolution image).                                  |
+| `NewSubfileType`| 1 (reduced-resolution image, by convention; see note below).   |
 | `WSIImageType`  | ASCII one of: `label`, `macro`, `thumbnail`, `overview`.       |
+
+> **Note on `NewSubfileType=1` for associated images.** The TIFF 6.0 spec
+> defines bit 0 of `NewSubfileType` as "the image is a reduced-resolution
+> version of another image in this TIFF file." Strictly speaking, this is
+> only semantically accurate for a `thumbnail` that was rendered from the
+> pyramid (downsampling L0). A `label` (a separate photograph of the
+> slide's identifying sticker) and a `macro` (a low-magnification camera
+> capture of the whole slide) are independent captures, not reduced
+> versions of L0 — bit 0 = 1 is technically a misuse.
+>
+> TIFF, however, defines no flag for "associated capture, related to but
+> not derived from the primary image." The WSI ecosystem (libtiff/GDAL,
+> Aperio, OpenSlide, opentile-go) has converged on `NewSubfileType=1` as
+> the least-bad convention: it has the practical effect of telling
+> non-WSI-aware viewers "this isn't the primary image, don't treat it
+> as such." Setting bit 0 = 0 would cause generic TIFF readers (e.g.
+> Apple Preview) to display the label as an additional document page,
+> which is worse UX.
+>
+> COG-WSI follows the convention. Classification of associated images
+> is therefore unreliable from `NewSubfileType` alone; readers MUST use
+> `WSIImageType` as the authoritative classifier.
 
 Associated images MAY be tiled or strip-encoded (both are allowed by COG-WSI,
 unlike pyramid IFDs which MUST be tiled). They preserve their source
