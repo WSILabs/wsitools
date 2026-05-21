@@ -150,8 +150,8 @@ func (w *Writer) AddAssociated(spec AssociatedSpec) error {
 	if w.closed {
 		return fmt.Errorf("writer closed")
 	}
-	if !validAssocKinds[spec.Kind] {
-		return fmt.Errorf("cogwsi: invalid associated kind %q (want one of label|macro|thumbnail|overview): %w", spec.Kind, ErrInvalidAssocKind)
+	if err := validateAssocKind(spec.Kind); err != nil {
+		return err
 	}
 	w.assoc = append(w.assoc, assocSpooled{spec: spec})
 	return nil
@@ -408,9 +408,9 @@ func populateLevelIFD(b *tiff.EntryBuilder, spec LevelSpec, tileOffsets []uint64
 	if spec.JPEGTables != nil {
 		b.AddBytes(347 /*JPEGTables*/, spec.JPEGTables)
 	}
-	b.AddASCII(TagWSIImageType, WSIImageTypePyramid)
-	b.AddLong(TagWSILevelIndex, []uint32{uint32(levelIdx)})
-	b.AddLong(TagWSILevelCount, []uint32{uint32(totalLevels)})
+	b.AddASCII(tiff.TagWSIImageType, tiff.WSIImageTypePyramid)
+	b.AddLong(tiff.TagWSILevelIndex, []uint32{uint32(levelIdx)})
+	b.AddLong(tiff.TagWSILevelCount, []uint32{uint32(totalLevels)})
 	if levelIdx == 0 {
 		if opts.Metadata.SourceImageDesc != "" {
 			b.AddASCII(270 /*ImageDescription*/, opts.Metadata.SourceImageDesc)
@@ -428,19 +428,19 @@ func populateLevelIFD(b *tiff.EntryBuilder, spec LevelSpec, tileOffsets []uint64
 			b.AddASCII(306 /*DateTime*/, opts.Metadata.AcquisitionDateTime.Format("2006:01:02 15:04:05"))
 		}
 		if opts.Metadata.SourceFormat != "" {
-			b.AddASCII(TagWSISourceFormat, opts.Metadata.SourceFormat)
+			b.AddASCII(tiff.TagWSISourceFormat, opts.Metadata.SourceFormat)
 		}
 		if opts.ToolsVersion != "" {
-			b.AddASCII(TagWSIToolsVersion, opts.ToolsVersion)
+			b.AddASCII(tiff.TagWSIToolsVersion, opts.ToolsVersion)
 		}
 		if opts.Metadata.MPPX > 0 {
-			b.AddDouble(TagWSIMPPX, []float64{opts.Metadata.MPPX})
+			b.AddDouble(tiff.TagWSIMPPX, []float64{opts.Metadata.MPPX})
 		}
 		if opts.Metadata.MPPY > 0 {
-			b.AddDouble(TagWSIMPPY, []float64{opts.Metadata.MPPY})
+			b.AddDouble(tiff.TagWSIMPPY, []float64{opts.Metadata.MPPY})
 		}
 		if opts.Metadata.Magnification > 0 {
-			b.AddDouble(TagWSIMagnification, []float64{opts.Metadata.Magnification})
+			b.AddDouble(tiff.TagWSIMagnification, []float64{opts.Metadata.Magnification})
 		}
 	}
 	return nil
@@ -481,6 +481,6 @@ func populateAssocIFD(b *tiff.EntryBuilder, bigtiff bool, spec AssociatedSpec, d
 		b.AddLong(279 /*StripByteCounts*/, []uint32{uint32(len(spec.Bytes))})
 	}
 	b.AddLong(278 /*RowsPerStrip*/, []uint32{spec.Height})
-	b.AddASCII(TagWSIImageType, spec.Kind)
+	b.AddASCII(tiff.TagWSIImageType, spec.Kind)
 	return nil
 }
