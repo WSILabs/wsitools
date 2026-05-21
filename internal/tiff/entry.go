@@ -217,3 +217,73 @@ func setOffset(slot []byte, val uint64, bigtiff bool) {
 		binary.LittleEndian.PutUint32(slot[:4], uint32(val))
 	}
 }
+
+// RawTag is a caller-supplied tag entry. Used by writers to accept
+// format-specific tags (e.g. Aperio SVS-shape tags emitted by transcode)
+// without baking the format into the writer.
+//
+// Type must be one of the exported Type* constants. Value must match:
+//   - TypeBYTE    → []byte
+//   - TypeASCII   → string
+//   - TypeSHORT   → []uint16
+//   - TypeLONG    → []uint32
+//   - TypeLONG8   → []uint64 (BigTIFF only)
+//   - TypeDOUBLE  → []float64
+//   - TypeRATIONAL → [2][]uint32 i.e. [numerators, denominators] of equal length
+type RawTag struct {
+	Tag   uint16
+	Type  uint16
+	Value any
+}
+
+// AddRaw dispatches a RawTag to the appropriate typed-Add method.
+// Returns an error if Type is unknown or Value type doesn't match Type.
+func (b *EntryBuilder) AddRaw(t RawTag) error {
+	switch t.Type {
+	case TypeBYTE:
+		v, ok := t.Value.([]byte)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeBYTE expects []byte, got %T", t.Tag, t.Value)
+		}
+		b.AddBytes(t.Tag, v)
+	case TypeASCII:
+		v, ok := t.Value.(string)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeASCII expects string, got %T", t.Tag, t.Value)
+		}
+		b.AddASCII(t.Tag, v)
+	case TypeSHORT:
+		v, ok := t.Value.([]uint16)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeSHORT expects []uint16, got %T", t.Tag, t.Value)
+		}
+		b.AddShort(t.Tag, v)
+	case TypeLONG:
+		v, ok := t.Value.([]uint32)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeLONG expects []uint32, got %T", t.Tag, t.Value)
+		}
+		b.AddLong(t.Tag, v)
+	case TypeLONG8:
+		v, ok := t.Value.([]uint64)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeLONG8 expects []uint64, got %T", t.Tag, t.Value)
+		}
+		b.AddLong8(t.Tag, v)
+	case TypeDOUBLE:
+		v, ok := t.Value.([]float64)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeDOUBLE expects []float64, got %T", t.Tag, t.Value)
+		}
+		b.AddDouble(t.Tag, v)
+	case TypeRATIONAL:
+		v, ok := t.Value.([2][]uint32)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeRATIONAL expects [2][]uint32, got %T", t.Tag, t.Value)
+		}
+		b.AddRational(t.Tag, v[0], v[1])
+	default:
+		return fmt.Errorf("tiff: AddRaw tag %d: unknown TIFF type %d", t.Tag, t.Type)
+	}
+	return nil
+}

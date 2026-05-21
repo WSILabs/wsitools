@@ -90,3 +90,44 @@ func TestIFDRecordSize(t *testing.T) {
 		t.Errorf("IFDRecordSize(5, BigTIFF): got %d want %d", got, 16+5*20)
 	}
 }
+
+func TestAddRawShort(t *testing.T) {
+	b := NewEntryBuilder(false)
+	if err := b.AddRaw(RawTag{Tag: TagImageWidth, Type: TypeSHORT, Value: []uint16{512}}); err != nil {
+		t.Fatal(err)
+	}
+	ifd, _, _ := b.Encode(0)
+	const entryStart = 2
+	if binary.LittleEndian.Uint16(ifd[entryStart:entryStart+2]) != TagImageWidth {
+		t.Errorf("AddRaw didn't add the expected tag")
+	}
+}
+
+func TestAddRawASCII(t *testing.T) {
+	b := NewEntryBuilder(false)
+	if err := b.AddRaw(RawTag{Tag: TagImageDescription, Type: TypeASCII, Value: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	ifd, _, _ := b.Encode(0)
+	const entryStart = 2
+	if binary.LittleEndian.Uint32(ifd[entryStart+4:entryStart+8]) != uint32(len("hello")+1) {
+		t.Errorf("AddRaw ASCII count mismatch")
+	}
+}
+
+func TestAddRawRejectsUnknownType(t *testing.T) {
+	b := NewEntryBuilder(false)
+	err := b.AddRaw(RawTag{Tag: 256, Type: 99 /*nonexistent*/, Value: []uint16{1}})
+	if err == nil {
+		t.Errorf("expected error for unknown TIFF type 99")
+	}
+}
+
+func TestAddRawTypeMismatch(t *testing.T) {
+	b := NewEntryBuilder(false)
+	// SHORT type but []uint32 value — should error.
+	err := b.AddRaw(RawTag{Tag: 256, Type: TypeSHORT, Value: []uint32{1}})
+	if err == nil {
+		t.Errorf("expected error for type/value mismatch")
+	}
+}
