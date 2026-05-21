@@ -131,3 +131,26 @@ func TestAddRawTypeMismatch(t *testing.T) {
 		t.Errorf("expected error for type/value mismatch")
 	}
 }
+
+func TestAddUndefined(t *testing.T) {
+	b := NewEntryBuilder(false)
+	b.AddUndefined(347 /*JPEGTables*/, []byte{0xFF, 0xD8, 0xFF, 0xD9})
+	ifd, _, _ := b.Encode(0)
+	const entryStart = 2
+	gotType := binary.LittleEndian.Uint16(ifd[entryStart+2 : entryStart+4])
+	if gotType != TypeUNDEFINED {
+		t.Errorf("AddUndefined: got type %d want %d (UNDEFINED)", gotType, TypeUNDEFINED)
+	}
+	gotCount := binary.LittleEndian.Uint32(ifd[entryStart+4 : entryStart+8])
+	if gotCount != 4 {
+		t.Errorf("AddUndefined count: got %d want 4", gotCount)
+	}
+}
+
+func TestAddRawUndefined(t *testing.T) {
+	b := NewEntryBuilder(false)
+	err := b.AddRaw(RawTag{Tag: 347, Type: TypeUNDEFINED, Value: []byte{0xFF, 0xD8, 0xFF, 0xD9}})
+	if err != nil {
+		t.Fatalf("AddRaw UNDEFINED: %v", err)
+	}
+}

@@ -44,3 +44,12 @@ func TestTypeByteSize(t *testing.T) {
 		}
 	}
 }
+
+func TestTIFFTypeUndefined(t *testing.T) {
+	if TypeUNDEFINED != 7 {
+		t.Errorf("TypeUNDEFINED: got %d want 7", TypeUNDEFINED)
+	}
+	if got := TypeByteSize(TypeUNDEFINED); got != 1 {
+		t.Errorf("TypeByteSize(TypeUNDEFINED): got %d want 1", got)
+	}
+}

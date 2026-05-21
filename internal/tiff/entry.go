@@ -128,6 +128,13 @@ func (b *EntryBuilder) AddBytes(tag uint16, payload []byte) {
 	b.addRaw(tag, TypeBYTE, uint64(len(payload)), payload)
 }
 
+// AddUndefined appends a TIFF type-7 (UNDEFINED) entry. Used for opaque
+// byte arrays whose interpretation is tag-specific: JPEGTables (347),
+// ICCProfile (34675), XMP (700), etc.
+func (b *EntryBuilder) AddUndefined(tag uint16, payload []byte) {
+	b.addRaw(tag, TypeUNDEFINED, uint64(len(payload)), payload)
+}
+
 // AddDouble appends a DOUBLE (float64) array entry.
 func (b *EntryBuilder) AddDouble(tag uint16, vals []float64) {
 	payload := make([]byte, 8*len(vals))
@@ -246,6 +253,12 @@ func (b *EntryBuilder) AddRaw(t RawTag) error {
 			return fmt.Errorf("tiff: AddRaw tag %d: TypeBYTE expects []byte, got %T", t.Tag, t.Value)
 		}
 		b.AddBytes(t.Tag, v)
+	case TypeUNDEFINED:
+		v, ok := t.Value.([]byte)
+		if !ok {
+			return fmt.Errorf("tiff: AddRaw tag %d: TypeUNDEFINED expects []byte, got %T", t.Tag, t.Value)
+		}
+		b.AddUndefined(t.Tag, v)
 	case TypeASCII:
 		v, ok := t.Value.(string)
 		if !ok {

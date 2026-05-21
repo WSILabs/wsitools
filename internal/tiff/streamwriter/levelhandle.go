@@ -114,8 +114,8 @@ func (w *Writer) buildLevelEntries(entry *imageEntry, isL0 bool) (*tiff.EntryBui
 	}
 
 	if len(s.JPEGTables) > 0 {
-		// JPEGTables is opaque bytes; matches cogwsiwriter convention.
-		b.AddBytes(tiff.TagJPEGTables, s.JPEGTables)
+		// JPEGTables is opaque bytes; TIFF spec requires type UNDEFINED (7).
+		b.AddUndefined(tiff.TagJPEGTables, s.JPEGTables)
 	}
 
 	if isL0 {
