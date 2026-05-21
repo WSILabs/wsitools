@@ -26,6 +26,16 @@ const (
 	TagJPEGTables                uint16 = 347
 )
 
+// TIFF Compression tag values we support. The Compression tag (259)
+// itself is declared above; these are the value-space constants.
+const (
+	CompressionNone     uint16 = 1
+	CompressionLZW      uint16 = 5
+	CompressionJPEG     uint16 = 7
+	CompressionDeflate  uint16 = 8
+	CompressionJPEG2000 uint16 = 33003 // Aperio / OpenJPEG codestream
+)
+
 // WSI private tag IDs (range 65080–65087) reserved by wsitools.
 // See docs/superpowers/specs/2026-05-20-cog-wsi-format.md §5.2.
 const (

@@ -61,3 +61,22 @@ func TestWSIPrivateTagIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestCompressionConstants(t *testing.T) {
+	cases := []struct {
+		name string
+		got  uint16
+		want uint16
+	}{
+		{"None", CompressionNone, 1},
+		{"LZW", CompressionLZW, 5},
+		{"JPEG", CompressionJPEG, 7},
+		{"Deflate", CompressionDeflate, 8},
+		{"JPEG2000", CompressionJPEG2000, 33003},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s: got %d want %d", c.name, c.got, c.want)
+		}
+	}
+}
