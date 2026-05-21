@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/cornish/wsitools/internal/tiff"
 )
 
 // Options configures a new Writer.
@@ -234,7 +236,7 @@ func (w *Writer) Close() error {
 	var blobs []ifdBlob
 
 	for i, lv := range w.levels {
-		b := newIFDBuilder(plan.BigTIFF)
+		b := tiff.NewEntryBuilder(plan.BigTIFF)
 		if err := populateLevelIFD(b, lv.spec, plan.Levels[i].TileOffsets, lv.spool.Entries(), w.opts, i, totalLevels); err != nil {
 			w.abortInternal()
 			return fmt.Errorf("populate IFD L%d: %w", i, err)
@@ -247,8 +249,8 @@ func (w *Writer) Close() error {
 		blobs = append(blobs, ifdBlob{offset: plan.Levels[i].IFDOffset, ifd: ifd, ext: ext})
 	}
 	for i, a := range w.assoc {
-		b := newIFDBuilder(plan.BigTIFF)
-		if err := populateAssocIFD(b, a.spec, plan.Associated[i].DataOffset); err != nil {
+		b := tiff.NewEntryBuilder(plan.BigTIFF)
+		if err := populateAssocIFD(b, plan.BigTIFF, a.spec, plan.Associated[i].DataOffset); err != nil {
 			w.abortInternal()
 			return fmt.Errorf("populate assoc IFD %d: %w", i, err)
 		}
@@ -380,7 +382,7 @@ func patchNextIFD(ifd []byte, next uint64, big bool) {
 // populateLevelIFD fills an ifdBuilder with the tags for a pyramid level.
 // levelIdx is the 0-based index of this level; totalLevels is the total
 // pyramid depth. These are used for WSILevelIndex and WSILevelCount tags.
-func populateLevelIFD(b *ifdBuilder, spec LevelSpec, tileOffsets []uint64, entries []spoolEntry, opts Options, levelIdx, totalLevels int) error {
+func populateLevelIFD(b *tiff.EntryBuilder, spec LevelSpec, tileOffsets []uint64, entries []spoolEntry, opts Options, levelIdx, totalLevels int) error {
 	subfile := uint32(1) // reduced-resolution
 	if levelIdx == 0 {
 		subfile = 0
@@ -444,12 +446,12 @@ func populateLevelIFD(b *ifdBuilder, spec LevelSpec, tileOffsets []uint64, entri
 	return nil
 }
 
-// populateAssocIFD fills an ifdBuilder for an associated image. Associated
+// populateAssocIFD fills a tiff.EntryBuilder for an associated image. Associated
 // images use strip-based encoding (1 strip covering the full image).
 // In classic-TIFF mode it returns an error if the data offset or byte count
 // would overflow a uint32; in BigTIFF mode it uses LONG8 for both fields.
-func populateAssocIFD(b *ifdBuilder, spec AssociatedSpec, dataOffset uint64) error {
-	if !b.bigtiff {
+func populateAssocIFD(b *tiff.EntryBuilder, bigtiff bool, spec AssociatedSpec, dataOffset uint64) error {
+	if !bigtiff {
 		if dataOffset > 0xFFFFFFFF {
 			return fmt.Errorf("cogwsi: associated image data offset %d overflows classic TIFF", dataOffset)
 		}
@@ -471,7 +473,7 @@ func populateAssocIFD(b *ifdBuilder, spec AssociatedSpec, dataOffset uint64) err
 	}
 	b.AddShort(277, []uint16{spec.SamplesPerPixel})
 	b.AddShort(284, []uint16{1})
-	if b.bigtiff {
+	if bigtiff {
 		b.AddLong8(273 /*StripOffsets*/, []uint64{dataOffset})
 		b.AddLong8(279 /*StripByteCounts*/, []uint64{uint64(len(spec.Bytes))})
 	} else {

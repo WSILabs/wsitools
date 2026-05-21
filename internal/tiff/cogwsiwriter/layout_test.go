@@ -1,6 +1,10 @@
 package cogwsiwriter
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cornish/wsitools/internal/tiff"
+)
 
 func TestLayoutClassicTIFFTwoLevels(t *testing.T) {
 	in := []levelLayoutInput{
@@ -72,8 +76,8 @@ func TestLayoutHonorsBigTIFFOverride(t *testing.T) {
 		t.Errorf("BigTIFFOff override ignored")
 	}
 	// BigTIFF IFD record size > classic IFD record size for the same tag count.
-	classicSize := ifdRecordSize(15, false)
-	bigSize := ifdRecordSize(15, true)
+	classicSize := tiff.IFDRecordSize(15, false)
+	bigSize := tiff.IFDRecordSize(15, true)
 	if bigSize <= classicSize {
 		t.Errorf("BigTIFF IFD record size %d should exceed classic %d for same tag count", bigSize, classicSize)
 	}

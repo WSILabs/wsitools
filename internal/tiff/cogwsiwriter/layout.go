@@ -1,6 +1,10 @@
 package cogwsiwriter
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/cornish/wsitools/internal/tiff"
+)
 
 // BigTIFFMode controls classic vs BigTIFF selection.
 type BigTIFFMode int
@@ -72,11 +76,7 @@ type layoutPlan struct {
 }
 
 const (
-	classicTagEntrySize = 12 // uint16 tag, uint16 type, uint32 count, uint32 val
-	bigTIFFTagEntrySize = 20 // uint16 tag, uint16 type, uint64 count, uint64 val
-	classicHeaderSize   = 8
-	bigTIFFHeaderSize   = 16
-	tileAlign           = 16
+	tileAlign = 16
 )
 
 // planLayout computes the full file layout. It does NOT write any bytes.
@@ -87,10 +87,7 @@ func planLayout(in layoutInput) (layoutPlan, error) {
 	}
 	plan := layoutPlan{
 		BigTIFF:    useBig,
-		HeaderSize: uint64(classicHeaderSize),
-	}
-	if useBig {
-		plan.HeaderSize = uint64(bigTIFFHeaderSize)
+		HeaderSize: uint64(tiff.HeaderSize(useBig)),
 	}
 	plan.GhostOffset = plan.HeaderSize
 
@@ -173,7 +170,7 @@ func decideBigTIFF(in layoutInput) (bool, error) {
 // ifdSizeForLevel returns (ifd_record_size, external_arrays_size) for a pyramid IFD.
 func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 	tagCount := countTagsForLevel(lv)
-	ifd := ifdRecordSize(tagCount, big)
+	ifd := uint64(tiff.IFDRecordSize(tagCount, big))
 
 	// External arrays for tags that don't fit inline:
 	//   TileOffsets:     N entries × (4 or 8) bytes
@@ -185,12 +182,14 @@ func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 	// BigTIFF has an 8-byte inline cap, so BitsPerSample (6 bytes) and
 	// WSIImageType (8 bytes) both fit inline. Classic TIFF needs them external.
 	var external uint64
-	entrySize := uint64(4)
+	// offsetFieldSize is the per-element byte width for TileOffsets/TileByteCounts:
+	// 4 bytes (uint32) for classic TIFF, 8 bytes (uint64) for BigTIFF.
+	offsetFieldSize := uint64(4)
 	if big {
-		entrySize = 8
+		offsetFieldSize = 8
 	}
-	external += uint64(len(lv.TileBytes)) * entrySize // TileOffsets
-	external += uint64(len(lv.TileBytes)) * entrySize // TileByteCounts
+	external += uint64(len(lv.TileBytes)) * offsetFieldSize // TileOffsets
+	external += uint64(len(lv.TileBytes)) * offsetFieldSize // TileByteCounts
 	if lv.JPEGTables != nil {
 		external += uint64(len(lv.JPEGTables))
 	}
@@ -215,7 +214,7 @@ func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 
 func ifdSizeForAssociated(a associatedLayoutInput, big bool) (uint64, uint64) {
 	tagCount := countTagsForAssociated(a)
-	ifd := ifdRecordSize(tagCount, big)
+	ifd := uint64(tiff.IFDRecordSize(tagCount, big))
 	// Associated images use StripOffsets/StripByteCounts (1 entry each, typically inline).
 	// Reserve 64 bytes external for safety (BitsPerSample array, etc.).
 	return ifd, 64
@@ -246,15 +245,6 @@ func countTagsForAssociated(_ associatedLayoutInput) int {
 	// PhotometricInterpretation, SamplesPerPixel, PlanarConfig, StripOffsets,
 	// StripByteCounts, RowsPerStrip, WSIImageType. (12)
 	return 12
-}
-
-func ifdRecordSize(tagCount int, big bool) uint64 {
-	if big {
-		// uint64 entry_count + tagCount * 20 + uint64 next_ifd_offset
-		return 8 + uint64(tagCount)*bigTIFFTagEntrySize + 8
-	}
-	// uint16 entry_count + tagCount * 12 + uint32 next_ifd_offset
-	return 2 + uint64(tagCount)*classicTagEntrySize + 4
 }
 
 func alignUp(v, align uint64) uint64 {
