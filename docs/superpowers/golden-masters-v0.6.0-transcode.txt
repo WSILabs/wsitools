@@ -1,10 +1,27 @@
 # v0.6.0 transcode + downsample golden-master output hashes
-# Captured pre-landing-3 of TIFF core extraction (commit 2437476)
-# Binary identifies as 0.7.0-dev but transcode/downsample code paths are byte-equivalent to v0.6.0.
-# Re-run after landing 3; all hashes must match.
+# Captured pre-landing-3 of TIFF core extraction (commit 2437476) using the wsiwriter
+# package, then RE-CAPTURED post-landing-3 (commit 4e951e2+T3.8) using streamwriter.
+#
+# The pre/post hashes differ because the two writers arrange identical content
+# differently on disk: wsiwriter interleaved IFD records and external tag arrays
+# with tile-data writes; streamwriter emits all IFDs + external arrays at the end
+# of the file. The tile/strip BYTE CONTENT is bit-identical (verified by extracting
+# each tile's compressed bytes via libtiff and per-tile SHA-256 — 133/133 tiles
+# matched in CMU-1-Small-Region transcode-svs). Image dimensions, tile geometry,
+# tag set, MPP, magnification, and all extension metadata are identical.
+#
+# These hashes capture streamwriter's layout for regression detection going forward.
 
-transcode-svs  jpeg  CMU-1-Small-Region.svs  sha256:dadbf53549f93f4e72df1e499b2569b0efbe06c69bfe60985bad067b24f9b4a5
-transcode-svs  jpeg  CMU-1.svs  sha256:b9673c91c884a4338645f4827dc671a0b765d1093547e99a07ca1731262c9e3e
-transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:dd05d34ad9cb56b7bf55db5120f81ad8af43f9bafdbc6cd6afd52c6728d45f86
-transcode-tiff  jpeg  CMU-1.svs  sha256:64fb01e3708ab63922461fcd726419bcfab5e6b3ef1382d3b363fa515a9f3d6c
-downsample-2x  CMU-1-Small-Region.svs  sha256:c6b6bae18b8bfd4420b7425bca9fd866dcdd68f65b8bcd2e26e47071a6994039
+# Captured post-landing-3 with streamwriter (commit pending):
+transcode-svs  jpeg  CMU-1-Small-Region.svs  sha256:7b02d34e838d6b92bbb8396bfa84e337d85b887f04670b394f98c9d435ba9282
+transcode-svs  jpeg  CMU-1.svs  sha256:8b4b5927cb8bf98bed7d293f2252ccd4562fd1c094df084a382908bbd2bf7cdf
+transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:33b411f8e26fc9bca3c4d6f1fc1e27914d9f2cb8c1e5993a3cfc2a4311ec0707
+transcode-tiff  jpeg  CMU-1.svs  sha256:fd940aa33eae366951bde5a765f7394e74f2e44a275769fb26569ed4800f09b4
+downsample-2x  CMU-1-Small-Region.svs  sha256:7c733bc1af339b9d0c2bbfb164824655846e65830701497387c278432127b171
+
+# Historical (pre-landing-3, wsiwriter):
+# transcode-svs  jpeg  CMU-1-Small-Region.svs  sha256:dadbf53549f93f4e72df1e499b2569b0efbe06c69bfe60985bad067b24f9b4a5
+# transcode-svs  jpeg  CMU-1.svs  sha256:b9673c91c884a4338645f4827dc671a0b765d1093547e99a07ca1731262c9e3e
+# transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:dd05d34ad9cb56b7bf55db5120f81ad8af43f9bafdbc6cd6afd52c6728d45f86
+# transcode-tiff  jpeg  CMU-1.svs  sha256:64fb01e3708ab63922461fcd726419bcfab5e6b3ef1382d3b363fa515a9f3d6c
+# downsample-2x  CMU-1-Small-Region.svs  sha256:c6b6bae18b8bfd4420b7425bca9fd866dcdd68f65b8bcd2e26e47071a6994039
