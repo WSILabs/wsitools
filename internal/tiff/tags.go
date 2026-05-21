@@ -34,6 +34,14 @@ const (
 	CompressionJPEG     uint16 = 7
 	CompressionDeflate  uint16 = 8
 	CompressionJPEG2000 uint16 = 33003 // Aperio / OpenJPEG codestream
+	// New: wsi-tools-private compression tag values used by extension codecs.
+	// These are in the private/experimental TIFF tag range; they are not
+	// registered with Adobe but match the values opentile-go's
+	// generictiff classifier recognizes.
+	CompressionWebP  uint16 = 50001 // Adobe-allocated
+	CompressionJPEGXL uint16 = 50002 // Adobe-allocated (draft)
+	CompressionAVIF  uint16 = 60001 // wsitools private/experimental range
+	CompressionHTJ2K uint16 = 60003 // wsitools private/experimental range
 )
 
 // WSI private tag IDs (range 65080–65087) reserved by wsitools.

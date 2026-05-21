@@ -80,3 +80,21 @@ func TestCompressionConstants(t *testing.T) {
 		}
 	}
 }
+
+func TestExtensionCompressionConstants(t *testing.T) {
+	cases := []struct {
+		name string
+		got  uint16
+		want uint16
+	}{
+		{"WebP", CompressionWebP, 50001},
+		{"JPEGXL", CompressionJPEGXL, 50002},
+		{"AVIF", CompressionAVIF, 60001},
+		{"HTJ2K", CompressionHTJ2K, 60003},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s: got %d want %d", c.name, c.got, c.want)
+		}
+	}
+}

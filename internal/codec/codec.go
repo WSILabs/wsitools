@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-
-	"github.com/cornish/wsitools/internal/wsiwriter"
 )
 
 var (
@@ -43,7 +41,6 @@ type Encoder interface {
 	LevelHeader() []byte
 	EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error)
 	TIFFCompressionTag() uint16
-	ExtraTIFFTags() []wsiwriter.TIFFTag
 	Close() error
 }
 

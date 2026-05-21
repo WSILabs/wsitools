@@ -118,7 +118,7 @@ import (
 	"unsafe"
 
 	"github.com/cornish/wsitools/internal/codec"
-	"github.com/cornish/wsitools/internal/wsiwriter"
+	"github.com/cornish/wsitools/internal/tiff"
 )
 
 func init() {
@@ -164,10 +164,9 @@ type Encoder struct {
 	effort   int
 }
 
-func (*Encoder) LevelHeader() []byte                  { return nil }
-func (*Encoder) TIFFCompressionTag() uint16           { return wsiwriter.CompressionJPEGXL }
-func (*Encoder) ExtraTIFFTags() []wsiwriter.TIFFTag   { return nil }
-func (*Encoder) Close() error                         { return nil }
+func (*Encoder) LevelHeader() []byte        { return nil }
+func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEGXL }
+func (*Encoder) Close() error               { return nil }
 
 func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {
 	if len(rgb) < w*h*3 {

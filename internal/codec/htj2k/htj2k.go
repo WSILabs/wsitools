@@ -21,7 +21,7 @@ import (
 	"unsafe"
 
 	"github.com/cornish/wsitools/internal/codec"
-	"github.com/cornish/wsitools/internal/wsiwriter"
+	"github.com/cornish/wsitools/internal/tiff"
 )
 
 func init() {
@@ -48,10 +48,9 @@ type Encoder struct {
 	quality int
 }
 
-func (*Encoder) LevelHeader() []byte                { return nil }
-func (*Encoder) TIFFCompressionTag() uint16         { return wsiwriter.CompressionHTJ2K }
-func (*Encoder) ExtraTIFFTags() []wsiwriter.TIFFTag { return nil }
-func (*Encoder) Close() error                       { return nil }
+func (*Encoder) LevelHeader() []byte        { return nil }
+func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionHTJ2K }
+func (*Encoder) Close() error               { return nil }
 
 // EncodeTile encodes an RGB888 tile as a raw J2K codestream using OpenJPH.
 func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {

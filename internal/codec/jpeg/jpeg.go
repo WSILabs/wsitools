@@ -97,7 +97,7 @@ import (
 	"unsafe"
 
 	"github.com/cornish/wsitools/internal/codec"
-	"github.com/cornish/wsitools/internal/wsiwriter"
+	"github.com/cornish/wsitools/internal/tiff"
 )
 
 func init() {
@@ -133,10 +133,9 @@ type Encoder struct {
 	tables  []byte
 }
 
-func (e *Encoder) LevelHeader() []byte                { return e.tables }
-func (e *Encoder) TIFFCompressionTag() uint16         { return wsiwriter.CompressionJPEG }
-func (e *Encoder) ExtraTIFFTags() []wsiwriter.TIFFTag { return nil }
-func (e *Encoder) Close() error                       { return nil }
+func (e *Encoder) LevelHeader() []byte        { return e.tables }
+func (e *Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEG }
+func (e *Encoder) Close() error               { return nil }
 
 // computeTables encodes a blank probe tile as a self-contained JPEG, then
 // extracts the DQT/DHT tables to form the shared JPEGTables for this level.
@@ -146,7 +145,7 @@ func (e *Encoder) computeTables() error {
 	if err != nil {
 		return fmt.Errorf("codec/jpeg: probe encode: %w", err)
 	}
-	tables, err := wsiwriter.ExtractJPEGTables(full)
+	tables, err := tiff.ExtractJPEGTables(full)
 	if err != nil {
 		return fmt.Errorf("codec/jpeg: extract tables: %w", err)
 	}
