@@ -2,6 +2,53 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-05-21
+
+### Changed (internal)
+
+- **TIFF core extraction.** Shared byte-emission primitives moved from
+  `internal/wsiwriter` and `internal/cogwsi` into a new
+  `internal/tiff` package (TIFF type constants, tag IDs, WSI tag IDs,
+  EntryBuilder, WriteHeader, JPEGTables helpers, BigTIFF auto-promote,
+  PatchUint32/64, RawTag/AddRaw, Compression value constants).
+- **Writer packages reorganized:**
+  - `internal/cogwsi` → `internal/tiff/cogwsiwriter` (same API surface,
+    now consumes `internal/tiff` primitives).
+  - `internal/wsiwriter` → `internal/tiff/streamwriter` (new public
+    API: `Options` struct instead of `WithXxx` functional Options,
+    `AddStripped` instead of `AddAssociated`, `ExtraTags []tiff.RawTag`
+    on `LevelSpec` and `StrippedSpec` for caller-supplied tags).
+- **SVS-shape tags moved caller-side.** The Aperio-specific
+  `WithLayout(LayoutSVS)` mode was removed from the writer. transcode
+  now assembles Aperio `ImageDescription` + `NewSubfileType=9` macro
+  marker as `[]tiff.RawTag` and passes via `ExtraTags`. See
+  `cmd/wsitools/svs_tags.go`.
+- **Aperio ImageDescription parser moved caller-side.** `ParseImageDescription`
+  + `MutateForDownsample` + `AperioDescription.Encode` moved from
+  `internal/wsiwriter/svs.go` to `cmd/wsitools/svs_imagedesc.go`.
+- **Codec interface simplified.** `Encoder.ExtraTIFFTags()` removed (no
+  codec used it). Codecs now import `internal/tiff` instead of
+  `internal/wsiwriter`.
+- **`internal/wsiwriter` deleted.**
+
+### Compatibility notes
+
+- All three commands (`transcode`, `downsample`, `convert`) produce
+  files that are functionally equivalent to v0.6.0 output for the
+  same inputs and flags: identical image dimensions, tile geometry,
+  tag set, MPP, magnification, ImageDescription, JPEGTables, and
+  per-tile compressed bytes (verified by per-tile SHA-256 on the CMU
+  fixture: 133/133 tile/strip bytes byte-identical).
+- File hashes differ at the byte level due to internal layout
+  reordering (the wsiwriter interleaved IFD writes with tile writes;
+  streamwriter emits all IFDs + external arrays at the end of the
+  file, matching the canonical Aperio SVS layout). All consumers
+  tested (`tiffinfo`, `wsitools info`, opentile-go's SVS + generic
+  readers) treat the outputs as identical SVS / generic-TIFF files.
+- COG-WSI output (from `convert`) is byte-identical to v0.6.0 except
+  for the embedded `WSIToolsVersion` tag value (now `0.7.0` instead
+  of `0.6.0-dev`). All other bytes match.
+
 ## [0.6.0] — 2026-05-20
 
 ### Added
