@@ -1,6 +1,7 @@
 // Package main: the downsample subcommand wires opentile-go (read), our
-// JPEG/JP2K decoders, the resample primitives, the JPEG codec, and wsiwriter
-// (write) into a single command that produces a power-of-2-downsampled SVS.
+// JPEG/JP2K decoders, the resample primitives, the JPEG codec, and the
+// streamwriter (write) into a single command that produces a power-of-2-
+// downsampled SVS.
 //
 // v0.1 architecture (intentionally simple, tightening in v0.2):
 //
@@ -10,7 +11,7 @@
 //   - Output L1+ is computed by repeated 2x2 area-average over the previous
 //     level's in-memory raster.
 //   - For each output level, the raster is re-tiled into 256x256 chunks and
-//     encoded via the JPEG codec, written to the output via wsiwriter.
+//     encoded via the JPEG codec, written to the output via streamwriter.
 //   - Associated images (label, macro, thumbnail/overview) are passed through
 //     verbatim via opentile-go's AssociatedImage.Bytes().
 //
@@ -40,7 +41,8 @@ import (
 	"github.com/cornish/wsitools/internal/pipeline"
 	"github.com/cornish/wsitools/internal/resample"
 	"github.com/cornish/wsitools/internal/source"
-	"github.com/cornish/wsitools/internal/wsiwriter"
+	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/cornish/wsitools/internal/tiff/streamwriter"
 )
 
 const (
@@ -135,7 +137,7 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read source ImageDescription: %w", err)
 	}
-	desc, err := wsiwriter.ParseImageDescription(rawDesc)
+	desc, err := ParseImageDescription(rawDesc)
 	if err != nil {
 		return fmt.Errorf("parse source ImageDescription: %w", err)
 	}
@@ -171,24 +173,28 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 	desc.MutateForDownsample(dsFactor, uint32(outW), uint32(outH))
 
 	// Predict output size to decide BigTIFF promotion.
-	bigtiff := predictBigTIFFNeeded(srcL0, src.Levels(), dsFactor)
+	bigtiffMode := tiff.BigTIFFOff
+	if predictBigTIFFNeeded(srcL0, src.Levels(), dsFactor) {
+		bigtiffMode = tiff.BigTIFFOn
+	}
 
-	// Open writer (atomic .tmp + rename via wsiwriter.Close).
-	w, err := wsiwriter.Create(dsOutput,
-		wsiwriter.WithBigTIFF(bigtiff),
-		wsiwriter.WithImageDescription(desc.Encode()),
-	)
+	// Open writer (atomic .tmp + rename via streamwriter.Close).
+	w, err := streamwriter.Create(dsOutput, streamwriter.Options{
+		BigTIFF:          bigtiffMode,
+		ImageDescription: desc.Encode(),
+		ToolsVersion:     Version,
+		SourceFormat:     string(src.Format()),
+	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
 	}
 
-	// Build pyramid (closes writer's tmp file on error via defer below).
+	// Build pyramid (Abort the writer + remove the tmp file on any error
+	// path; Close is the success path).
 	closed := false
 	defer func() {
 		if !closed {
-			// Close() with error path inside; ignore explicit error to surface
-			// the original cause.
-			_ = w.Close()
+			w.Abort()
 		}
 	}()
 
@@ -347,7 +353,7 @@ func countTilesForLevel(w, h int) int {
 // postL0Hook, if non-nil, is called after writing L0 and before writing L1.
 // The caller uses this to inject the thumbnail IFD between L0 and L1 to match
 // Aperio's quirky IFD ordering convention.
-func buildPyramid(ctx context.Context, src opentile.Tiler, w *wsiwriter.Writer, factor, quality, workers int, postL0Hook func() error) error {
+func buildPyramid(ctx context.Context, src opentile.Tiler, w *streamwriter.Writer, factor, quality, workers int, postL0Hook func() error) error {
 	srcLevels := src.Levels()
 	srcL0 := srcLevels[0]
 
@@ -637,10 +643,10 @@ func downsampleByPowerOf2(rgb []byte, srcW, srcH, factor int) ([]byte, int, int,
 }
 
 // encodeAndWriteLevel encodes the in-memory RGB raster into 256x256 abbreviated
-// JPEG tiles and writes them via a wsiwriter LevelHandle. All pyramid IFDs use
-// NewSubfileType=0 — opentile-go's SVS classifier rejects pyramid levels with
-// the reduced bit set. bar may be nil when --quiet is set.
-func encodeAndWriteLevel(ctx context.Context, w *wsiwriter.Writer, raster []byte, levelW, levelH, quality, workers int, bar *mpb.Bar) error {
+// JPEG tiles and writes them via a streamwriter LevelHandle. All pyramid IFDs
+// use NewSubfileType=0 — opentile-go's SVS classifier rejects pyramid levels
+// with the reduced bit set. bar may be nil when --quiet is set.
+func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []byte, levelW, levelH, quality, workers int, bar *mpb.Bar) error {
 	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
 		TileWidth:   outputTileSize,
 		TileHeight:  outputTileSize,
@@ -652,16 +658,18 @@ func encodeAndWriteLevel(ctx context.Context, w *wsiwriter.Writer, raster []byte
 	defer enc.Close()
 
 	tables := enc.LevelHeader()
-	lh, err := w.AddLevel(wsiwriter.LevelSpec{
-		ImageWidth:                uint32(levelW),
-		ImageHeight:               uint32(levelH),
-		TileWidth:                 outputTileSize,
-		TileHeight:                outputTileSize,
-		Compression:               wsiwriter.CompressionJPEG,
-		PhotometricInterpretation: 2, // RGB (Aperio)
-		JPEGTables:                tables,
-		JPEGAbbreviatedTiles:      true,
-		NewSubfileType:            0,
+	lh, err := w.AddLevel(streamwriter.LevelSpec{
+		ImageWidth:      uint32(levelW),
+		ImageHeight:     uint32(levelH),
+		TileWidth:       outputTileSize,
+		TileHeight:      outputTileSize,
+		Compression:     tiff.CompressionJPEG,
+		Photometric:     2, // RGB (Aperio)
+		SamplesPerPixel: 3,
+		BitsPerSample:   []uint16{8, 8, 8},
+		JPEGTables:      tables,
+		NewSubfileType:  0,
+		WSIImageType:    tiff.WSIImageTypePyramid,
 	})
 	if err != nil {
 		return fmt.Errorf("AddLevel: %w", err)
@@ -743,36 +751,47 @@ func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty int) ([]byte,
 // as a single-strip IFD. NewSubfileType is set per the SVS reader classifier
 // convention: thumbnail=0, label=1 (reduced bit), overview/macro=9 (reduced +
 // macro bit). Compression tag mirrors the source.
-func writeOneAssociated(w *wsiwriter.Writer, a opentile.AssociatedImage) error {
+func writeOneAssociated(w *streamwriter.Writer, a opentile.AssociatedImage) error {
 	bs, err := a.Bytes()
 	if err != nil {
 		return fmt.Errorf("associated %q bytes: %w", a.Kind(), err)
 	}
 	var subfileType uint32
+	var wsiImageType string
 	switch a.Kind() {
 	case "thumbnail":
 		subfileType = 0
+		wsiImageType = tiff.WSIImageTypeThumbnail
 	case "label":
 		subfileType = 1
-	case "overview", "macro":
+		wsiImageType = tiff.WSIImageTypeLabel
+	case "overview":
 		subfileType = 9
+		wsiImageType = tiff.WSIImageTypeOverview
+	case "macro":
+		subfileType = 9
+		wsiImageType = tiff.WSIImageTypeMacro
 	default:
 		subfileType = 0
+		wsiImageType = tiff.WSIImageTypeAssociated
 	}
 	comp, photo, err := mapAssociatedCompression(a.Compression())
 	if err != nil {
 		return fmt.Errorf("associated %q compression: %w", a.Kind(), err)
 	}
-	if err := w.AddAssociated(wsiwriter.AssociatedSpec{
-		Kind:                      a.Kind(),
-		Compressed:                bs,
-		Width:                     uint32(a.Size().W),
-		Height:                    uint32(a.Size().H),
-		Compression:               comp,
-		PhotometricInterpretation: photo,
-		NewSubfileType:            subfileType,
+	if err := w.AddStripped(streamwriter.StrippedSpec{
+		Width:           uint32(a.Size().W),
+		Height:          uint32(a.Size().H),
+		RowsPerStrip:    uint32(a.Size().H),
+		BitsPerSample:   []uint16{8, 8, 8},
+		SamplesPerPixel: 3,
+		Photometric:     photo,
+		Compression:     comp,
+		StripBytes:      bs,
+		NewSubfileType:  subfileType,
+		WSIImageType:    wsiImageType,
 	}); err != nil {
-		return fmt.Errorf("AddAssociated %q: %w", a.Kind(), err)
+		return fmt.Errorf("AddStripped %q: %w", a.Kind(), err)
 	}
 	return nil
 }
@@ -783,11 +802,11 @@ func writeOneAssociated(w *wsiwriter.Writer, a opentile.AssociatedImage) error {
 func mapAssociatedCompression(c opentile.Compression) (uint16, uint16, error) {
 	switch c {
 	case opentile.CompressionJPEG:
-		return wsiwriter.CompressionJPEG, 2, nil
+		return tiff.CompressionJPEG, 2, nil
 	case opentile.CompressionLZW:
-		return wsiwriter.CompressionLZW, 2, nil
+		return tiff.CompressionLZW, 2, nil
 	case opentile.CompressionNone:
-		return wsiwriter.CompressionNone, 2, nil
+		return tiff.CompressionNone, 2, nil
 	default:
 		return 0, 0, fmt.Errorf("unsupported associated compression: %s", c)
 	}
