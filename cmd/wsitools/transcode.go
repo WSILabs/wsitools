@@ -18,7 +18,8 @@ import (
 	"github.com/cornish/wsitools/internal/decoder"
 	"github.com/cornish/wsitools/internal/pipeline"
 	"github.com/cornish/wsitools/internal/source"
-	"github.com/cornish/wsitools/internal/wsiwriter"
+	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/cornish/wsitools/internal/tiff/streamwriter"
 )
 
 var (
@@ -110,7 +111,7 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	defer src.Close()
 
 	container := resolveContainer(src.Format(), tcCodec, tcContainer)
-	bigtiff := resolveBigTIFF(tcBigTIFF, src)
+	bigtiffMode := resolveBigTIFFMode(tcBigTIFF, src)
 
 	knobs := map[string]string{"q": fmt.Sprintf("%d", tcQuality)}
 	for _, opt := range tcCodecOpts {
@@ -127,47 +128,53 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		knobs[k] = v
 	}
 
-	// Build writer options.
-	wOpts := []wsiwriter.Option{
-		wsiwriter.WithBigTIFF(bigtiff),
-		wsiwriter.WithToolsVersion(Version),
-		wsiwriter.WithSourceFormat(src.Format()),
-	}
 	md := src.Metadata()
+
+	// Build writer options.
+	opts := streamwriter.Options{
+		BigTIFF:      bigtiffMode,
+		ToolsVersion: Version,
+		SourceFormat: src.Format(),
+	}
 	if md.Make != "" {
-		wOpts = append(wOpts, wsiwriter.WithMake(md.Make))
+		opts.Make = md.Make
 	}
 	if md.Model != "" {
-		wOpts = append(wOpts, wsiwriter.WithModel(md.Model))
+		opts.Model = md.Model
 	}
 	if md.Software != "" {
-		wOpts = append(wOpts, wsiwriter.WithSoftware(md.Software))
+		opts.Software = md.Software
 	}
 	if !md.AcquisitionDateTime.IsZero() {
-		wOpts = append(wOpts, wsiwriter.WithDateTime(md.AcquisitionDateTime))
-	}
-	if container == "svs" && src.Format() == string(opentile.FormatSVS) {
-		// SVS-shaped output: re-emit Aperio ImageDescription verbatim.
-		if desc := src.SourceImageDescription(); desc != "" {
-			wOpts = append(wOpts, wsiwriter.WithImageDescription(desc))
-		}
-	} else {
-		// Generic TIFF: assemble a wsitools provenance string.
-		wOpts = append(wOpts, wsiwriter.WithImageDescription(buildProvenanceDesc(src, tcCodec, md)))
+		opts.DateTime = md.AcquisitionDateTime
 	}
 
-	w, err := wsiwriter.Create(tcOutput, wOpts...)
+	// ImageDescription handling.
+	//   - SVS container: leave opts.ImageDescription empty; the L0 IFD
+	//     gets the Aperio ImageDescription via LevelSpec.ExtraTags
+	//     (buildSVSL0ExtraTags). srcImageDesc is threaded into
+	//     transcodeLevel below.
+	//   - Generic container: set opts.ImageDescription to a wsitools
+	//     provenance string.
+	var srcImageDesc string
+	if container == "svs" && src.Format() == string(opentile.FormatSVS) {
+		srcImageDesc = src.SourceImageDescription()
+	} else {
+		opts.ImageDescription = buildProvenanceDesc(src, tcCodec, md)
+	}
+
+	w, err := streamwriter.Create(tcOutput, opts)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
 
-	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, tcJobs, container); err != nil {
-		w.Close() // tmp removed by Close
+	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, tcJobs, container, srcImageDesc); err != nil {
+		w.Abort()
 		return err
 	}
 
 	if err := writeAssociatedImages(src, w, container); err != nil {
-		w.Close()
+		w.Abort()
 		return err
 	}
 
@@ -197,12 +204,15 @@ func resolveContainer(srcFormat, codecName, override string) string {
 	return "tiff"
 }
 
-func resolveBigTIFF(mode string, src source.Source) bool {
+// resolveBigTIFFMode maps the CLI --bigtiff flag to a tiff.BigTIFFMode.
+// "auto" promotes to BigTIFFOn when the source pixel count exceeds the
+// 2 GiB classic-TIFF safety threshold.
+func resolveBigTIFFMode(mode string, src source.Source) tiff.BigTIFFMode {
 	switch mode {
 	case "on":
-		return true
+		return tiff.BigTIFFOn
 	case "off":
-		return false
+		return tiff.BigTIFFOff
 	}
 	// auto: predict output size; promote when > 2 GiB.
 	// Estimate ~1 byte per pixel for lossy codecs.
@@ -210,19 +220,22 @@ func resolveBigTIFF(mode string, src source.Source) bool {
 	for _, lvl := range src.Levels() {
 		total += int64(lvl.Size().X) * int64(lvl.Size().Y)
 	}
-	return total > (2 << 30)
+	if total > (2 << 30) {
+		return tiff.BigTIFFOn
+	}
+	return tiff.BigTIFFOff
 }
 
-func transcodePyramid(ctx context.Context, src source.Source, w *wsiwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container string) error {
+func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {
 	for _, lvl := range src.Levels() {
-		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers); err != nil {
+		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers, container, srcImageDesc); err != nil {
 			return fmt.Errorf("level %d: %w", lvl.Index(), err)
 		}
 	}
 	return nil
 }
 
-func transcodeLevel(ctx context.Context, lvl source.Level, w *wsiwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
+func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: lvl.TileSize().X, TileHeight: lvl.TileSize().Y,
 		PixelFormat: codec.PixelFormatRGB8,
@@ -232,21 +245,28 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *wsiwriter.Writer, 
 	}
 	defer enc.Close()
 
-	spec := wsiwriter.LevelSpec{
-		ImageWidth:                uint32(lvl.Size().X),
-		ImageHeight:               uint32(lvl.Size().Y),
-		TileWidth:                 uint32(lvl.TileSize().X),
-		TileHeight:                uint32(lvl.TileSize().Y),
-		Compression:               enc.TIFFCompressionTag(),
-		PhotometricInterpretation: 2, // RGB; codecs carry their own colour model
-		JPEGTables:                enc.LevelHeader(),
-		JPEGAbbreviatedTiles:      enc.TIFFCompressionTag() == wsiwriter.CompressionJPEG,
-		NewSubfileType:            0, // pyramid IFDs always non-reduced (Aperio classifier rule)
-		WSIImageType:              wsiwriter.WSIImageTypePyramid,
+	spec := streamwriter.LevelSpec{
+		ImageWidth:      uint32(lvl.Size().X),
+		ImageHeight:     uint32(lvl.Size().Y),
+		TileWidth:       uint32(lvl.TileSize().X),
+		TileHeight:      uint32(lvl.TileSize().Y),
+		Compression:     enc.TIFFCompressionTag(),
+		Photometric:     2, // RGB; codecs carry their own colour model
+		SamplesPerPixel: 3,
+		BitsPerSample:   []uint16{8, 8, 8},
+		JPEGTables:      enc.LevelHeader(),
+		NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),
+		WSIImageType:    tiff.WSIImageTypePyramid,
 	}
-	for _, t := range enc.ExtraTIFFTags() {
-		spec.ExtraTags = append(spec.ExtraTags, t)
+	// SVS-shaped output: emit Aperio ImageDescription verbatim on L0.
+	if container == "svs" && lvl.Index() == 0 && srcImageDesc != "" {
+		spec.ExtraTags = buildSVSL0ExtraTags(srcImageDesc)
 	}
+	// NOTE: codec ExtraTIFFTags() currently returns nil for every
+	// registered codec and still uses the legacy TIFFTag type from the
+	// old writer package. Wiring the codec interface to tiff.RawTag is a
+	// future task; the loop is dropped here so this file has zero
+	// references to the legacy writer package.
 
 	lh, err := w.AddLevel(spec)
 	if err != nil {
@@ -329,23 +349,39 @@ func pickDecoder(c source.Compression) decoder.Decoder {
 	return nil
 }
 
-func writeAssociatedImages(src source.Source, w *wsiwriter.Writer, container string) error {
+func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string) error {
 	for _, a := range src.Associated() {
 		bs, err := a.Bytes()
 		if err != nil {
 			return fmt.Errorf("associated %s: %w", a.Kind(), err)
 		}
-		spec := wsiwriter.AssociatedSpec{
-			Kind:                      a.Kind(),
-			Compressed:                bs,
-			Width:                     uint32(a.Size().X),
-			Height:                    uint32(a.Size().Y),
-			Compression:               mapCompressionForOutput(a.Compression()),
-			PhotometricInterpretation: 2,
-			NewSubfileType:            newSubfileTypeFor(container, a.Kind()),
-			WSIImageType:              a.Kind(),
+		spec := streamwriter.StrippedSpec{
+			Width:           uint32(a.Size().X),
+			Height:          uint32(a.Size().Y),
+			RowsPerStrip:    uint32(a.Size().Y),
+			BitsPerSample:   []uint16{8, 8, 8},
+			SamplesPerPixel: 3,
+			Photometric:     2,
+			Compression:     mapCompressionForOutput(a.Compression()),
+			StripBytes:      bs,
+			NewSubfileType:  newSubfileTypeForAssoc(container, a.Kind()),
+			WSIImageType:    a.Kind(),
 		}
-		if err := w.AddAssociated(spec); err != nil {
+		// SVS-shaped output: emit Aperio-flavored NewSubfileType via
+		// ExtraTags (macro=9, label=1). Clear spec.NewSubfileType so the
+		// writer doesn't also emit a default value — EntryBuilder doesn't
+		// dedup, so a duplicate tag would corrupt the IFD.
+		if container == "svs" {
+			switch a.Kind() {
+			case "macro", "overview":
+				spec.NewSubfileType = 0
+				spec.ExtraTags = buildSVSMacroExtraTags()
+			case "label":
+				spec.NewSubfileType = 0
+				spec.ExtraTags = buildSVSLabelExtraTags()
+			}
+		}
+		if err := w.AddStripped(spec); err != nil {
 			return fmt.Errorf("write associated %s: %w", a.Kind(), err)
 		}
 	}
@@ -355,25 +391,35 @@ func writeAssociatedImages(src source.Source, w *wsiwriter.Writer, container str
 func mapCompressionForOutput(c source.Compression) uint16 {
 	switch c {
 	case source.CompressionJPEG:
-		return wsiwriter.CompressionJPEG
+		return tiff.CompressionJPEG
 	case source.CompressionLZW:
-		return wsiwriter.CompressionLZW
+		return tiff.CompressionLZW
 	case source.CompressionJPEG2000:
-		return wsiwriter.CompressionJPEG2000
+		return tiff.CompressionJPEG2000
 	}
-	return wsiwriter.CompressionNone
+	return tiff.CompressionNone
 }
 
-func newSubfileTypeFor(container, kind string) uint32 {
-	if container == "svs" {
-		switch kind {
-		case "label":
-			return 1
-		case "macro", "overview":
-			return 9
-		}
+// newSubfileTypeForLevel returns the NewSubfileType for a pyramid IFD.
+// L0 is non-reduced (0); all other levels are reduced-resolution (1).
+// The Aperio convention is the same for SVS-shaped output.
+func newSubfileTypeForLevel(idx int, container string) uint32 {
+	_ = container
+	if idx == 0 {
+		return 0
 	}
-	return 1 // generic TIFF: any associated image is reduced-resolution
+	return 1
+}
+
+// newSubfileTypeForAssoc returns the default NewSubfileType for an
+// associated image. Any associated image is reduced-resolution (1).
+// SVS-shaped output adds the Aperio-private macro=9 marker via
+// ExtraTags in writeAssociatedImages — that path doesn't need special
+// handling here.
+func newSubfileTypeForAssoc(container, kind string) uint32 {
+	_ = container
+	_ = kind
+	return 1
 }
 
 func buildProvenanceDesc(src source.Source, codecName string, md source.Metadata) string {
