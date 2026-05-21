@@ -1,0 +1,10 @@
+# v0.6.0 transcode + downsample golden-master output hashes
+# Captured pre-landing-3 of TIFF core extraction (commit 2437476)
+# Binary identifies as 0.7.0-dev but transcode/downsample code paths are byte-equivalent to v0.6.0.
+# Re-run after landing 3; all hashes must match.
+
+transcode-svs  jpeg  CMU-1-Small-Region.svs  sha256:dadbf53549f93f4e72df1e499b2569b0efbe06c69bfe60985bad067b24f9b4a5
+transcode-svs  jpeg  CMU-1.svs  sha256:b9673c91c884a4338645f4827dc671a0b765d1093547e99a07ca1731262c9e3e
+transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:dd05d34ad9cb56b7bf55db5120f81ad8af43f9bafdbc6cd6afd52c6728d45f86
+transcode-tiff  jpeg  CMU-1.svs  sha256:64fb01e3708ab63922461fcd726419bcfab5e6b3ef1382d3b363fa515a9f3d6c
+downsample-2x  CMU-1-Small-Region.svs  sha256:c6b6bae18b8bfd4420b7425bca9fd866dcdd68f65b8bcd2e26e47071a6994039
