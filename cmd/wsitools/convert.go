@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cornish/wsitools/internal/cogwsi"
+	"github.com/cornish/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/cornish/wsitools/internal/source"
 )
 
@@ -92,10 +92,10 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	}
 
 	md := src.Metadata()
-	opts := cogwsi.Options{
+	opts := cogwsiwriter.Options{
 		BigTIFF:      bigTIFFMode,
 		ToolsVersion: Version,
-		Metadata: cogwsi.Metadata{
+		Metadata: cogwsiwriter.Metadata{
 			MPPX:                md.MPP,
 			MPPY:                md.MPP, // MPP is currently single-axis in source.Metadata
 			Magnification:       md.Magnification,
@@ -108,14 +108,14 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	w, err := cogwsi.Create(cvOutput, opts)
+	w, err := cogwsiwriter.Create(cvOutput, opts)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
 
 	// Tile-copy: full-resolution first (source order).
 	for _, lvl := range src.Levels() {
-		spec := cogwsi.LevelSpec{
+		spec := cogwsiwriter.LevelSpec{
 			ImageWidth:      uint32(lvl.Size().X),
 			ImageHeight:     uint32(lvl.Size().Y),
 			TileWidth:       uint32(lvl.TileSize().X),
@@ -155,7 +155,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 				w.Abort()
 				return fmt.Errorf("read associated %s: %w", a.Kind(), err)
 			}
-			if err := w.AddAssociated(cogwsi.AssociatedSpec{
+			if err := w.AddAssociated(cogwsiwriter.AssociatedSpec{
 				Kind:        a.Kind(),
 				Width:       uint32(a.Size().X),
 				Height:      uint32(a.Size().Y),
@@ -163,7 +163,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 				Photometric: 2,
 				Bytes:       bs,
 			}); err != nil {
-				if errors.Is(err, cogwsi.ErrInvalidAssocKind) {
+				if errors.Is(err, cogwsiwriter.ErrInvalidAssocKind) {
 					slog.Warn("skipping associated image with unsupported kind",
 						"kind", a.Kind(), "reason", err)
 					continue
@@ -189,14 +189,14 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func parseBigTIFFFlag(v string) (cogwsi.BigTIFFMode, error) {
+func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 	switch v {
 	case "auto":
-		return cogwsi.BigTIFFAuto, nil
+		return cogwsiwriter.BigTIFFAuto, nil
 	case "on":
-		return cogwsi.BigTIFFOn, nil
+		return cogwsiwriter.BigTIFFOn, nil
 	case "off":
-		return cogwsi.BigTIFFOff, nil
+		return cogwsiwriter.BigTIFFOff, nil
 	}
 	return 0, fmt.Errorf("--bigtiff %q: want auto|on|off", v)
 }

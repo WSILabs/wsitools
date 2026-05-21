@@ -1,4 +1,4 @@
-package cogwsi_test
+package cogwsiwriter_test
 
 import (
 	"bytes"
@@ -9,27 +9,27 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/cogwsi"
+	"github.com/cornish/wsitools/internal/tiff/cogwsiwriter"
 )
 
 func TestPackageCompiles(t *testing.T) {
-	var _ *cogwsi.Writer
+	var _ *cogwsiwriter.Writer
 }
 
 func TestWriterCreateAndSpoolLevel(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.tiff")
 
-	w, err := cogwsi.Create(out, cogwsi.Options{
+	w, err := cogwsiwriter.Create(out, cogwsiwriter.Options{
 		ToolsVersion: "test",
-		BigTIFF:      cogwsi.BigTIFFAuto,
+		BigTIFF:      cogwsiwriter.BigTIFFAuto,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	defer w.Abort()
 
-	h, err := w.AddLevel(cogwsi.LevelSpec{
+	h, err := w.AddLevel(cogwsiwriter.LevelSpec{
 		ImageWidth:      8,
 		ImageHeight:     8,
 		TileWidth:       8,
@@ -51,7 +51,7 @@ func TestWriterCreateAndSpoolLevel(t *testing.T) {
 		t.Errorf("expected spool file: %v", err)
 	}
 
-	h2, err := w.AddLevel(cogwsi.LevelSpec{
+	h2, err := w.AddLevel(cogwsiwriter.LevelSpec{
 		ImageWidth: 16, ImageHeight: 8,
 		TileWidth: 8, TileHeight: 8,
 		Compression: 1, Photometric: 2, SamplesPerPixel: 3,
@@ -68,7 +68,7 @@ func TestWriterCreateAndSpoolLevel(t *testing.T) {
 func TestWriterAbortRemovesEverything(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.tiff")
-	w, err := cogwsi.Create(out, cogwsi.Options{})
+	w, err := cogwsiwriter.Create(out, cogwsiwriter.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestWriterCloseProducesValidTIFF(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.tiff")
 
-	w, err := cogwsi.Create(out, cogwsi.Options{ToolsVersion: "test"})
+	w, err := cogwsiwriter.Create(out, cogwsiwriter.Options{ToolsVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestWriterCloseProducesValidTIFF(t *testing.T) {
 		}
 		return t
 	}
-	h0, _ := w.AddLevel(cogwsi.LevelSpec{
+	h0, _ := w.AddLevel(cogwsiwriter.LevelSpec{
 		ImageWidth: 16, ImageHeight: 16, TileWidth: 8, TileHeight: 8,
 		Compression: 1, Photometric: 2, SamplesPerPixel: 3,
 		BitsPerSample: []uint16{8, 8, 8}, IsL0: true,
@@ -109,7 +109,7 @@ func TestWriterCloseProducesValidTIFF(t *testing.T) {
 			}
 		}
 	}
-	h1, _ := w.AddLevel(cogwsi.LevelSpec{
+	h1, _ := w.AddLevel(cogwsiwriter.LevelSpec{
 		ImageWidth: 8, ImageHeight: 8, TileWidth: 8, TileHeight: 8,
 		Compression: 1, Photometric: 2, SamplesPerPixel: 3,
 		BitsPerSample: []uint16{8, 8, 8},
@@ -153,10 +153,10 @@ func TestWriterCloseProducesValidTIFF(t *testing.T) {
 func TestWriterCloseReverseOrderTileData(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.tiff")
-	w, _ := cogwsi.Create(out, cogwsi.Options{ToolsVersion: "test"})
+	w, _ := cogwsiwriter.Create(out, cogwsiwriter.Options{ToolsVersion: "test"})
 
 	tile := bytes.Repeat([]byte{0xAA}, 192)
-	h0, _ := w.AddLevel(cogwsi.LevelSpec{
+	h0, _ := w.AddLevel(cogwsiwriter.LevelSpec{
 		ImageWidth: 16, ImageHeight: 16, TileWidth: 8, TileHeight: 8,
 		Compression: 1, Photometric: 2, SamplesPerPixel: 3,
 		BitsPerSample: []uint16{8, 8, 8}, IsL0: true,
@@ -166,7 +166,7 @@ func TestWriterCloseReverseOrderTileData(t *testing.T) {
 			_ = h0.WriteTile(tx, ty, tile)
 		}
 	}
-	h1, _ := w.AddLevel(cogwsi.LevelSpec{
+	h1, _ := w.AddLevel(cogwsiwriter.LevelSpec{
 		ImageWidth: 8, ImageHeight: 8, TileWidth: 8, TileHeight: 8,
 		Compression: 1, Photometric: 2, SamplesPerPixel: 3,
 		BitsPerSample: []uint16{8, 8, 8},
@@ -188,11 +188,11 @@ func TestWriterCloseReverseOrderTileData(t *testing.T) {
 func TestWriterAbortAfterCloseLeavesOutputIntact(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.tiff")
-	w, err := cogwsi.Create(out, cogwsi.Options{ToolsVersion: "test"})
+	w, err := cogwsiwriter.Create(out, cogwsiwriter.Options{ToolsVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, _ := w.AddLevel(cogwsi.LevelSpec{
+	h, _ := w.AddLevel(cogwsiwriter.LevelSpec{
 		ImageWidth: 8, ImageHeight: 8, TileWidth: 8, TileHeight: 8,
 		Compression: 1, Photometric: 2, SamplesPerPixel: 3,
 		BitsPerSample: []uint16{8, 8, 8}, IsL0: true,
@@ -239,12 +239,12 @@ func readTileOffsets(path string) (l0, l1 uint64, err error) {
 func TestWriterAddAssociatedRejectsInvalidKind(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.tiff")
-	w, err := cogwsi.Create(out, cogwsi.Options{ToolsVersion: "test"})
+	w, err := cogwsiwriter.Create(out, cogwsiwriter.Options{ToolsVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer w.Abort()
-	err = w.AddAssociated(cogwsi.AssociatedSpec{Kind: "probability", Bytes: []byte("x")})
+	err = w.AddAssociated(cogwsiwriter.AssociatedSpec{Kind: "probability", Bytes: []byte("x")})
 	if err == nil {
 		t.Fatalf("expected error for kind=probability")
 	}
@@ -253,7 +253,7 @@ func TestWriterAddAssociatedRejectsInvalidKind(t *testing.T) {
 	}
 	// Valid kinds: label, macro, thumbnail, overview.
 	for _, kind := range []string{"label", "macro", "thumbnail", "overview"} {
-		if err := w.AddAssociated(cogwsi.AssociatedSpec{Kind: kind, Bytes: []byte("x")}); err != nil {
+		if err := w.AddAssociated(cogwsiwriter.AssociatedSpec{Kind: kind, Bytes: []byte("x")}); err != nil {
 			t.Errorf("kind=%s: unexpected error: %v", kind, err)
 		}
 	}

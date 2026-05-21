@@ -1,4 +1,4 @@
-package cogwsi
+package cogwsiwriter
 
 import "fmt"
 
