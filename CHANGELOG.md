@@ -4,6 +4,24 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [0.7.0] — 2026-05-21
 
+### Added (user-visible)
+
+- `wsitools info` on COG-WSI files now reports `Format: cog-wsi`
+  (was `generic-tiff` in v0.6). Opentile-go's dedicated COG-WSI
+  reader honors the `WSIImageType` / `WSILevelIndex` /
+  `WSILevelCount` private tags, so pyramid level counts now match
+  the source exactly (resolves the level-drop seen in v0.6 on
+  Aperio mixed-ratio pyramids re-read through generic-tiff).
+
+### Dependencies
+
+- Upgraded `github.com/cornish/opentile-go` from v0.14.0 to v0.19.0.
+  Brings dedicated COG-WSI reader (closes upstream issues #5 + #6)
+  plus integer-multiple ratio acceptance in the generic-TIFF pyramid
+  classifier. One internal-API change followed (`opentile.AssociatedImage.Kind()`
+  → `Type()`); call sites in `internal/source` and `cmd/wsitools`
+  updated.
+
 ### Changed (internal)
 
 - **TIFF core extraction.** Shared byte-emission primitives moved from
