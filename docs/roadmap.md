@@ -24,6 +24,15 @@ queued, deferred, or under consideration.
 - `extract` — save associated image (label/macro/thumbnail/overview) as PNG or JPEG.
 - `hash` — content hash (file mode default; pixel mode opt-in).
 
+### v0.5
+- (no new utilities — project rename: `wsi-tools` → `wsitools`; module path + binary name).
+
+### v0.6
+- `convert --to cog-wsi` — lossless, bit-exact tile-copy of a WSI into the new COG-WSI container (Cloud Optimized GeoTIFF + WSI extension tags). Six source formats (SVS, Philips-TIFF, OME-TIFF, BIF, IFE, generic-TIFF). Normative format spec at `docs/superpowers/specs/2026-05-20-cog-wsi-format.md`.
+
+### v0.7
+- (no new utilities — TIFF core extraction milestone: shared `internal/tiff` package; `wsiwriter` and `cogwsi` writer packages reorganized as `internal/tiff/streamwriter` and `internal/tiff/cogwsiwriter`. opentile-go upgraded v0.14 → v0.19, bringing the dedicated COG-WSI reader and integer-multiple ratio acceptance — `wsitools info` on COG-WSI output now reports `Format: cog-wsi` and pyramid levels match source counts exactly).
+
 ## Planned
 
 ### Batch 2 — extends batch 1

@@ -8,7 +8,7 @@ A Swiss-army knife of utilities for whole-slide imaging (WSI) files used in digi
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 
-## v0.6 — what's here
+## v0.7 — what's here
 
 **Write-side**
 
@@ -32,7 +32,7 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   associated images, scanner metadata. Text or `--json`. Analog of `openslide-show-properties`.
 - `wsitools dump-ifds` — format-aware per-IFD layout dump. Annotates each IFD with its
   classification (pyramid L0/L1/…/label/macro/thumbnail/overview/probability/map) and
-  reports wsitools private tags (65080–65084). Slim tiffinfo analog.
+  reports wsitools private tags (65080–65087). Slim tiffinfo analog.
 - `wsitools extract --kind <k> -o <path>` — save an associated image
   (label/macro/thumbnail/overview) as PNG (default) or JPEG. JPEG output is
   byte-pass-through when the source is already JPEG.

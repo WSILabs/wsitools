@@ -10,8 +10,13 @@ v0.2+ adds transcode + more source formats.
 ## Conventions
 
 - Reader = `github.com/cornish/opentile-go` (consumed as a Go module dep, not forked).
-- Writer = `internal/wsiwriter` (pure Go for TIFF structure; cgo only inside codec wrappers).
+- TIFF core = `internal/tiff` (byte-emission primitives: types, tag IDs, EntryBuilder, WriteHeader, JPEGTables, BigTIFF auto-promote, PatchUint32/64). Pure Go.
+- Writers built on the core:
+  - `internal/tiff/streamwriter` — streaming TIFF writer; backs `transcode` + `downsample`.
+  - `internal/tiff/cogwsiwriter` — spool-and-finalize COG-WSI writer; backs `convert`.
+  Both are pure Go; cgo only inside codec wrappers.
 - Codecs = `internal/codec/<codec>/` subpackages, one per codec, registered via `init()`.
+- WSI private TIFF tag namespace: 65080–65087 (see `internal/tiff/tags.go`).
 - Decoders = `internal/decoder/` (smaller surface — only what source slides need).
 - Pipeline = `internal/pipeline` (worker-pool decode/process/encode).
 - CLI = `cmd/wsitools/` using cobra.
