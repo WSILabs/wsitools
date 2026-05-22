@@ -224,7 +224,7 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 	var thumbnail, label, macro opentile.AssociatedImage
 	var otherAssoc []opentile.AssociatedImage
 	for _, a := range src.Associated() {
-		switch a.Kind() {
+		switch a.Type() {
 		case "thumbnail":
 			thumbnail = a
 		case "label":
@@ -238,7 +238,7 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 	if len(otherAssoc) > 0 {
 		var kinds []string
 		for _, a := range otherAssoc {
-			kinds = append(kinds, a.Kind())
+			kinds = append(kinds, a.Type())
 		}
 		slog.Warn("dropping associated images not supported by Aperio classifier",
 			"count", len(otherAssoc),
@@ -754,11 +754,11 @@ func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty int) ([]byte,
 func writeOneAssociated(w *streamwriter.Writer, a opentile.AssociatedImage) error {
 	bs, err := a.Bytes()
 	if err != nil {
-		return fmt.Errorf("associated %q bytes: %w", a.Kind(), err)
+		return fmt.Errorf("associated %q bytes: %w", a.Type(), err)
 	}
 	var subfileType uint32
 	var wsiImageType string
-	switch a.Kind() {
+	switch a.Type() {
 	case "thumbnail":
 		subfileType = 0
 		wsiImageType = tiff.WSIImageTypeThumbnail
@@ -777,7 +777,7 @@ func writeOneAssociated(w *streamwriter.Writer, a opentile.AssociatedImage) erro
 	}
 	comp, photo, err := mapAssociatedCompression(a.Compression())
 	if err != nil {
-		return fmt.Errorf("associated %q compression: %w", a.Kind(), err)
+		return fmt.Errorf("associated %q compression: %w", a.Type(), err)
 	}
 	if err := w.AddStripped(streamwriter.StrippedSpec{
 		Width:           uint32(a.Size().W),
@@ -791,7 +791,7 @@ func writeOneAssociated(w *streamwriter.Writer, a opentile.AssociatedImage) erro
 		NewSubfileType:  subfileType,
 		WSIImageType:    wsiImageType,
 	}); err != nil {
-		return fmt.Errorf("AddStripped %q: %w", a.Kind(), err)
+		return fmt.Errorf("AddStripped %q: %w", a.Type(), err)
 	}
 	return nil
 }

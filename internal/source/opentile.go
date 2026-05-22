@@ -131,7 +131,7 @@ type opentileAssociated struct {
 }
 
 func (a *opentileAssociated) Kind() string {
-	return a.a.Kind()
+	return a.a.Type()
 }
 func (a *opentileAssociated) Size() image.Point {
 	sz := a.a.Size()
