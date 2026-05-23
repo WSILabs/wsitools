@@ -3,9 +3,9 @@ module github.com/cornish/wsitools
 go 1.26.2
 
 require (
-	github.com/cornish/opentile-go v0.19.0
 	github.com/spf13/cobra v1.10.2
 	github.com/vbauerster/mpb/v8 v8.12.0
+	github.com/wsilabs/opentile-go v0.21.0
 	golang.org/x/image v0.39.0
 )
 

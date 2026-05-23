@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	opentile "github.com/cornish/opentile-go"
-	_ "github.com/cornish/opentile-go/formats/all"
-	svsfmt "github.com/cornish/opentile-go/formats/svs"
+	opentile "github.com/wsilabs/opentile-go"
+	_ "github.com/wsilabs/opentile-go/formats/all"
+	svsfmt "github.com/wsilabs/opentile-go/formats/svs"
 
 	"github.com/cornish/wsitools/internal/codec"
 	jpegcodec "github.com/cornish/wsitools/internal/codec/jpeg"

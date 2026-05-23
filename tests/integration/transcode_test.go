@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	opentile "github.com/cornish/opentile-go"
-	_ "github.com/cornish/opentile-go/formats/all"
+	opentile "github.com/wsilabs/opentile-go"
+	_ "github.com/wsilabs/opentile-go/formats/all"
 )
 
 // v02Codecs lists the 4 novel codecs added in v0.2 that produce generic-TIFF

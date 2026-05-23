@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"image"
 
-	opentile "github.com/cornish/opentile-go"
-	_ "github.com/cornish/opentile-go/formats/all"
-	svsfmt "github.com/cornish/opentile-go/formats/svs"
+	opentile "github.com/wsilabs/opentile-go"
+	_ "github.com/wsilabs/opentile-go/formats/all"
+	svsfmt "github.com/wsilabs/opentile-go/formats/svs"
 )
 
 // Open is the entry point. Opens the file via opentile-go, then routes

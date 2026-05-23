@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	opentile "github.com/cornish/opentile-go"
+	opentile "github.com/wsilabs/opentile-go"
 	"github.com/spf13/cobra"
 
 	codec "github.com/cornish/wsitools/internal/codec"
