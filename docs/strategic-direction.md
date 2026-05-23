@@ -20,46 +20,177 @@ CLI consumer.
 ## 1. Rounding out opentile-go (becomes the "openslide for Go")
 
 opentile-go today handles every hard part of slide access except returning
-decoded pixels. Closing that gap:
+decoded pixels. Closing that gap means a meaningful API redesign in
+addition to adding the decode layer — the current public surface is built
+around a `Tiler` interface that only exposes compressed tile bytes, and
+extending it for decoded operations would force every format implementer
+to grow in lockstep. Better shape: collapse the public surface to a
+single `*Slide` struct that owns the format-specific tile reader as an
+*internal* detail and exposes both raw and decoded operations as methods.
 
-- **`opentile/region` subpackage.** Region reading for arbitrary
-  `(level, x, y, w, h)` rectangles. Decodes source tiles that intersect
-  the region, blits into a destination raster, returns RGB(A). ~500 LOC of
-  Go on top of the codec layer.
-- **`Slide.Properties() map[string]string`.** Flat string-keyed view over
-  the existing typed `Metadata`. Lets pathology code use openslide-shaped
-  property keys (`openslide.mpp-x`, `openslide.objective-power`,
-  `aperio.AppMag`, etc.) when convenient. ~50 LOC adapter.
-- **`Slide.Thumbnail(maxDim) ([]byte, w, h)`.** Decoded thumbnail at
-  requested max dimension; picks the best associated image or downsamples
-  from a pyramid level.
-- **`Slide.BestLevelForDownsample(d)`.** Trivial helper.
-- **Cache policy decision.** Whether `region` reads cache decoded tiles.
-  Deferrable until the first interactive consumer (tile-server) needs it;
-  one-shot consumers (region CLI) don't.
+### Public API shape (opentile-go v1.0)
 
-Net result: opentile-go ships a region API + decoded-image surface roughly
-equivalent to openslide's, with a coherent Go interface.
+The Go-idiomatic pattern: `*Slide` is a concrete struct (not an
+interface); the format-specific reader becomes an unexported interface
+inside opentile-go. Same architectural pattern as `*tls.Conn` wrapping
+`net.Conn`, `*sql.DB` wrapping a driver, etc.
+
+```go
+package opentile
+
+type Slide struct { /* unexported */ }
+
+// Construction
+func OpenFile(path string) (*Slide, error)
+func Open(r io.ReaderAt, size int64, opts ...Option) (*Slide, error)
+func (s *Slide) Close() error
+
+// Format detection + basic surface
+func (s *Slide) Format() Format
+func (s *Slide) Metadata() Metadata
+func (s *Slide) Levels() []Level
+func (s *Slide) Associated() []AssociatedImage
+
+// Raw tile access (compressed bytes — bit-exact paths)
+func (s *Slide) RawTile(level, tx, ty int) ([]byte, error)
+func (s *Slide) RawTileInto(level, tx, ty int, dst []byte) (n int, err error)
+
+// Decoded tile access (single tile, RGB by default)
+func (s *Slide) DecodedTile(level, tx, ty int) (*Image, error)
+func (s *Slide) DecodedTileInto(level, tx, ty int, dst *Image) error
+
+// Decoded region read (arbitrary rectangle, in L0 pixel coordinates)
+func (s *Slide) ReadRegion(level, x, y, w, h int) (*Image, error)
+func (s *Slide) ReadRegionInto(level, x, y int, dst *Image) error
+
+// Convenience
+func (s *Slide) Thumbnail(maxDim int) (*Image, error)
+func (s *Slide) BestLevelForDownsample(downsample float64) int
+```
+
+`AssociatedImage` keeps its current shape but gains a decoded accessor
+alongside the existing raw-bytes accessor:
+
+```go
+type AssociatedImage struct { /* ... */ }
+func (a AssociatedImage) Type() string       // label | macro | thumbnail | overview | ...
+func (a AssociatedImage) Size() image.Point
+func (a AssociatedImage) Compression() Compression
+func (a AssociatedImage) RawBytes() ([]byte, error)  // bit-exact passthrough
+func (a AssociatedImage) Decoded() (*Image, error)   // decoded pixels
+```
+
+`Level` is a value-type struct (no methods); operations take a level
+index. Avoids the `lvl.TileInto(tx, ty, dst)` style that lets callers
+ignore which slide a level belongs to.
+
+```go
+type Level struct {
+    Width, Height       int
+    TileWidth, TileHeight int
+    Compression         Compression
+    // ... other inspection-only fields
+}
+```
+
+### Pixel format
+
+Decoded operations default to **RGB** (3 bytes per pixel, no alpha).
+Reasoning: WSI imagery is opaque, so alpha is wasted memory; libjpeg-turbo
+decodes RGB natively (no intermediate copy); strip-based pipelines (DZI)
+save ~25 % memory at RGB vs RGBA. Callers who want stdlib `image.NRGBA`
+interop can opt in via the `*Into` variants with an RGBA destination, or
+use a helper conversion.
+
+**BGRA is not supported.** openslide returns BGRA because of a C-era
+little-endian byte-swap optimization for 32-bit reads. Go has no need to
+inherit that.
+
+```go
+type PixelFormat int
+
+const (
+    PixelFormatRGB   PixelFormat = iota  // 3 bytes per pixel, no alpha
+    PixelFormatRGBA                      // 4 bytes per pixel, alpha = 0xFF
+)
+
+type Image struct {
+    Width, Height int
+    Stride        int           // bytes per row; can over-allocate for SIMD alignment
+    Format        PixelFormat
+    Pix           []byte        // len(Pix) == Stride * Height
+}
+
+func NewImage(w, h int) *Image                                // RGB
+func NewImageFormat(w, h int, fmt PixelFormat) *Image         // explicit
+```
+
+Decoded-method default returns are RGB; pass an RGBA-formatted `*Image`
+to `ReadRegionInto` / `DecodedTileInto` to get RGBA output.
+
+### Coordinate convention for `ReadRegion`
+
+`(x, y)` are in **L0 pixel coordinates**, regardless of the requested
+`level`. This matches openslide's convention so pathology code calibrated
+to that convention works without translation, and it makes the "give me
+this rectangle at this magnification" intent unambiguous (you specify
+where on the slide independent of which pyramid level provides the
+sampled output).
+
+### What's NOT in the surface (intentionally)
+
+- **No `Slide.Properties() map[string]string` flat-string adapter.**
+  `Slide.Metadata()` already returns typed metadata with `Make`, `Model`,
+  `Software`, `DateTime`, `MPP`, `Magnification`, etc. Iterating known
+  fields is a 5-line helper. Vendor-specific properties grow on the typed
+  struct (sub-structs or `Metadata.Vendor map[string]string` escape
+  hatch) rather than flattening everything to strings.
+- **No "Slide" interface.** The format-specific reader is unexported.
+  Consumers see only the concrete `*Slide` struct.
+- **No streaming/iterator API for tiles.** `for _, lvl := range slide.Levels()`
+  + nested tile loops handle the use case. Add iterators if a real
+  consumer materialises.
+
+### Cache policy
+
+Whether `ReadRegion` and `DecodedTile` cache decoded tiles between calls
+is deferrable. Tile-server consumers want it; one-shot CLI consumers
+don't. Add as an `Option` to `Open` / `OpenFile` when the first
+interactive consumer needs it.
+
+### Net result
+
+opentile-go v1.0 ships a single-concrete-type API surface that handles
+the full slide-reading workflow (raw bytes, decoded tiles, region reads,
+thumbnails, metadata) in one place. The format dispatch infrastructure
+(currently the public `Tiler` interface) becomes an unexported
+implementation detail. Consumers think about "the slide," not about
+which interface defines which operation.
 
 ---
 
 ## 2. Deduping code (the codec lift)
 
-This is the structural simplification that makes Section 1 possible
-without bloating opentile-go for current consumers.
+This is the structural simplification that makes Section 1's decoded
+operations possible without bloating opentile-go for consumers that only
+need raw-tile access.
 
 - **Lift `wsitools/internal/decoder` + `wsitools/internal/codec/*` into
   opentile-go** as `opentile/codec/{jpeg, jpegxl, avif, webp, htj2k,
   jpeg2000}` subpackages. Each subpackage registers itself against a small
-  codec interface via `init()` — same registry pattern wsitools already
-  uses internally.
-- **Subpackage import means cgo deps are opt-in.** Existing opentile-go
-  users who only want tile-byte access don't import `opentile/codec/*` and
-  pay no new dependency cost. Users wanting region reads import the
-  specific codecs they need (or `opentile/codec/all` for everything).
+  unexported codec interface via `init()` — same registry pattern
+  wsitools already uses internally.
+- **Subpackage import means cgo deps are opt-in.** Consumers who only
+  need `Slide.RawTile` / `Slide.Levels` / `Slide.Metadata` don't import
+  `opentile/codec/*` and pay no new dependency cost. Calling
+  `Slide.DecodedTile` / `Slide.ReadRegion` / `Slide.Thumbnail` without
+  having imported the relevant codec returns a clear "no decoder
+  registered for compression X" error at call time (similar to how
+  `image.Decode` requires importing `_ "image/jpeg"`). For ergonomics,
+  `opentile/codec/all` blanket-imports every codec.
 - **wsitools shrinks** — `internal/decoder` and `internal/codec/*`
   disappear; transcode/downsample import codecs from opentile-go. Single
-  set of cgo wrappers, two consumers (opentile-go's region reader +
+  set of cgo wrappers, two consumers (opentile-go's decode layer +
   wsitools' encode pipelines).
 - **wsitools becomes purely CLI** on top of a complete library. No more
   codec maintenance in two places.
@@ -94,7 +225,7 @@ over the library.
 ### Read-side utilities (depend on `region`)
 
 - `wsitools region --x --y --w --h --level -o out.png` — extract an
-  arbitrary rectangle. First real consumer of the region API.
+  arbitrary rectangle. First real consumer of `Slide.ReadRegion`.
 - `wsitools dump-tile` — single tile's compressed bytes to file/stdout.
   Debug aid.
 - `wsitools dump-ifds --raw` — full tiffinfo-style dump per IFD.
@@ -342,19 +473,21 @@ contributors; personal-shaped names are most honest about scope.
 
 Roughly the order of leverage and risk:
 
-1. **Move the GH repos to the new org** (Section 4). Do this BEFORE the
-   codec lift, so the cumulative pain of import-path updates happens
-   exactly once.
-2. **Codec lift** (Section 2) — opentile-go v0.20 (or v0.21 if v0.20 was
-   the org-move release). Pure refactor; wsitools imports change but
-   behavior stays. Unblocks everything downstream.
-3. **`opentile/region` + properties + thumbnail** (Section 1) —
-   opentile-go v0.21 / v1.0 (depending on whether you want to mark API
-   stability at this milestone).
-4. **`wsitools region` CLI** — first real consumer of the new region
-   API. Validates the surface.
+1. ~~**Move the GH repos to the new org**~~ — done (WSILabs/opentile-go
+   at v0.21.0, WSILabs/wsitools at v0.8.1).
+2. **Codec lift** (Section 2) — opentile-go v0.22 (additive: new
+   `opentile/codec/*` subpackages, no public API change yet).
+   Pure refactor on the wsitools side; codec imports change but behavior
+   stays. Unblocks everything downstream.
+3. **API redesign: `*Slide` struct + decoded operations** (Section 1) —
+   opentile-go **v1.0**. Drops the public `Tiler` interface, replaces
+   with `*Slide`, adds `RawTile`/`DecodedTile`/`ReadRegion`/`Thumbnail`
+   methods. This is the API stability marker; v1.x onward is additive.
+4. **`wsitools region` CLI** — first real consumer of `Slide.ReadRegion`.
+   Validates the surface.
 5. **JPEG IDCT scale-factor** in the JPEG codec wrapper. Small but high-
-   leverage. Could land alongside the codec lift.
+   leverage. Could land alongside the codec lift (#2) or with the v1.0
+   API redesign (#3).
 6. **Strip-based pyramid lift + `wsitools dzsave`** (Section 3) — the
    big performance piece. Plenty of room to benchmark against libvips and
    iterate.
@@ -378,12 +511,12 @@ on each other in lock-step — you can pick any path and move forward.
 
 ## 6. Open decisions parked for later
 
-- **New organization name.** Whichever flavour you pick from Section 4;
-  this needs to happen before any sequencing step starts.
-- **Module version cut for the codec lift.** Whether to call it `v0.20`
-  (minor release with internal restructure) or `v1.0` (signal API
-  stability now that opentile-go is feature-complete-ish).
-- **`opentile/region` cache policy.** Whether reads cache decoded tiles.
+- ~~**New organization name.**~~ Settled: `WSILabs`. Both repos relocated.
+- ~~**Module version cut for the codec lift.**~~ Settled: codec lift lands
+  in opentile-go v0.22 (additive, no public API change), API redesign
+  with `*Slide` lands in v1.0.
+- **Decoded-tile cache policy** (Section 1). Whether `Slide.ReadRegion` /
+  `Slide.DecodedTile` cache decoded tiles between calls.
   Acceptable to defer until the tile-server consumer surfaces.
 - **DZI command name.** `dzsave` (matches libvips' name) or `dzi`
   (matches the format name). Naming bikeshed worth one minute of
@@ -391,3 +524,8 @@ on each other in lock-step — you can pick any path and move forward.
 - **DICOM-WSI scope** — pure writer, or both read + write? If both,
   reading needs DICOM-WSI integration into opentile-go's format
   dispatch, which is a fair chunk of work.
+- **Vendor-properties escape hatch on `Metadata`.** Whether to add a
+  `Metadata.Vendor map[string]string` field for vendor-specific
+  key/value properties (e.g., Aperio's ImageDescription lines like
+  `Filtered = 5|StripeWidth = 2040`) that aren't represented in the
+  typed surface today. Add when the first caller needs it.
