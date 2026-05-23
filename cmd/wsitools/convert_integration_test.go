@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/source"
 )
 
 func testDir(t *testing.T) string {

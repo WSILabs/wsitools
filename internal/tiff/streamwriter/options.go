@@ -3,7 +3,7 @@ package streamwriter
 import (
 	"time"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 // Options configures a new Writer.

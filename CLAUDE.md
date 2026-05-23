@@ -5,7 +5,7 @@ v0.2+ adds transcode + more source formats.
 
 ## Module path
 
-`github.com/cornish/wsitools`
+`github.com/wsilabs/wsitools`
 
 ## Conventions
 

@@ -3,7 +3,7 @@ package streamwriter
 import (
 	"fmt"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 // LevelSpec describes one pyramid level. Compressed tiles are streamed

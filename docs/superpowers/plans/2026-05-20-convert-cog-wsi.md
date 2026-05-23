@@ -65,7 +65,7 @@ package cogwsi_test
 import (
 	"testing"
 
-	"github.com/cornish/wsitools/internal/cogwsi"
+	"github.com/wsilabs/wsitools/internal/cogwsi"
 )
 
 func TestPackageCompiles(t *testing.T) {
@@ -76,7 +76,7 @@ func TestPackageCompiles(t *testing.T) {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `go test ./internal/cogwsi/...`
-Expected: `package github.com/cornish/wsitools/internal/cogwsi: no Go files in ...`
+Expected: `package github.com/wsilabs/wsitools/internal/cogwsi: no Go files in ...`
 
 - [ ] **Step 3: Create the package files (stubs)**
 
@@ -110,7 +110,7 @@ type Writer struct {
 - [ ] **Step 4: Run the test and verify it passes**
 
 Run: `go test ./internal/cogwsi/...`
-Expected: `ok  	github.com/cornish/wsitools/internal/cogwsi`
+Expected: `ok  	github.com/wsilabs/wsitools/internal/cogwsi`
 
 - [ ] **Step 5: Add a stub convert command and a flag-parsing test**
 
@@ -474,7 +474,7 @@ Create `internal/cogwsi/tags.go`:
 ```go
 package cogwsi
 
-import "github.com/cornish/wsitools/internal/wsiwriter"
+import "github.com/wsilabs/wsitools/internal/wsiwriter"
 
 // WSI tag IDs reused from internal/wsiwriter (range 65080–65084).
 const (
@@ -1463,7 +1463,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/cogwsi"
+	"github.com/wsilabs/wsitools/internal/cogwsi"
 )
 
 func TestWriterCreateAndSpoolLevel(t *testing.T) {
@@ -2229,8 +2229,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cornish/wsitools/internal/cogwsi"
-	"github.com/cornish/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/cogwsi"
+	"github.com/wsilabs/wsitools/internal/source"
 )
 
 var (
@@ -2554,7 +2554,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/source"
 )
 
 func testDir(t *testing.T) string {

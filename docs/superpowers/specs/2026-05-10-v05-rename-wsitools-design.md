@@ -58,8 +58,8 @@ Splitting the work cleanly avoids the coupling:
 
 | Where | Change |
 |---|---|
-| `go.mod` | `module github.com/cornish/wsi-tools` → `module github.com/cornish/wsitools` |
-| All Go imports | `"github.com/cornish/wsi-tools/..."` → `"github.com/cornish/wsitools/..."` (one sed pass; ~161 grep hits across `*.go`, `*.md`, `Makefile`, `*.yml`, `go.mod`) |
+| `go.mod` | `module github.com/cornish/wsi-tools` → `module github.com/wsilabs/wsitools` |
+| All Go imports | `"github.com/cornish/wsi-tools/..."` → `"github.com/wsilabs/wsitools/..."` (one sed pass; ~161 grep hits across `*.go`, `*.md`, `Makefile`, `*.yml`, `go.mod`) |
 | `cmd/wsi-tools/` | rename to `cmd/wsitools/` (binary name follows directory name) |
 | `cmd/wsitools/main.go` | `cobra.Command{Use: "wsi-tools", ...}` → `Use: "wsitools"` |
 | `cmd/wsitools/version.go` | `fmt.Printf("wsi-tools %s\n", Version)` → `fmt.Printf("wsitools %s\n", Version)` (the `Version` constant itself doesn't change) |
@@ -113,7 +113,7 @@ surface, and its tests. The rename is a pure substitution exercise:
    - `go.mod`: change `module github.com/cornish/wsi-tools` line. Same
      for `go.sum` if any reference appears (typically none).
    - `*.go` files: sed-replace ONLY the import path
-     `"github.com/cornish/wsi-tools/"` → `"github.com/cornish/wsitools/"`.
+     `"github.com/cornish/wsi-tools/"` → `"github.com/wsilabs/wsitools/"`.
      This is precise enough to leave the
      `cmd/wsitools/transcode.go::buildProvenanceDesc` literal
      `"wsi-tools/%s transcode source=..."` untouched (it stays).
@@ -140,7 +140,7 @@ surface, and its tests. The rename is a pure substitution exercise:
 10. **Post-release bump** `Version` → `"0.6.0-dev"`, commit, push.
 11. **Verify v0.5.0 tag CI passes** (project policy: never declare shipped
     until tag CI is green).
-12. **Rename the GitHub repo** `cornish/wsi-tools` → `cornish/wsitools`
+12. **Rename the GitHub repo** `cornish/wsi-tools` → `wsilabs/wsitools`
     AFTER v0.5.0 tag CI is green. GitHub auto-redirects the old URL.
     Update local `origin` remote.
 13. **Move local working directory** `/Users/cornish/GitHub/wsi-tools/`
@@ -237,10 +237,10 @@ and will swap in v0.5.1 once opentile-go v0.14.1 is in place.
 
 ### Breaking (install path + binary name)
 
-- Module path: `github.com/cornish/wsi-tools` → `github.com/cornish/wsitools`.
-- Repo URL: `cornish/wsi-tools` → `cornish/wsitools` (GitHub auto-redirects old URLs).
+- Module path: `github.com/cornish/wsi-tools` → `github.com/wsilabs/wsitools`.
+- Repo URL: `cornish/wsi-tools` → `wsilabs/wsitools` (GitHub auto-redirects old URLs).
 - Binary name: `wsi-tools` → `wsitools`.
-- Install: `go install github.com/cornish/wsitools/cmd/wsitools@latest`.
+- Install: `go install github.com/wsilabs/wsitools/cmd/wsitools@latest`.
 
 ### Unchanged
 

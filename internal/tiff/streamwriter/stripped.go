@@ -3,7 +3,7 @@ package streamwriter
 import (
 	"fmt"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 // StrippedSpec describes a single-strip image (label/macro/thumbnail/overview

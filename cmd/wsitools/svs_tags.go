@@ -1,6 +1,6 @@
 package main
 
-import "github.com/cornish/wsitools/internal/tiff"
+import "github.com/wsilabs/wsitools/internal/tiff"
 
 // buildSVSL0ExtraTags returns the Aperio-specific tag set for the L0
 // pyramid IFD of an SVS-shaped transcode output. desc is the source

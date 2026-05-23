@@ -14,8 +14,8 @@
 
 | Path | Action | Responsibility |
 |---|---|---|
-| `go.mod` | modify | `module github.com/cornish/wsi-tools` → `module github.com/cornish/wsitools` |
-| All `*.go` files | modify | sed-replace import path only: `"github.com/cornish/wsi-tools/"` → `"github.com/cornish/wsitools/"`. Leave non-import literal strings untouched. |
+| `go.mod` | modify | `module github.com/cornish/wsi-tools` → `module github.com/wsilabs/wsitools` |
+| All `*.go` files | modify | sed-replace import path only: `"github.com/cornish/wsi-tools/"` → `"github.com/wsilabs/wsitools/"`. Leave non-import literal strings untouched. |
 | `cmd/wsi-tools/` | rename | `git mv cmd/wsi-tools cmd/wsitools` (preserves history) |
 | `cmd/wsitools/main.go` | modify | `cobra.Command{Use: "wsi-tools", ...}` → `Use: "wsitools"` |
 | `cmd/wsitools/version.go` | modify | `fmt.Printf("wsi-tools %s\n", Version)` → `fmt.Printf("wsitools %s\n", Version)` |
@@ -73,17 +73,17 @@ Expected: HEAD is at the spec commit (`9c02fd5` or similar), working tree clean,
 - [ ] **Step 2: Update go.mod module line**
 
 ```bash
-sed -i '' 's|^module github.com/cornish/wsi-tools$|module github.com/cornish/wsitools|' go.mod
+sed -i '' 's|^module github.com/cornish/wsi-tools$|module github.com/wsilabs/wsitools|' go.mod
 head -1 go.mod
 ```
 
-Expected: `module github.com/cornish/wsitools`.
+Expected: `module github.com/wsilabs/wsitools`.
 
 - [ ] **Step 3: Sed-replace import paths in all .go files**
 
 ```bash
 find . -type f -name '*.go' -not -path './sample_files/*' \
-  -exec sed -i '' 's|github.com/cornish/wsi-tools/|github.com/cornish/wsitools/|g' {} +
+  -exec sed -i '' 's|github.com/cornish/wsi-tools/|github.com/wsilabs/wsitools/|g' {} +
 ```
 
 Verify the only remaining `github.com/cornish/wsi-tools` references are intentional (none in *.go after this pass):
@@ -292,8 +292,8 @@ Note the counts — they'll drop to zero after this task (or only stay >0 for th
 The README needs four kinds of edit:
 
 1. Title: `# wsi-tools` → `# wsitools`
-2. CI badge URL: `cornish/wsi-tools/actions/workflows/ci.yml` → `cornish/wsitools/actions/workflows/ci.yml`. Also pkg.go.dev badge: `pkg.go.dev/badge/github.com/cornish/wsi-tools.svg` → `pkg.go.dev/badge/github.com/cornish/wsitools.svg`.
-3. Install command: `go install github.com/cornish/wsi-tools/cmd/wsi-tools@latest` → `go install github.com/cornish/wsitools/cmd/wsitools@latest`.
+2. CI badge URL: `cornish/wsi-tools/actions/workflows/ci.yml` → `wsilabs/wsitools/actions/workflows/ci.yml`. Also pkg.go.dev badge: `pkg.go.dev/badge/github.com/cornish/wsi-tools.svg` → `pkg.go.dev/badge/github.com/wsilabs/wsitools.svg`.
+3. Install command: `go install github.com/cornish/wsi-tools/cmd/wsi-tools@latest` → `go install github.com/wsilabs/wsitools/cmd/wsitools@latest`.
 4. Every prose mention of `wsi-tools` (subcommand examples, "v0.4 — what's here", etc.).
 
 A blanket sed handles all four cleanly because every `wsi-tools` in this file is a target:
@@ -309,7 +309,7 @@ Expected: zero hits remain. Inspect to confirm:
 head -25 README.md
 ```
 
-Expected first 25 lines: title now `# wsitools`, badges link to `cornish/wsitools`, "v0.4 — what's here" intact.
+Expected first 25 lines: title now `# wsitools`, badges link to `wsilabs/wsitools`, "v0.4 — what's here" intact.
 
 - [ ] **Step 3: Update CLAUDE.md**
 
@@ -421,10 +421,10 @@ ships a parser that accepts both prefixes.
 
 ### Breaking (install path + binary name)
 
-- Module path: `github.com/cornish/wsi-tools` → `github.com/cornish/wsitools`.
-- Repo URL: `cornish/wsi-tools` → `cornish/wsitools` (GitHub auto-redirects old URLs).
+- Module path: `github.com/cornish/wsi-tools` → `github.com/wsilabs/wsitools`.
+- Repo URL: `cornish/wsi-tools` → `wsilabs/wsitools` (GitHub auto-redirects old URLs).
 - Binary name: `wsi-tools` → `wsitools`.
-- Install: `go install github.com/cornish/wsitools/cmd/wsitools@latest`.
+- Install: `go install github.com/wsilabs/wsitools/cmd/wsitools@latest`.
 
 ### Unchanged
 
@@ -557,7 +557,7 @@ Next, irreversible:
   gh release create v0.5.0 --title "v0.5.0 — project rename"
   # post-release: bump Version to 0.6.0-dev + commit + push
   # verify v0.5.0 tag CI on macOS + Windows
-  # rename GitHub repo cornish/wsi-tools -> cornish/wsitools
+  # rename GitHub repo cornish/wsi-tools -> wsilabs/wsitools
   # update local origin remote
   # rename local working dir
 ```
@@ -638,12 +638,12 @@ If either fails, **STOP and triage before doing the GitHub repo rename**. The re
 gh repo rename wsitools --repo cornish/wsi-tools
 ```
 
-Expected: GitHub renames the repo. Existing URLs to `cornish/wsi-tools` auto-redirect to `cornish/wsitools`. Releases, tags, issues, PRs all carry over.
+Expected: GitHub renames the repo. Existing URLs to `cornish/wsi-tools` auto-redirect to `wsilabs/wsitools`. Releases, tags, issues, PRs all carry over.
 
 Verify:
 
 ```bash
-gh repo view cornish/wsitools | head -3
+gh repo view wsilabs/wsitools | head -3
 ```
 
 Expected: shows the renamed repo.
@@ -652,7 +652,7 @@ Expected: shows the renamed repo.
 
 ```bash
 git remote -v
-git remote set-url origin https://github.com/cornish/wsitools.git
+git remote set-url origin https://github.com/wsilabs/wsitools.git
 git remote -v
 git fetch origin
 ```
@@ -735,7 +735,7 @@ B. After opentile-go v0.14.1 is published, in wsitools:
 1. **All 6 tasks committed?** `git log --oneline v0.4.1..v0.5.0` — expect ~5 commits (one per task plus the version bump).
 2. **All tests pass on the v0.5.0 tag?** Both macOS and Windows green per CI.
 3. **`./bin/wsitools version`** prints `wsitools 0.5.0` (tagged build) or `0.6.0-dev` (post-release main).
-4. **GitHub repo URL works**: `https://github.com/cornish/wsitools` resolves; `https://github.com/cornish/wsi-tools` redirects to it.
+4. **GitHub repo URL works**: `https://github.com/wsilabs/wsitools` resolves; `https://github.com/cornish/wsi-tools` redirects to it.
 5. **Old release URLs still work**: `https://github.com/cornish/wsi-tools/releases/tag/v0.4.0` redirects to the new path.
 6. **No `wsi-tools` references** in active prose: README, CLAUDE.md, docs/roadmap.md should all be clean.
 7. **Historical artifacts untouched**: `docs/superpowers/specs/`, `docs/superpowers/plans/`, CHANGELOG entries `[0.1.0]`–`[0.4.1]` still say `wsi-tools` (intentional).

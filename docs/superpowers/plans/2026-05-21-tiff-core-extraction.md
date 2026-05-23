@@ -124,7 +124,7 @@ func TestTypeByteSize(t *testing.T) {
 
 Run: `cd /Users/cornish/GitHub/wsitools && go test ./internal/tiff/...`
 
-Expected: `package github.com/cornish/wsitools/internal/tiff: no Go files`
+Expected: `package github.com/wsilabs/wsitools/internal/tiff: no Go files`
 
 - [ ] **Step 3: Create doc.go**
 
@@ -1596,7 +1596,7 @@ done
 Then for the test file's import of itself:
 
 ```bash
-sed -i '' 's|"github.com/cornish/wsitools/internal/cogwsi"|"github.com/cornish/wsitools/internal/tiff/cogwsiwriter"|g' internal/tiff/cogwsiwriter/*.go
+sed -i '' 's|"github.com/wsilabs/wsitools/internal/cogwsi"|"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"|g' internal/tiff/cogwsiwriter/*.go
 ```
 
 Check `internal/tiff/cogwsiwriter/writer_test.go` (the external test file) imports `cogwsiwriter` as expected.
@@ -1606,7 +1606,7 @@ Check `internal/tiff/cogwsiwriter/writer_test.go` (the external test file) impor
 In `cmd/wsitools/convert.go`, change the import line and all qualified references:
 
 ```bash
-sed -i '' 's|"github.com/cornish/wsitools/internal/cogwsi"|"github.com/cornish/wsitools/internal/tiff/cogwsiwriter"|g' cmd/wsitools/convert.go
+sed -i '' 's|"github.com/wsilabs/wsitools/internal/cogwsi"|"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"|g' cmd/wsitools/convert.go
 sed -i '' 's/\bcogwsi\./cogwsiwriter\./g' cmd/wsitools/convert.go
 ```
 
@@ -1646,7 +1646,7 @@ git rm internal/tiff/cogwsiwriter/ifd.go internal/tiff/cogwsiwriter/ifd_test.go
 
 In `internal/tiff/cogwsiwriter/writer.go`:
 
-1. Add `"github.com/cornish/wsitools/internal/tiff"` to the import block.
+1. Add `"github.com/wsilabs/wsitools/internal/tiff"` to the import block.
 2. Replace `newIFDBuilder(plan.BigTIFF)` with `tiff.NewEntryBuilder(plan.BigTIFF)` (every occurrence; should be 2–3 sites in `Close`).
 3. Replace all in-package references that used the deleted symbols:
    - `b.AddTileOffsets(...)` keeps working (now a `tiff.EntryBuilder` method).
@@ -1662,7 +1662,7 @@ Iterate until clean.
 
 In `internal/tiff/cogwsiwriter/layout.go`:
 
-1. Add `"github.com/cornish/wsitools/internal/tiff"` to the import block (if not already there).
+1. Add `"github.com/wsilabs/wsitools/internal/tiff"` to the import block (if not already there).
 2. Delete the local `classicTagEntrySize`, `bigTIFFTagEntrySize`, `classicHeaderSize`, `bigTIFFHeaderSize` constants — they're now in `internal/tiff/entry.go` and `header.go`.
 3. Replace `ifdRecordSize(tagCount, useBig)` calls with `uint64(tiff.IFDRecordSize(tagCount, useBig))`. (The local function may stay as a thin wrapper if many call sites; or inline-call `tiff.IFDRecordSize`. Up to implementer.)
 4. Replace local `classicHeaderSize`/`bigTIFFHeaderSize` references with `tiff.HeaderSize(useBig)`.
@@ -1716,7 +1716,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 // ErrInvalidAssocKind is returned by AddAssociated when the spec's
@@ -1955,7 +1955,7 @@ package streamwriter_test
 import (
 	"testing"
 
-	"github.com/cornish/wsitools/internal/tiff/streamwriter"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
 func TestPackageCompiles(t *testing.T) {
@@ -1967,7 +1967,7 @@ func TestPackageCompiles(t *testing.T) {
 
 Run: `cd /Users/cornish/GitHub/wsitools && go test ./internal/tiff/streamwriter/...`
 
-Expected: `package github.com/cornish/wsitools/internal/tiff/streamwriter: no Go files`.
+Expected: `package github.com/wsilabs/wsitools/internal/tiff/streamwriter: no Go files`.
 
 - [ ] **Step 3: Create doc.go + options.go + writer stub**
 
@@ -1993,7 +1993,7 @@ package streamwriter
 import (
 	"time"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 // Options configures a new Writer.
@@ -2070,8 +2070,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/tiff"
-	"github.com/cornish/wsitools/internal/tiff/streamwriter"
+	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
 func TestCreateAndCloseEmpty(t *testing.T) {
@@ -2227,7 +2227,7 @@ git commit -m "feat(streamwriter): Writer body with Create/AddLevel/WriteTile/Ad
 Read the existing file at `/Users/cornish/GitHub/wsitools/internal/wsiwriter/svs_roundtrip_test.go`. Create `internal/tiff/streamwriter/svs_roundtrip_test.go` with the same intent but adapted:
 
 1. Package: `package streamwriter_test`.
-2. Import: `"github.com/cornish/wsitools/internal/tiff/streamwriter"`.
+2. Import: `"github.com/wsilabs/wsitools/internal/tiff/streamwriter"`.
 3. Calls: replace `wsiwriter.Create(... WithFoo(x) ...)` with `streamwriter.Create(path, streamwriter.Options{Foo: x, ...})`.
 4. `AddAssociated` → `AddStripped`. The spec types differ slightly; replace v0.6.0 `AssociatedSpec{Kind: ..., ...}` with `StrippedSpec{WSIImageType: ..., ...}`.
 5. `WithLayout(LayoutSVS)` (if present) — replace with caller-supplied `ExtraTags`. For this test, that means assembling the Aperio-specific ImageDescription string + tags as `[]tiff.RawTag{{Tag: tiff.TagImageDescription, Type: tiff.TypeASCII, Value: "..."}, ...}` and passing through `LevelSpec.ExtraTags`.
@@ -2285,7 +2285,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 func TestBuildSVSL0ExtraTagsContainsImageDescription(t *testing.T) {
@@ -2326,7 +2326,7 @@ Create `cmd/wsitools/svs_tags.go`:
 ```go
 package main
 
-import "github.com/cornish/wsitools/internal/tiff"
+import "github.com/wsilabs/wsitools/internal/tiff"
 
 // buildSVSL0ExtraTags returns the Aperio-specific tag set for the L0
 // pyramid IFD of an SVS-shaped transcode output. desc is the source
@@ -2379,8 +2379,8 @@ git commit -m "feat(transcode): caller-side SVS-shape ExtraTags builders"
 
 In `cmd/wsitools/transcode.go`:
 
-1. Add `"github.com/cornish/wsitools/internal/tiff/streamwriter"` and `"github.com/cornish/wsitools/internal/tiff"` to imports.
-2. Remove `"github.com/cornish/wsitools/internal/wsiwriter"`.
+1. Add `"github.com/wsilabs/wsitools/internal/tiff/streamwriter"` and `"github.com/wsilabs/wsitools/internal/tiff"` to imports.
+2. Remove `"github.com/wsilabs/wsitools/internal/wsiwriter"`.
 
 - [ ] **Step 2: Convert `wsiwriter.Option`-style Options to the Options struct**
 
@@ -2555,8 +2555,8 @@ Read `cmd/wsitools/downsample.go` to find every `wsiwriter.X` reference. The lik
 
 In `cmd/wsitools/downsample.go`:
 
-1. Add `"github.com/cornish/wsitools/internal/tiff"` and `"github.com/cornish/wsitools/internal/tiff/streamwriter"` to the import block.
-2. Remove `"github.com/cornish/wsitools/internal/wsiwriter"`.
+1. Add `"github.com/wsilabs/wsitools/internal/tiff"` and `"github.com/wsilabs/wsitools/internal/tiff/streamwriter"` to the import block.
+2. Remove `"github.com/wsilabs/wsitools/internal/wsiwriter"`.
 
 - [ ] **Step 3: Convert `wsiwriter.Option`-style to `streamwriter.Options` struct**
 

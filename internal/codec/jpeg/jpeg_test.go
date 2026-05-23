@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/codec"
-	"github.com/cornish/wsitools/internal/decoder"
+	"github.com/wsilabs/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/decoder"
 )
 
 // TestJPEGEncoderRoundTrip verifies encode→decode fidelity using libjpeg-turbo

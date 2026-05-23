@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cornish/wsitools/internal/tiff/cogwsiwriter"
-	"github.com/cornish/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
+	"github.com/wsilabs/wsitools/internal/source"
 )
 
 var (

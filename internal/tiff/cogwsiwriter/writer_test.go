@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/tiff/cogwsiwriter"
+	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 )
 
 func TestPackageCompiles(t *testing.T) {

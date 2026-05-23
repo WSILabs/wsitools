@@ -5,7 +5,7 @@ package webp
 import (
 	"testing"
 
-	"github.com/cornish/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/codec"
 )
 
 func TestWebPEncoderRoundTrip(t *testing.T) {

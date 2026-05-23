@@ -1,4 +1,4 @@
-module github.com/cornish/wsitools
+module github.com/wsilabs/wsitools
 
 go 1.26.2
 

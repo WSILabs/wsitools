@@ -48,8 +48,8 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/cornish/wsitools/internal/codec"
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 func init() {

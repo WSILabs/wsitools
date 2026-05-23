@@ -5,7 +5,7 @@ package jpegxl
 import (
 	"testing"
 
-	"github.com/cornish/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/codec"
 )
 
 func TestJPEGXLEncoderRoundTrip(t *testing.T) {

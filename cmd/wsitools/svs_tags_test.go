@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 func TestBuildSVSL0ExtraTagsContainsImageDescription(t *testing.T) {

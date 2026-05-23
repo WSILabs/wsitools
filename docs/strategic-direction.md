@@ -168,7 +168,7 @@ Build deliverables in order:
 
 ## 4. Moving the repos to a GitHub organization
 
-Both `cornish/opentile-go` and `cornish/wsitools` currently live under a
+Both `cornish/opentile-go` and `wsilabs/wsitools` currently live under a
 personal account. Moving them to an organization (call the new owner
 `<ORG>` — final name TBD) cleans up identity, makes future related
 projects natural (`<ORG>/openwsi-go` if region ever spins off,
@@ -242,7 +242,7 @@ in lockstep.
    import from the new path. `find . -name '*.go' | xargs sed -i ''` for
    the import-statement bulk rename, plus `go mod edit -replace` if you
    need a transition period.
-4. Repeat for `cornish/wsitools` → `<ORG>/wsitools`.
+4. Repeat for `wsilabs/wsitools` → `<ORG>/wsitools`.
 5. Pre-existing versions at the old path keep working (the redirect +
    their `go.mod` self-identifying as the old path means `go get
    github.com/cornish/opentile-go@v0.19.0` still works for legacy
@@ -304,7 +304,7 @@ Before flipping the transfer:
       `github.com/<ORG>/opentile-go`; `go mod edit -require
       github.com/<ORG>/opentile-go@v0.20.0`; `go mod tidy`; `go build
       ./...`; commit.
-- [ ] Transfer `cornish/wsitools` → `<ORG>/wsitools`.
+- [ ] Transfer `wsilabs/wsitools` → `<ORG>/wsitools`.
 - [ ] In the new wsitools: edit `go.mod` to
       `module github.com/<ORG>/wsitools`; bulk-rename all internal
       imports; commit; tag the next wsitools release (probably 0.8.0

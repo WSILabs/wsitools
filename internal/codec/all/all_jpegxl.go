@@ -2,4 +2,4 @@
 
 package all
 
-import _ "github.com/cornish/wsitools/internal/codec/jpegxl"
+import _ "github.com/wsilabs/wsitools/internal/codec/jpegxl"

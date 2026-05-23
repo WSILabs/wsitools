@@ -14,12 +14,12 @@ import (
 	opentile "github.com/wsilabs/opentile-go"
 	"github.com/spf13/cobra"
 
-	codec "github.com/cornish/wsitools/internal/codec"
-	"github.com/cornish/wsitools/internal/decoder"
-	"github.com/cornish/wsitools/internal/pipeline"
-	"github.com/cornish/wsitools/internal/source"
-	"github.com/cornish/wsitools/internal/tiff"
-	"github.com/cornish/wsitools/internal/tiff/streamwriter"
+	codec "github.com/wsilabs/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/decoder"
+	"github.com/wsilabs/wsitools/internal/pipeline"
+	"github.com/wsilabs/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
 var (

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cornish/wsitools/internal/tiff"
-	"github.com/cornish/wsitools/internal/tiff/streamwriter"
+	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
 func TestWSIImageType_PyramidAndAssociated(t *testing.T) {

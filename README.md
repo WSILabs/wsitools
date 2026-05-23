@@ -1,8 +1,8 @@
 # wsitools
 
-[![CI](https://github.com/cornish/wsitools/actions/workflows/ci.yml/badge.svg)](https://github.com/cornish/wsitools/actions/workflows/ci.yml)
+[![CI](https://github.com/wsilabs/wsitools/actions/workflows/ci.yml/badge.svg)](https://github.com/wsilabs/wsitools/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Go Reference](https://pkg.go.dev/badge/github.com/cornish/wsitools.svg)](https://pkg.go.dev/github.com/cornish/wsitools)
+[![Go Reference](https://pkg.go.dev/badge/github.com/wsilabs/wsitools.svg)](https://pkg.go.dev/github.com/wsilabs/wsitools)
 
 A Swiss-army knife of utilities for whole-slide imaging (WSI) files used in digital pathology.
 
@@ -75,7 +75,7 @@ go build -tags 'nojxl noavif nowebp nohtj2k' ./cmd/wsitools   # only JPEG (v0.1 
 ## Install
 
 ```sh
-go install github.com/cornish/wsitools/cmd/wsitools@latest
+go install github.com/wsilabs/wsitools/cmd/wsitools@latest
 ```
 
 ## Usage

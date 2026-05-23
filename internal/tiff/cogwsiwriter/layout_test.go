@@ -3,7 +3,7 @@ package cogwsiwriter
 import (
 	"testing"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 func TestLayoutClassicTIFFTwoLevels(t *testing.T) {

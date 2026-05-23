@@ -3,7 +3,7 @@ package cogwsiwriter
 import (
 	"fmt"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 // BigTIFFMode controls classic vs BigTIFF selection.

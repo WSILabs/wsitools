@@ -9,5 +9,5 @@
 package all
 
 import (
-	_ "github.com/cornish/wsitools/internal/codec/jpeg"
+	_ "github.com/wsilabs/wsitools/internal/codec/jpeg"
 )

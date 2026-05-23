@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cornish/wsitools/internal/cliout"
-	"github.com/cornish/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/cliout"
+	"github.com/wsilabs/wsitools/internal/source"
 )
 
 var infoJSON *bool

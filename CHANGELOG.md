@@ -2,6 +2,33 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-05-23
+
+Relocation release: repository moved from `github.com/cornish/wsitools`
+to `github.com/wsilabs/wsitools` under the new WSILabs GitHub org. No
+behavior change; this release exists so consumers can update their
+module path:
+
+```diff
+- github.com/cornish/wsitools
++ github.com/wsilabs/wsitools
+```
+
+The old path continues to redirect at the HTTPS layer for existing
+clones, but Go module consumers must update their `go.mod` and import
+statements.
+
+### Dependencies
+
+- Upgraded `github.com/wsilabs/opentile-go` to v0.21.0 (also relocated
+  from `cornish/opentile-go`).
+
+### Install
+
+```sh
+go install github.com/wsilabs/wsitools/cmd/wsitools@v0.8.0
+```
+
 ## [0.7.0] — 2026-05-21
 
 ### Added (user-visible)
@@ -103,10 +130,10 @@ ships a parser that accepts both prefixes.
 
 ### Breaking (install path + binary name)
 
-- Module path: `github.com/cornish/wsi-tools` → `github.com/cornish/wsitools`.
-- Repo URL: `cornish/wsi-tools` → `cornish/wsitools` (GitHub auto-redirects old URLs).
+- Module path: `github.com/cornish/wsi-tools` → `github.com/wsilabs/wsitools`.
+- Repo URL: `cornish/wsi-tools` → `wsilabs/wsitools` (GitHub auto-redirects old URLs).
 - Binary name: `wsi-tools` → `wsitools`.
-- Install: `go install github.com/cornish/wsitools/cmd/wsitools@latest`.
+- Install: `go install github.com/wsilabs/wsitools/cmd/wsitools@latest`.
 
 ### Unchanged
 

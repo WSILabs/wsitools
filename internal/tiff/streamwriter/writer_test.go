@@ -11,8 +11,8 @@ import (
 
 	xtiff "golang.org/x/image/tiff"
 
-	"github.com/cornish/wsitools/internal/tiff"
-	"github.com/cornish/wsitools/internal/tiff/streamwriter"
+	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
 func TestCreateAndCloseEmpty(t *testing.T) {

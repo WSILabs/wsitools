@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/cornish/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
 // imageEntry is the internal per-IFD state held by the Writer.

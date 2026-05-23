@@ -61,9 +61,9 @@ Imports read naturally:
 
 ```go
 import (
-    "github.com/cornish/wsitools/internal/tiff"
-    "github.com/cornish/wsitools/internal/tiff/streamwriter"
-    "github.com/cornish/wsitools/internal/tiff/cogwsiwriter"
+    "github.com/wsilabs/wsitools/internal/tiff"
+    "github.com/wsilabs/wsitools/internal/tiff/streamwriter"
+    "github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 )
 
 w, _ := streamwriter.Create(path, streamwriter.Options{...})
@@ -273,8 +273,8 @@ paths and internal delegation to `internal/tiff` primitives.
 `cmd/wsitools/convert.go` updates its import:
 
 ```go
-- "github.com/cornish/wsitools/internal/cogwsi"
-+ "github.com/cornish/wsitools/internal/tiff/cogwsiwriter"
+- "github.com/wsilabs/wsitools/internal/cogwsi"
++ "github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 ```
 
 All `cogwsi.X` references become `cogwsiwriter.X`. Functionally

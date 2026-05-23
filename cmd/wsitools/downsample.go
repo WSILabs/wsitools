@@ -35,14 +35,14 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 
-	codec "github.com/cornish/wsitools/internal/codec"
-	jpegcodec "github.com/cornish/wsitools/internal/codec/jpeg"
-	"github.com/cornish/wsitools/internal/decoder"
-	"github.com/cornish/wsitools/internal/pipeline"
-	"github.com/cornish/wsitools/internal/resample"
-	"github.com/cornish/wsitools/internal/source"
-	"github.com/cornish/wsitools/internal/tiff"
-	"github.com/cornish/wsitools/internal/tiff/streamwriter"
+	codec "github.com/wsilabs/wsitools/internal/codec"
+	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
+	"github.com/wsilabs/wsitools/internal/decoder"
+	"github.com/wsilabs/wsitools/internal/pipeline"
+	"github.com/wsilabs/wsitools/internal/resample"
+	"github.com/wsilabs/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
 const (
