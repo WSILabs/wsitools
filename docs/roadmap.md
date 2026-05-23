@@ -33,6 +33,9 @@ queued, deferred, or under consideration.
 ### v0.7
 - (no new utilities — TIFF core extraction milestone: shared `internal/tiff` package; `wsiwriter` and `cogwsi` writer packages reorganized as `internal/tiff/streamwriter` and `internal/tiff/cogwsiwriter`. opentile-go upgraded v0.14 → v0.19, bringing the dedicated COG-WSI reader and integer-multiple ratio acceptance — `wsitools info` on COG-WSI output now reports `Format: cog-wsi` and pyramid levels match source counts exactly).
 
+### v0.8
+- (no new utilities — repository relocation: module path moved from `github.com/cornish/wsitools` to `github.com/wsilabs/wsitools` under the new WSILabs GitHub organization. opentile-go also relocated to `github.com/wsilabs/opentile-go` at v0.21.0. No behavior change. v0.8.1 corrects the embedded `Version` constant that was missed when v0.8.0 was tagged).
+
 ## Planned
 
 ### Batch 2 — extends batch 1
