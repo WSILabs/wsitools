@@ -43,6 +43,7 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 const (
@@ -56,12 +57,13 @@ const (
 )
 
 var (
-	dsOutput    string
-	dsFactor    int
-	dsTargetMag int
-	dsQuality   int
-	dsJobs      int
-	dsForce     bool
+	dsOutput     string
+	dsFactor     int
+	dsTargetMag  int
+	dsQuality    int
+	dsJobs       int
+	dsForce      bool
+	dsTileOrder  string
 )
 
 var downsampleCmd = &cobra.Command{
@@ -93,6 +95,10 @@ func init() {
 	downsampleCmd.Flags().IntVar(&dsQuality, "quality", 90, "JPEG quality 1..100")
 	downsampleCmd.Flags().IntVar(&dsJobs, "jobs", runtime.NumCPU(), "worker goroutines")
 	downsampleCmd.Flags().BoolVarP(&dsForce, "force", "f", false, "overwrite output if it exists")
+	downsampleCmd.Flags().StringVar(&dsTileOrder, "tile-order", "row-major",
+		"Tile emission order within each level (row-major|hilbert|morton). "+
+			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
+			"accept all three.")
 	_ = downsampleCmd.MarkFlagRequired("output")
 	rootCmd.AddCommand(downsampleCmd)
 }
@@ -178,12 +184,20 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		bigtiffMode = tiff.BigTIFFOn
 	}
 
+	order, err := tileorder.ByName(dsTileOrder)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
 	// Open writer (atomic .tmp + rename via streamwriter.Close).
 	w, err := streamwriter.Create(dsOutput, streamwriter.Options{
 		BigTIFF:          bigtiffMode,
 		ImageDescription: desc.Encode(),
 		ToolsVersion:     Version,
 		SourceFormat:     string(src.Format()),
+		FormatName:       "svs",
+		AcceptedOrders:   acceptedOrdersForFormat("svs"),
+		DefaultOrder:     order,
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
