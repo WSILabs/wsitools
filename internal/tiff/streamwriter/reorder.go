@@ -43,15 +43,21 @@ func newReorderBuffer(s tileorder.OrderStrategy, tilesX, tilesY, capacity uint32
 	return b
 }
 
-// Submit adds a tile to the buffer. In the happy-path (T2.1) the buffer
-// is unbounded — tiles are always accepted. Back-pressure (blocking when
-// the buffer reaches capacity) is added in T2.2.
+// Submit adds a tile to the buffer, blocking under back-pressure when the
+// buffer is full. The head-of-queue tile (idx == nextIdx) is always admitted
+// regardless of capacity to prevent self-deadlock.
 func (b *reorderBuffer) Submit(x, y uint32, compressed []byte) error {
 	idx := b.strategy.Index(x, y, b.tilesX, b.tilesY)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.err != nil {
-		return b.err
+	for {
+		if b.err != nil {
+			return b.err
+		}
+		if uint32(len(b.pending)) < b.capacity || idx == b.nextIdx {
+			break // admit: head-of-queue OR space available
+		}
+		b.cond.Wait()
 	}
 	b.pending[idx] = compressed
 	b.cond.Broadcast()
