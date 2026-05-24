@@ -20,17 +20,19 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 var (
-	tcOutput    string
-	tcCodec     string
-	tcQuality   int
-	tcCodecOpts []string
-	tcContainer string
-	tcJobs      int
-	tcBigTIFF   string
-	tcForce     bool
+	tcOutput     string
+	tcCodec      string
+	tcQuality    int
+	tcCodecOpts  []string
+	tcContainer  string
+	tcJobs       int
+	tcBigTIFF    string
+	tcForce      bool
+	tcTileOrder  string
 )
 
 var transcodeCmd = &cobra.Command{
@@ -74,6 +76,10 @@ func init() {
 	transcodeCmd.Flags().IntVar(&tcJobs, "jobs", runtime.NumCPU(), "worker goroutines")
 	transcodeCmd.Flags().StringVar(&tcBigTIFF, "bigtiff", "auto", "auto|on|off")
 	transcodeCmd.Flags().BoolVarP(&tcForce, "force", "f", false, "overwrite output if it exists")
+	transcodeCmd.Flags().StringVar(&tcTileOrder, "tile-order", "row-major",
+		"Tile emission order within each level (row-major|hilbert|morton). "+
+			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
+			"accept all three.")
 	_ = transcodeCmd.MarkFlagRequired("output")
 	_ = transcodeCmd.MarkFlagRequired("codec")
 	rootCmd.AddCommand(transcodeCmd)
@@ -113,6 +119,11 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	container := resolveContainer(src.Format(), tcCodec, tcContainer)
 	bigtiffMode := resolveBigTIFFMode(tcBigTIFF, src)
 
+	order, err := tileorder.ByName(tcTileOrder)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
 	knobs := map[string]string{"q": fmt.Sprintf("%d", tcQuality)}
 	for _, opt := range tcCodecOpts {
 		k, v, ok := strings.Cut(opt, "=")
@@ -132,9 +143,12 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 
 	// Build writer options.
 	opts := streamwriter.Options{
-		BigTIFF:      bigtiffMode,
-		ToolsVersion: Version,
-		SourceFormat: src.Format(),
+		BigTIFF:        bigtiffMode,
+		ToolsVersion:   Version,
+		SourceFormat:   src.Format(),
+		FormatName:     container,
+		AcceptedOrders: acceptedOrdersForFormat(container),
+		DefaultOrder:   order,
 	}
 	if md.Make != "" {
 		opts.Make = md.Make
@@ -289,7 +303,32 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 		},
 	}
 
-	return pipeline.Run(ctx, pipeline.Config{
+	sink := func(t pipeline.Tile) error {
+		return lh.WriteTile(t.X, t.Y, t.Bytes)
+	}
+
+	// Run the ordered drain concurrently with pipeline.Run.
+	drainErr := make(chan error, 1)
+	go func() {
+		for {
+			idx, bytes, ok, err := lh.NextReady()
+			if err != nil {
+				drainErr <- err
+				return
+			}
+			if !ok {
+				drainErr <- nil
+				return
+			}
+			if err := lh.WriteTileAtIndex(idx, bytes); err != nil {
+				lh.Abort(err)
+				drainErr <- err
+				return
+			}
+		}
+	}()
+
+	pipeErr := pipeline.Run(ctx, pipeline.Config{
 		Workers: workers,
 		Source: func(ctx context.Context, emit func(pipeline.Tile) error) error {
 			for ty := 0; ty < grid.Y; ty++ {
@@ -336,10 +375,19 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 			t.Bytes = encoded
 			return t, nil
 		},
-		Sink: func(t pipeline.Tile) error {
-			return lh.WriteTile(t.X, t.Y, t.Bytes)
-		},
+		Sink: sink,
 	})
+
+	// Tell the buffer no more tiles will arrive.
+	lh.CloseInput()
+
+	// Propagate pipeline error (or wait for drain to finish).
+	if pipeErr != nil {
+		lh.Abort(pipeErr)
+		<-drainErr
+		return pipeErr
+	}
+	return <-drainErr
 }
 
 func pickDecoder(c source.Compression) decoder.Factory {
@@ -430,6 +478,18 @@ func newSubfileTypeForAssoc(container, kind string) uint32 {
 	_ = container
 	_ = kind
 	return 1
+}
+
+// acceptedOrdersForFormat returns the per-format whitelist of tile-order names.
+// nil = permissive (all registered strategies allowed).
+func acceptedOrdersForFormat(format string) []string {
+	switch format {
+	case "svs":
+		return []string{"row-major"}
+	case "tiff", "ome-tiff":
+		return nil // permissive
+	}
+	return nil
 }
 
 func buildProvenanceDesc(src source.Source, codecName string, md source.Metadata) string {

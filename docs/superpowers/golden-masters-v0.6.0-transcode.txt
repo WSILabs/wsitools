@@ -1,3 +1,9 @@
+# HISTORICAL ARTIFACT — these hashes were captured from a wsitools
+# version that wrote tiles in worker-arrival order. They are not
+# reproducible (see ../specs/2026-05-24-v0.10-deterministic-tile-order-design.md
+# for the root-cause analysis). For v0.10+ canonical hashes, see
+# golden-masters-v0.10.0.txt. Hashes below preserved for archaeology only.
+
 # v0.6.0 transcode + downsample golden-master output hashes
 # Captured pre-landing-3 of TIFF core extraction (commit 2437476) using the wsiwriter
 # package, then RE-CAPTURED post-landing-3 (commit 4e951e2+T3.8) using streamwriter.

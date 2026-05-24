@@ -3,11 +3,11 @@ package cogwsiwriter
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 // Options configures a new Writer.
@@ -15,6 +15,10 @@ type Options struct {
 	BigTIFF      BigTIFFMode
 	ToolsVersion string
 	Metadata     Metadata
+	// DefaultOrder is the per-level tile emission order applied during
+	// finalize. nil → tileorder.RowMajor (standard COG layout).
+	// Accepted strategies: row-major, hilbert, morton.
+	DefaultOrder tileorder.OrderStrategy
 }
 
 // Metadata is the cross-format scanner / acquisition info passed through to L0.
@@ -75,6 +79,7 @@ type Writer struct {
 	levels   []*LevelHandle
 	assoc    []assocSpooled
 	closed   bool
+	order    tileorder.OrderStrategy
 }
 
 type assocSpooled struct {
@@ -86,6 +91,17 @@ type assocSpooled struct {
 // empty; the head block is written by Close. A sibling spool directory
 // path+".spool" is created for scratch storage.
 func Create(path string, opts Options) (*Writer, error) {
+	ord := opts.DefaultOrder
+	if ord == nil {
+		ord = tileorder.RowMajor
+	}
+	switch ord.Name() {
+	case "row-major", "hilbert", "morton":
+		// allowed
+	default:
+		return nil, fmt.Errorf("cogwsiwriter: tile order %q not supported (allowed: row-major, hilbert, morton)", ord.Name())
+	}
+
 	spoolDir := path + ".spool"
 	if err := os.MkdirAll(spoolDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create spool dir: %w", err)
@@ -100,6 +116,7 @@ func Create(path string, opts Options) (*Writer, error) {
 		spoolDir: spoolDir,
 		out:      f,
 		opts:     opts,
+		order:    ord,
 	}, nil
 }
 
@@ -227,6 +244,25 @@ func (w *Writer) Close() error {
 
 	totalLevels := len(w.levels)
 
+	// Remap plan TileOffsets from raster-emission order to strategy order.
+	// planLayout assigns TileOffsets[emitIdx] in sequential (raster) order.
+	// When the strategy reorders emission, tile (x,y) is emitted at
+	// emitIdx = order.Index(x,y,...), so its file offset is
+	// plan.Levels[i].TileOffsets[emitIdx]. The IFD must record this at
+	// raster slot y*tilesX+x. Build per-level remapped offset slices.
+	remappedOffsets := make([][]uint64, len(w.levels))
+	for i, lv := range w.levels {
+		tilesX := lv.gridX
+		tilesY := lv.gridY
+		total := tilesX * tilesY
+		remapped := make([]uint64, total)
+		for emitIdx := uint32(0); emitIdx < total; emitIdx++ {
+			x, y := w.order.IndexToXY(emitIdx, tilesX, tilesY)
+			remapped[y*tilesX+x] = plan.Levels[i].TileOffsets[emitIdx]
+		}
+		remappedOffsets[i] = remapped
+	}
+
 	// Build IFD bytes for each level and associated image.
 	type ifdBlob struct {
 		offset uint64
@@ -237,7 +273,7 @@ func (w *Writer) Close() error {
 
 	for i, lv := range w.levels {
 		b := tiff.NewEntryBuilder(plan.BigTIFF)
-		if err := populateLevelIFD(b, lv.spec, plan.Levels[i].TileOffsets, lv.spool.Entries(), w.opts, i, totalLevels); err != nil {
+		if err := populateLevelIFD(b, lv.spec, remappedOffsets[i], lv.spool.Entries(), w.opts, i, totalLevels); err != nil {
 			w.abortInternal()
 			return fmt.Errorf("populate IFD L%d: %w", i, err)
 		}
@@ -290,24 +326,28 @@ func (w *Writer) Close() error {
 		}
 	}
 
-	// Stream level spools in reverse order (smallest first).
+	// Stream level spools in reverse order (smallest first), in strategy order.
 	for i := len(w.levels) - 1; i >= 0; i-- {
 		lv := w.levels[i]
-		entries := lv.spool.Entries()
-		if err := lv.spool.Rewind(); err != nil {
-			w.abortInternal()
-			return fmt.Errorf("rewind L%d: %w", i, err)
-		}
-		for j, e := range entries {
-			off := int64(plan.Levels[i].TileOffsets[j])
-			buf := make([]byte, e.Length)
-			if _, err := io.ReadFull(lv.spool, buf); err != nil {
+		tilesX := lv.gridX
+		tilesY := lv.gridY
+		total := tilesX * tilesY
+		for emitIdx := uint32(0); emitIdx < total; emitIdx++ {
+			x, y := w.order.IndexToXY(emitIdx, tilesX, tilesY)
+			rasterIdx := y*tilesX + x
+			// TileOffsets[emitIdx] is the pre-planned file offset for the
+			// emitIdx-th tile in raster emission order. Since we emit tile
+			// (x,y) at emission position emitIdx, it occupies that slot.
+			// The IFD records this offset at TileOffsets[rasterIdx] (set above).
+			off := int64(plan.Levels[i].TileOffsets[emitIdx])
+			buf, err := lv.spool.ReadEntryAt(int(rasterIdx))
+			if err != nil {
 				w.abortInternal()
-				return fmt.Errorf("read L%d tile %d: %w", i, j, err)
+				return fmt.Errorf("read L%d tile (%d,%d): %w", i, x, y, err)
 			}
 			if _, err := w.out.WriteAt(buf, off); err != nil {
 				w.abortInternal()
-				return fmt.Errorf("write L%d tile %d: %w", i, j, err)
+				return fmt.Errorf("write L%d tile (%d,%d): %w", i, x, y, err)
 			}
 		}
 	}

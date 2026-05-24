@@ -9,8 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/wsilabs/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 var (
@@ -19,6 +20,7 @@ var (
 	cvForce        bool
 	cvBigTIFFFlag  string
 	cvNoAssociated bool
+	cvTileOrder    string
 )
 
 var convertCmd = &cobra.Command{
@@ -46,6 +48,10 @@ func init() {
 	convertCmd.Flags().BoolVarP(&cvForce, "force", "f", false, "overwrite output if it exists")
 	convertCmd.Flags().StringVar(&cvBigTIFFFlag, "bigtiff", "auto", "auto|on|off")
 	convertCmd.Flags().BoolVar(&cvNoAssociated, "no-associated", false, "skip label/macro/thumbnail/overview")
+	convertCmd.Flags().StringVar(&cvTileOrder, "tile-order", "row-major",
+		"Tile emission order within each level (row-major|hilbert|morton). "+
+			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
+			"accept all three.")
 	_ = convertCmd.MarkFlagRequired("output")
 	_ = convertCmd.MarkFlagRequired("to")
 	rootCmd.AddCommand(convertCmd)
@@ -72,6 +78,11 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	order, err := tileorder.ByName(cvTileOrder)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
 	src, err := source.Open(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {
@@ -95,6 +106,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	opts := cogwsiwriter.Options{
 		BigTIFF:      bigTIFFMode,
 		ToolsVersion: Version,
+		DefaultOrder: order,
 		Metadata: cogwsiwriter.Metadata{
 			MPPX:                md.MPP,
 			MPPY:                md.MPP, // MPP is currently single-axis in source.Metadata
