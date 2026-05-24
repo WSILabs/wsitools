@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 // LevelSpec describes one pyramid level. Compressed tiles are streamed
@@ -19,6 +20,11 @@ type LevelSpec struct {
 	NewSubfileType          uint32
 	WSIImageType            string
 	ExtraTags               []tiff.RawTag
+
+	// Order is the per-level tile emission strategy. If nil, the
+	// writer's DefaultOrder (from Options) is used; if that's also
+	// nil, RowMajor is used.
+	Order tileorder.OrderStrategy
 }
 
 // LevelHandle accepts tile bytes for one pyramid level.
