@@ -1,0 +1,11 @@
+# Canonical byte-stable hashes for wsitools v0.10.0+. Output is now
+# deterministic across runs and across GOMAXPROCS (see
+# ../specs/2026-05-24-v0.10-deterministic-tile-order-design.md).
+# Future regressions show up as goldens-byte-stable failures here.
+# Update entries with a justification in the PR description.
+
+v0.10.0  transcode-svs   jpeg  CMU-1-Small-Region.svs  sha256:643be4be9032315ef5d547227337aeabc137784ad5c2a896e3a5ba98ef0f43ec
+v0.10.0  transcode-svs   jpeg  CMU-1.svs  sha256:c69225b17798241a34d1c66baeaa6d171389c7700c5512f9a81e83f5821aca1c
+v0.10.0  transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:25a0ec72777eda98785b35ed629cc6b2b8f80576b7a37bfd7146997ec70cb531
+v0.10.0  transcode-tiff  jpeg  CMU-1.svs  sha256:6af43da7204904c1782a0bf04d685002c4415cb5c054d53fa1c37a13ee502cc8
+v0.10.0  downsample-2x   CMU-1-Small-Region.svs  sha256:0e56e0ad7e30655134473207b33ac0330a611478c15aa0173a30ea29ab0c31c7
