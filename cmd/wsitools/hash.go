@@ -9,8 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wsilabs/opentile-go/decoder"
+
 	"github.com/wsilabs/wsitools/internal/cliout"
-	"github.com/wsilabs/wsitools/internal/decoder"
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
@@ -96,14 +97,13 @@ func hashL0Pixels(path string) (string, error) {
 		return "", fmt.Errorf("no levels in %s", path)
 	}
 	l0 := levels[0]
-	dec := pickDecoderForCompression(l0.Compression())
-	if dec == nil {
+	fac := pickDecoderForCompression(l0.Compression())
+	if fac == nil {
 		return "", fmt.Errorf("L0 compression %s is not decodable for pixel hash",
 			l0.Compression())
 	}
 
 	tileBuf := make([]byte, l0.TileMaxSize())
-	rgbBuf := make([]byte, l0.TileSize().X*l0.TileSize().Y*3)
 	h := sha256.New()
 	grid := l0.Grid()
 	for ty := 0; ty < grid.Y; ty++ {
@@ -112,24 +112,33 @@ func hashL0Pixels(path string) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("read tile (%d,%d): %w", tx, ty, err)
 			}
-			out, err := dec.DecodeTile(tileBuf[:n], rgbBuf, 1, 1)
+			dec := fac.New()
+			img, err := dec.Decode(tileBuf[:n], decoder.DecodeOptions{Scale: 1, Format: decoder.PixelFormatRGB})
+			dec.Close()
 			if err != nil {
 				return "", fmt.Errorf("decode tile (%d,%d): %w", tx, ty, err)
 			}
-			h.Write(out)
+			h.Write(img.Pix)
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func pickDecoderForCompression(c source.Compression) decoder.Decoder {
+func pickDecoderForCompression(c source.Compression) decoder.Factory {
+	var name string
 	switch c {
 	case source.CompressionJPEG:
-		return decoder.NewJPEG()
+		name = "jpeg"
 	case source.CompressionJPEG2000:
-		return decoder.NewJPEG2000()
+		name = "jpeg2000"
+	default:
+		return nil
 	}
-	return nil
+	fac, ok := decoder.Get(name)
+	if !ok {
+		return nil
+	}
+	return fac
 }
 
 func emitHash(cmd *cobra.Command, algorithm, mode, hexStr, path string) error {
