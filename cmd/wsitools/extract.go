@@ -14,7 +14,8 @@ import (
 	"github.com/spf13/cobra"
 	xtiff "golang.org/x/image/tiff"
 
-	"github.com/wsilabs/wsitools/internal/decoder"
+	"github.com/wsilabs/opentile-go/decoder"
+
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
@@ -127,21 +128,29 @@ func runExtract(cmd *cobra.Command, args []string) error {
 func decodeAssociated(path string, b []byte, comp source.Compression, w, h int) (image.Image, error) {
 	switch comp {
 	case source.CompressionJPEG:
-		dec := decoder.NewJPEG()
-		rgb := make([]byte, w*h*3)
-		out, err := dec.DecodeTile(b, rgb, 1, 1)
+		fac, ok := decoder.Get("jpeg")
+		if !ok {
+			return nil, fmt.Errorf("no jpeg decoder registered")
+		}
+		dec := fac.New()
+		defer dec.Close()
+		img, err := dec.Decode(b, decoder.DecodeOptions{Scale: 1, Format: decoder.PixelFormatRGB})
 		if err != nil {
 			return nil, fmt.Errorf("decode jpeg: %w", err)
 		}
-		return rgbToImage(out, w, h), nil
+		return rgbToImage(img.Pix, w, h), nil
 	case source.CompressionJPEG2000:
-		dec := decoder.NewJPEG2000()
-		rgb := make([]byte, w*h*3)
-		out, err := dec.DecodeTile(b, rgb, 1, 1)
+		fac, ok := decoder.Get("jpeg2000")
+		if !ok {
+			return nil, fmt.Errorf("no jpeg2000 decoder registered")
+		}
+		dec := fac.New()
+		defer dec.Close()
+		img, err := dec.Decode(b, decoder.DecodeOptions{Scale: 1, Format: decoder.PixelFormatRGB})
 		if err != nil {
 			return nil, fmt.Errorf("decode jpeg2000: %w", err)
 		}
-		return rgbToImage(out, w, h), nil
+		return rgbToImage(img.Pix, w, h), nil
 	case source.CompressionLZW:
 		// AssociatedImage.Bytes() for LZW labels returns a single re-encoded LZW
 		// stream, but TIFF LZW labels may use horizontal differencing (Predictor=2),

@@ -12,10 +12,10 @@ import (
 	"time"
 
 	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/opentile-go/decoder"
 	"github.com/spf13/cobra"
 
 	codec "github.com/wsilabs/wsitools/internal/codec"
-	"github.com/wsilabs/wsitools/internal/decoder"
 	"github.com/wsilabs/wsitools/internal/pipeline"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
@@ -273,13 +273,12 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 		return err
 	}
 
-	dec := pickDecoder(lvl.Compression())
-	if dec == nil {
+	decFac := pickDecoder(lvl.Compression())
+	if decFac == nil {
 		return fmt.Errorf("no decoder for source compression %s", lvl.Compression())
 	}
 
 	grid := lvl.Grid()
-	tileBytes := lvl.TileSize().X * lvl.TileSize().Y * 3
 	tileW := lvl.TileSize().X
 	tileH := lvl.TileSize().Y
 	maxTileBytes := lvl.TileMaxSize()
@@ -317,8 +316,12 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 			return nil
 		},
 		Process: func(t pipeline.Tile) (pipeline.Tile, error) {
-			rgb := make([]byte, tileBytes)
-			rgbOut, err := dec.DecodeTile(t.Bytes, rgb, 1, 1)
+			dec := decFac.New()
+			defer dec.Close()
+			img, err := dec.Decode(t.Bytes, decoder.DecodeOptions{
+				Scale:  1,
+				Format: decoder.PixelFormatRGB,
+			})
 			if t.Release != nil {
 				t.Release()
 				t.Release = nil
@@ -326,7 +329,7 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 			if err != nil {
 				return pipeline.Tile{}, err
 			}
-			encoded, err := enc.EncodeTile(rgbOut, tileW, tileH, nil)
+			encoded, err := enc.EncodeTile(img.Pix, tileW, tileH, nil)
 			if err != nil {
 				return pipeline.Tile{}, err
 			}
@@ -339,14 +342,21 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 	})
 }
 
-func pickDecoder(c source.Compression) decoder.Decoder {
+func pickDecoder(c source.Compression) decoder.Factory {
+	var name string
 	switch c {
 	case source.CompressionJPEG:
-		return decoder.NewJPEG()
+		name = "jpeg"
 	case source.CompressionJPEG2000:
-		return decoder.NewJPEG2000()
+		name = "jpeg2000"
+	default:
+		return nil
 	}
-	return nil
+	fac, ok := decoder.Get(name)
+	if !ok {
+		return nil
+	}
+	return fac
 }
 
 func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string) error {

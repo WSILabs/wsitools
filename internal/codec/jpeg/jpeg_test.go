@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"testing"
 
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
+	_ "github.com/wsilabs/opentile-go/decoder/jpeg"
+
 	"github.com/wsilabs/wsitools/internal/codec"
-	"github.com/wsilabs/wsitools/internal/decoder"
 )
 
 // TestJPEGEncoderRoundTrip verifies encode→decode fidelity using libjpeg-turbo
@@ -56,11 +58,17 @@ func TestJPEGEncoderRoundTrip(t *testing.T) {
 	if spliced == nil {
 		t.Fatal("splice produced nil")
 	}
-	dec := decoder.NewJPEG()
-	out, err := dec.DecodeTile(spliced, nil, 1, 1)
-	if err != nil {
-		t.Fatalf("DecodeTile: %v", err)
+	decFac, ok := otdecoder.Get("jpeg")
+	if !ok {
+		t.Fatal("no jpeg decoder registered")
 	}
+	dec := decFac.New()
+	defer dec.Close()
+	img, err := dec.Decode(spliced, otdecoder.DecodeOptions{Scale: 1, Format: otdecoder.PixelFormatRGB})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	out := img.Pix
 	if got, want := len(out), 256*256*3; got != want {
 		t.Errorf("decoded length: got %d, want %d", got, want)
 	}
