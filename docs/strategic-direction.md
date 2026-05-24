@@ -50,6 +50,7 @@ func (s *Slide) Format() Format
 func (s *Slide) Metadata() Metadata
 func (s *Slide) Levels() []Level
 func (s *Slide) Associated() []AssociatedImage
+func (s *Slide) TIFFTags() []TIFFTag         // empty slice for non-TIFF formats
 
 // Raw tile access (compressed bytes — bit-exact paths)
 func (s *Slide) RawTile(level, tx, ty int) ([]byte, error)
@@ -59,9 +60,39 @@ func (s *Slide) RawTileInto(level, tx, ty int, dst []byte) (n int, err error)
 func (s *Slide) DecodedTile(level, tx, ty int) (*Image, error)
 func (s *Slide) DecodedTileInto(level, tx, ty int, dst *Image) error
 
-// Decoded region read (arbitrary rectangle, in L0 pixel coordinates)
+// Decoded region read (arbitrary rectangle, in L0 pixel coordinates).
+// (x, y) are L0 coords; (w, h) are at the requested level's resolution.
+// No implicit resampling — reads exactly at that level. For arbitrary-
+// scale output, use ReadRegionScaled or a strip iterator.
 func (s *Slide) ReadRegion(level, x, y, w, h int) (*Image, error)
 func (s *Slide) ReadRegionInto(level, x, y int, dst *Image) error
+
+// Decoded region read with explicit output sizing. Picks the best source
+// pyramid level (via BestLevelForDownsample), reads at that level, then
+// resamples to the target output dimensions. The convenience entry
+// point for "give me this L0 rectangle at this output resolution."
+func (s *Slide) ReadRegionScaled(l0x, l0y, l0w, l0h, outW, outH int) (*Image, error)
+func (s *Slide) ReadRegionScaledInto(l0x, l0y, l0w, l0h int, dst *Image) error
+
+// Strip iterator — sequential horizontal strips of the slide at a
+// chosen output resolution, with internal parallel decode, IDCT scale
+// selection, decoded-tile cache, and pre-fetch lookahead. The right
+// primitive for dzsave-class throughput (libvips-comparable speed on
+// JPEG sources). Each call to Next() returns an *Image of dimensions
+// outW × stripHeight (final strip may be shorter).
+func (s *Slide) ScaledStrips(outW, outH, stripHeight int, opts ...StripOption) *StripIterator
+
+type StripIterator struct { /* unexported */ }
+func (it *StripIterator) Next() (*Image, error)   // io.EOF when exhausted
+func (it *StripIterator) Close() error
+
+// Strip iterator configuration. Sane defaults work for most uses.
+type StripOption func(*stripConfig)
+func WithDecodeWorkers(n int) StripOption          // parallelism for source-tile decode; default: runtime.NumCPU()
+func WithLookahead(strips int) StripOption         // pre-fetch depth; default: 2
+func WithIDCTScale(scale int) StripOption          // 1/2/4/8 for JPEG sources; default: auto
+func WithKernel(k resample.Kernel) StripOption     // resample quality; default: Lanczos
+func WithTileCache(c *Cache) StripOption           // shared cache across iterators (tile-server use)
 
 // Convenience
 func (s *Slide) Thumbnail(maxW, maxH int) (*Image, error)              // fits inside (maxW, maxH) preserving aspect
@@ -77,6 +108,30 @@ func (s *Slide) BackgroundColor() color.Color                            // usua
 // the slide has no embedded profile.
 func (s *Slide) ICCProfile() ([]byte, error)
 ```
+
+### Why the strip iterator belongs in opentile-go
+
+The naive "loop and call `ReadRegion` for each strip" pattern works for
+correctness but is too slow for dzsave-class throughput. Three things
+need to happen together to close the gap to libvips:
+
+1. **Parallel decode** — multiple source tiles decoded concurrently across
+   N CPU cores.
+2. **Decoded-tile cache** — adjacent output strips share source tiles
+   (the typical case when source tile-height ≠ output strip-height);
+   without caching, tiles get redecoded across strip boundaries.
+3. **Pre-fetch lookahead** — while the caller processes strip N, the
+   library decodes the source tiles for strip N+1 in background workers.
+
+These three optimizations interact tightly with codec internals (JPEG
+IDCT scale-factor selection, the v0.13 tile-prefix optimizations). They
+belong inside opentile-go so every consumer benefits, rather than
+having each consumer (dzsave, tile-server, region-extract) reimplement
+the same worker pool + cache + lookahead pattern.
+
+Consumers who don't need the strip pattern continue to use
+`ReadRegion` / `ReadRegionScaled` for ad-hoc rectangle reads. The strip
+iterator is opt-in.
 
 `AssociatedImage` keeps its current shape but gains decoded and
 ICC-profile accessors alongside the existing raw-bytes accessor:
@@ -110,22 +165,105 @@ available (e.g., Aperio's `AppMag` line), falling back to L0/Lk
 dimension ratios. Storing it explicitly avoids the floor/ceil rounding
 hazards we saw in the opentile-go pyramid classifier (issue #5).
 
-`Metadata` carries vendor identity separately from format:
+`Metadata` already covers most of openslide's typed surface plus a
+properties map (added in opentile-go v0.17). The v1.0 cut clarifies
+some naming, adds `Vendor` (distinct from `SourceFormat`) at the
+top level, and pulls a few standard openslide-equivalent fields into
+the typed surface that were previously absent or only in `Properties`:
 
 ```go
 type Metadata struct {
-    Make, Model         string
-    Software            string
-    DateTime            time.Time
-    MPP                 float64        // microns per pixel
-    Magnification       float64        // optical magnification (e.g. 40.0)
-    Vendor              string         // scanner manufacturer ("aperio", "hamamatsu", "philips", ...)
-    SourceFormat        string         // file format (closely related but distinct from Vendor)
-    // ... existing fields ...
-    // Future: Vendor map[string]string escape hatch for raw vendor properties
-    //   (Aperio ImageDescription key/value lines, etc.) — added when first needed.
+    // Existing typed fields (already in opentile-go v0.17+).
+    Magnification       float64
+    ScannerManufacturer string
+    ScannerModel        string
+    ScannerSoftware     []string
+    ScannerSerial       string
+    AcquisitionDateTime time.Time
+
+    // Pixel size — split X/Y axes with an aggregate convenience.
+    // MicronsPerPixel is set when X == Y (the common case for WSI);
+    // zero indicates either "unknown" OR "asymmetric pixels"; check
+    // MicronsPerPixelX/Y to disambiguate.
+    MicronsPerPixel  float64
+    MicronsPerPixelX float64
+    MicronsPerPixelY float64
+
+    // ImageDescription is the structured per-format description
+    // (Aperio SVS ImageDescription string, OME-XML, BIF iSyntax
+    // section, etc.). Empty when the format has no equivalent.
+    ImageDescription string
+
+    // NEW in v1.0 — fields previously absent or only in Properties:
+    Vendor       string  // "aperio" | "hamamatsu" | "philips" | ... (scanner-shape, distinct from format)
+    SourceFormat string  // file format identifier
+    Comment      string  // openslide.comment equivalent — free-text slide comment
+                         // (distinct from ImageDescription, which is the structured per-format block)
+
+    // Properties is a flat key/value map for additional metadata that
+    // doesn't fit the typed fields. Two key conventions:
+    //
+    //   - opentile-go-canonical keys (lowercase-with-hyphens):
+    //     PropertyCaseNumber, PropertyUserName, PropertyScannedAreaMM2,
+    //     PropertyScanDurationSec, PropertyComments. Populated by
+    //     format readers when their format exposes the equivalent.
+    //
+    //   - Vendor-namespaced keys (vendor.<key>): vendor-specific fields
+    //     surfaced as-is. e.g., "aperio.AppMag", "hamamatsu.SourceLens",
+    //     "philips.iSyntax.AcquisitionParameters".
+    //
+    //   - TIFF tag passthrough keys (tiff.<TagName>): every TIFF tag the
+    //     format reader parses is mirrored here under its canonical
+    //     name. e.g., "tiff.XResolution", "tiff.ResolutionUnit",
+    //     "tiff.ImageDescription", "tiff.Make", "tiff.Model". Vendor
+    //     readers populate this so downstream code calibrated to
+    //     openslide's tiff.* property keys works without translation.
+    //
+    // Typed fields above are the authoritative source where they exist;
+    // Properties is the long tail.
+    Properties map[string]string
 }
 ```
+
+### TIFF tag passthrough
+
+For TIFF-based slides (SVS, Philips-TIFF, OME-TIFF, BIF, generic-TIFF,
+COG-WSI), every TIFF tag the format reader parses is mirrored into
+`Metadata.Properties` under `tiff.<TagName>` keys. This matches
+openslide's convention and gives consumers calibrated to openslide's
+property-key vocabulary a direct path without translation.
+
+Two access tiers:
+
+1. **Common TIFF tags via `Properties`** — `tiff.ImageWidth`,
+   `tiff.ImageLength`, `tiff.Make`, `tiff.Model`, `tiff.Software`,
+   `tiff.DateTime`, `tiff.ImageDescription`, `tiff.XResolution`,
+   `tiff.YResolution`, `tiff.ResolutionUnit`, `tiff.Compression`,
+   `tiff.PhotometricInterpretation`, etc. Populated by the format
+   reader during open.
+
+2. **Exhaustive raw-tag access via `Slide.TIFFTags()`** (TIFF-based
+   formats only) — returns every TIFF tag on every IFD as typed
+   entries. For consumers that want completeness including unknown
+   private vendor tags. Returns an empty slice for non-TIFF formats
+   (IFE, future formats).
+
+   ```go
+   type TIFFTag struct {
+       IFD      int            // 0-based IFD index in file order
+       Tag      uint16         // TIFF tag ID
+       Type     uint16         // TIFF type (BYTE/ASCII/SHORT/LONG/etc.)
+       Count    uint64         // number of values
+       RawBytes []byte         // raw bytes; caller decodes per Type
+   }
+
+   func (s *Slide) TIFFTags() []TIFFTag  // empty for non-TIFF formats
+   ```
+
+   This is a deliberate non-cache approach — `TIFFTags()` re-walks the
+   IFD chain on call. Consumers wanting the typed fields should use
+   `Metadata()` (faster, cached); `TIFFTags()` is for completeness
+   when you need every tag.
 
 ### Pixel format
 
@@ -161,6 +299,31 @@ func NewImageFormat(w, h int, fmt PixelFormat) *Image         // explicit
 
 Decoded-method default returns are RGB; pass an RGBA-formatted `*Image`
 to `ReadRegionInto` / `DecodedTileInto` to get RGBA output.
+
+### Resample subpackage
+
+Pure pixel resample primitives, lifted from `wsitools/internal/resample`.
+Free functions; no state. Used internally by `ReadRegionScaled` and the
+strip iterator, also available for ad-hoc use.
+
+```go
+package resample
+
+type Kernel int
+
+const (
+    Nearest Kernel = iota
+    Bilinear
+    Lanczos
+    Box   // area-averaging; fast for downsampling
+)
+
+func Image(src *opentile.Image, outW, outH int, k Kernel) *opentile.Image
+func ImageInto(src, dst *opentile.Image, k Kernel) error  // dst dims determine output
+```
+
+Pure-Go for v1.0. cgo-accelerated kernels (via libvips' resampler or
+hand-tuned assembly) are a future optimization if profiling demands it.
 
 ### Coordinate convention for `ReadRegion`
 
@@ -292,44 +455,45 @@ over the library.
 ### Re-tiling pipeline + DZI / large-output utilities
 
 The DZI / re-tiling use case (e.g., 240×240 SVS → uniform 256×256 DZI
-tile tree with a strict 2× pyramid as JPEG) is the bar libvips sets. To
-match libvips speed:
+tile tree with a strict 2× pyramid as JPEG) is the bar libvips sets. The
+performance machinery for matching libvips lives in **opentile-go's
+`Slide.ScaledStrips` iterator** (described in Section 1), not in wsitools.
+The iterator provides parallel source-tile decode, decoded-tile cache,
+JPEG IDCT scale-factor selection, and pre-fetch lookahead — all the
+expensive plumbing that closes the gap to libvips.
 
-- **Strip-based streaming pipeline.** Process the image in horizontal
-  strips (`image_width × tile_height` pixels per strip), never
-  materialise L0.
-- **Pyramid lift on the strip.** As each strip is read, downsample it
-  iteratively to produce the corresponding row of tiles at every pyramid
-  level in a single pass. Buffering required is `tile_height × 2^N`
-  source rows for an N-level pyramid.
-- **Demand-driven decode.** When producing the strip for output tile row
-  Y, decode only the source tiles that intersect that strip.
-- **Aggressive parallelism.** N parallel source-tile decoders, M parallel
-  output-tile encoders, downsample sandwiched between.
-- **JPEG IDCT scaling** (the killer trick for JPEG-tiled sources).
-  libjpeg-turbo can decode at 1/2, 1/4, or 1/8 resolution during the
-  IDCT step itself — essentially free. For pyramid levels reachable by
-  IDCT scaling, this skips the full decode-then-downsample cycle. Without
-  it, you're decoding at full resolution and downsampling 4–8× in
-  software.
+wsitools' role for DZI / re-tiling is the consumer side:
 
-Honest performance expectations: with all of the above, ~1.2–1.5× of
-libvips on JPEG sources. The downsample kernel is the remaining gap
-(libvips uses hand-tuned SIMD C; Go's compiler doesn't auto-vectorize
-these loops well, and Go assembly is per-arch work). For non-JPEG sources
-(JPEG2000, AVIF, JXL, etc.), the IDCT trick doesn't apply and you're
-~1.5–2× slower, but libvips' coverage of those codecs isn't great either.
+- **Strip iteration through opentile-go.** Configure `ScaledStrips` for
+  the desired output level resolution; consume strips sequentially.
+- **Pyramid lift across strips.** For multi-level outputs (DZI typically
+  generates ~10 levels), either run one `ScaledStrips` iterator per
+  output level, or stack them with shared tile caches.
+- **Re-tile blitting.** Cut each strip into output tiles
+  (256×256 for standard DZI).
+- **Encode pool.** N parallel JPEG encoders consume output tiles and
+  write them to disk.
+- **Output container.** DZI: directory tree + `.dzi` manifest. COG-WSI:
+  via cogwsiwriter. DICOM-WSI: via a future dicomwsiwriter.
+
+Honest performance expectations: with the strip iterator + IDCT scaling
+working as designed, ~1.2–1.5× of libvips on JPEG sources. The downsample
+kernel is the remaining gap (libvips uses hand-tuned SIMD C; Go's
+compiler doesn't auto-vectorize these loops well, and Go assembly is
+per-arch work). For non-JPEG sources (JPEG2000, AVIF, JXL, etc.), the
+IDCT trick doesn't apply and you're ~1.5–2× slower, but libvips' coverage
+of those codecs isn't great either.
 
 Build deliverables in order:
 
 1. `wsitools dzsave` — DeepZoom pyramid generator. The first real
-   consumer of the strip pipeline.
-2. `wsitools tile-server` — HTTP DZI/IIIF tile server. Reuses the strip
-   pipeline plus a tile cache (the deferred cache from Section 1 lands
-   here).
+   consumer of `Slide.ScaledStrips`.
+2. `wsitools tile-server` — HTTP DZI/IIIF tile server. Shares a tile
+   cache across requests via `WithTileCache(c)` (Section 1 cache policy
+   gets resolved here).
 3. `wsitools dicom-wsi` — convert WSI to DICOM-WSI format. Biggest
-   single utility; depends on region + pyramid plus a DICOM-WSI writer.
-   Its own design cycle.
+   single utility; depends on the strip iterator plus a new DICOM-WSI
+   writer in wsitools. Its own design cycle.
 
 ### Read-side operations and pool-management
 
@@ -534,24 +698,30 @@ Roughly the order of leverage and risk:
 
 1. ~~**Move the GH repos to the new org**~~ — done (WSILabs/opentile-go
    at v0.21.0, WSILabs/wsitools at v0.8.1).
-2. **Codec lift** (Section 2) — opentile-go v0.22 (additive: new
-   `opentile/codec/*` subpackages, no public API change yet).
-   Pure refactor on the wsitools side; codec imports change but behavior
-   stays. Unblocks everything downstream.
-3. **API redesign: `*Slide` struct + decoded operations** (Section 1) —
-   opentile-go **v1.0**. Drops the public `Tiler` interface, replaces
-   with `*Slide`, adds `RawTile`/`DecodedTile`/`ReadRegion`/`Thumbnail`
-   methods. This is the API stability marker; v1.x onward is additive.
-4. **`wsitools region` CLI** — first real consumer of `Slide.ReadRegion`.
-   Validates the surface.
-5. **JPEG IDCT scale-factor** in the JPEG codec wrapper. Small but high-
-   leverage. Could land alongside the codec lift (#2) or with the v1.0
-   API redesign (#3).
-6. **Strip-based pyramid lift + `wsitools dzsave`** (Section 3) — the
-   big performance piece. Plenty of room to benchmark against libvips and
-   iterate.
-7. **`wsitools tile-server`** — needs the cache policy decision from
-   Section 1; everything else is HTTP plumbing.
+2. **Codec lift + resample lift** (Section 2) — opentile-go v0.22
+   (additive: new `opentile/codec/*` and `opentile/resample` subpackages,
+   no public API change yet). Pure refactor on the wsitools side; codec
+   imports change but behavior stays. Includes the JPEG IDCT scale-factor
+   parameter on the JPEG codec wrapper (high-leverage perf knob worth
+   surfacing while you're already touching it). Unblocks everything
+   downstream.
+3. **API redesign: `*Slide` struct + decoded operations + strip
+   iterator** (Section 1) — opentile-go **v1.0**. Drops the public
+   `Tiler` interface, replaces with `*Slide`; adds raw + decoded tile
+   methods, `ReadRegion` / `ReadRegionScaled`, `ScaledStrips` iterator
+   with parallel decode + cache + lookahead, openslide-equivalent surface
+   (ICCProfile, Bounds, BackgroundColor, Thumbnail with two-axis box fit,
+   Level.Downsample, Metadata.Vendor). API stability marker; v1.x
+   onward is additive.
+4. **`wsitools region` CLI** — first real consumer of `ReadRegionScaled`.
+   Validates the region surface.
+5. **`wsitools dzsave`** — first real consumer of `ScaledStrips`.
+   Validates the strip iterator + benchmarks against libvips.
+6. **`wsitools extract`** — ImageScope-equivalent region-at-scale to
+   container output (SVS / TIFF / COG-WSI / JPEG / PNG). Reuses the
+   strip iterator + writer plumbing from #5.
+7. **`wsitools tile-server`** — needs the strip iterator's shared tile
+   cache (`WithTileCache`) operational; everything else is HTTP plumbing.
 8. **Convert extensions** (`--to iris`, `--to svs`, `--to bif`).
    Independent of Sections 1+2; can run in parallel.
 9. **`convert` subsumes `transcode`** — lossy paths land in convert;
