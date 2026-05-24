@@ -72,7 +72,17 @@ func (w *Writer) AddLevel(s LevelSpec) (*LevelHandle, error) {
 	}
 	capacity := w.defaultReorderCapacity
 	if capacity == 0 {
-		capacity = 16 // conservative default; refined when worker count is plumbed
+		// Default capacity must exceed pipeline.Run's in-flight depth
+		// (in + out channels = 4*Workers + W workers in Process =
+		// ~5W tiles) plus head-of-line slack. With a single Sink
+		// goroutine that Submits arbitrary tiles before the head
+		// arrives, undersizing this risks deadlock: the sink is
+		// stuck in Submit on a non-head tile while the head tile
+		// sits in the pipeline's `out` channel waiting for the sink
+		// to pick it up. 1024 covers up to ~200 workers comfortably;
+		// memory cost is bounded by (capacity * avg_tile_size) ≈
+		// 60MB for typical JPEG WSI tiles.
+		capacity = 1024
 	}
 
 	tilesX := (s.ImageWidth + s.TileWidth - 1) / s.TileWidth

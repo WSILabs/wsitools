@@ -289,7 +289,32 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 		},
 	}
 
-	return pipeline.Run(ctx, pipeline.Config{
+	sink := func(t pipeline.Tile) error {
+		return lh.WriteTile(t.X, t.Y, t.Bytes)
+	}
+
+	// Run the ordered drain concurrently with pipeline.Run.
+	drainErr := make(chan error, 1)
+	go func() {
+		for {
+			idx, bytes, ok, err := lh.NextReady()
+			if err != nil {
+				drainErr <- err
+				return
+			}
+			if !ok {
+				drainErr <- nil
+				return
+			}
+			if err := lh.WriteTileAtIndex(idx, bytes); err != nil {
+				lh.Abort(err)
+				drainErr <- err
+				return
+			}
+		}
+	}()
+
+	pipeErr := pipeline.Run(ctx, pipeline.Config{
 		Workers: workers,
 		Source: func(ctx context.Context, emit func(pipeline.Tile) error) error {
 			for ty := 0; ty < grid.Y; ty++ {
@@ -336,10 +361,19 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 			t.Bytes = encoded
 			return t, nil
 		},
-		Sink: func(t pipeline.Tile) error {
-			return lh.WriteTile(t.X, t.Y, t.Bytes)
-		},
+		Sink: sink,
 	})
+
+	// Tell the buffer no more tiles will arrive.
+	lh.CloseInput()
+
+	// Propagate pipeline error (or wait for drain to finish).
+	if pipeErr != nil {
+		lh.Abort(pipeErr)
+		<-drainErr
+		return pipeErr
+	}
+	return <-drainErr
 }
 
 func pickDecoder(c source.Compression) decoder.Factory {
