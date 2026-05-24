@@ -64,20 +64,31 @@ func (s *Slide) ReadRegion(level, x, y, w, h int) (*Image, error)
 func (s *Slide) ReadRegionInto(level, x, y int, dst *Image) error
 
 // Convenience
-func (s *Slide) Thumbnail(maxDim int) (*Image, error)
+func (s *Slide) Thumbnail(maxW, maxH int) (*Image, error)              // fits inside (maxW, maxH) preserving aspect
 func (s *Slide) BestLevelForDownsample(downsample float64) int
+
+// Bounds / background (some scanners only fill a portion of L0 with
+// tissue; the rest is background. Out-of-bounds region reads fill with
+// BackgroundColor rather than failing.)
+func (s *Slide) Bounds() image.Rectangle                                // tissue region in L0 coords; zero-value if not known
+func (s *Slide) BackgroundColor() color.Color                            // usually white for histology
+
+// ICC profile passthrough (color-managed pathology workflows). nil if
+// the slide has no embedded profile.
+func (s *Slide) ICCProfile() ([]byte, error)
 ```
 
-`AssociatedImage` keeps its current shape but gains a decoded accessor
-alongside the existing raw-bytes accessor:
+`AssociatedImage` keeps its current shape but gains decoded and
+ICC-profile accessors alongside the existing raw-bytes accessor:
 
 ```go
 type AssociatedImage struct { /* ... */ }
-func (a AssociatedImage) Type() string       // label | macro | thumbnail | overview | ...
+func (a AssociatedImage) Type() string                                  // label | macro | thumbnail | overview | ...
 func (a AssociatedImage) Size() image.Point
 func (a AssociatedImage) Compression() Compression
-func (a AssociatedImage) RawBytes() ([]byte, error)  // bit-exact passthrough
-func (a AssociatedImage) Decoded() (*Image, error)   // decoded pixels
+func (a AssociatedImage) RawBytes() ([]byte, error)                     // bit-exact passthrough
+func (a AssociatedImage) Decoded() (*Image, error)                      // decoded pixels
+func (a AssociatedImage) ICCProfile() ([]byte, error)                   // per-image profile; nil if absent
 ```
 
 `Level` is a value-type struct (no methods); operations take a level
@@ -89,7 +100,30 @@ type Level struct {
     Width, Height       int
     TileWidth, TileHeight int
     Compression         Compression
+    Downsample          float64       // canonical downsample factor from L0
     // ... other inspection-only fields
+}
+```
+
+`Downsample` is computed at slide-open time from vendor metadata when
+available (e.g., Aperio's `AppMag` line), falling back to L0/Lk
+dimension ratios. Storing it explicitly avoids the floor/ceil rounding
+hazards we saw in the opentile-go pyramid classifier (issue #5).
+
+`Metadata` carries vendor identity separately from format:
+
+```go
+type Metadata struct {
+    Make, Model         string
+    Software            string
+    DateTime            time.Time
+    MPP                 float64        // microns per pixel
+    Magnification       float64        // optical magnification (e.g. 40.0)
+    Vendor              string         // scanner manufacturer ("aperio", "hamamatsu", "philips", ...)
+    SourceFormat        string         // file format (closely related but distinct from Vendor)
+    // ... existing fields ...
+    // Future: Vendor map[string]string escape hatch for raw vendor properties
+    //   (Aperio ImageDescription key/value lines, etc.) — added when first needed.
 }
 ```
 
@@ -137,19 +171,44 @@ this rectangle at this magnification" intent unambiguous (you specify
 where on the slide independent of which pyramid level provides the
 sampled output).
 
+### Out-of-bounds region reads
+
+`ReadRegion` accepts any `(x, y, w, h)` and fills the off-slide portion
+of the rectangle with `BackgroundColor()` rather than returning an
+error. This matches openslide's `read_region` semantics and is critical
+for tile-server / DZI generation: boundary tiles routinely overhang the
+edge of the slide, and pathology viewers expect those overhangs to be
+filled with background (typically white), not to fail. Same applies
+when a slide has `Bounds()` smaller than its L0 dimensions — pixels
+inside the L0 rectangle but outside the bounds rectangle are filled
+with background.
+
 ### What's NOT in the surface (intentionally)
 
 - **No `Slide.Properties() map[string]string` flat-string adapter.**
-  `Slide.Metadata()` already returns typed metadata with `Make`, `Model`,
-  `Software`, `DateTime`, `MPP`, `Magnification`, etc. Iterating known
-  fields is a 5-line helper. Vendor-specific properties grow on the typed
-  struct (sub-structs or `Metadata.Vendor map[string]string` escape
-  hatch) rather than flattening everything to strings.
+  `Slide.Metadata()` already returns typed metadata. Vendor-specific
+  properties grow on the typed struct (sub-structs or a future
+  `Metadata.Vendor map[string]string` escape hatch) rather than
+  flattening everything to strings.
 - **No "Slide" interface.** The format-specific reader is unexported.
   Consumers see only the concrete `*Slide` struct.
 - **No streaming/iterator API for tiles.** `for _, lvl := range slide.Levels()`
   + nested tile loops handle the use case. Add iterators if a real
   consumer materialises.
+- **No `DetectVendor(filename)` pre-open helper.** Just call `OpenFile`
+  and check `s.Format()` / `s.Metadata().Vendor`. openslide exposed
+  this for fast pre-open dispatch in C; Go's open-then-inspect pattern
+  is the equivalent.
+- **No `(*Slide).Err()` error accessor.** Go's idiomatic `error` returns
+  on every call cover what openslide's `openslide_get_error` did for
+  C-shaped error handling.
+- **No multi-region API** (`openslide.region[N].*`). Rare in practice
+  (mostly 3DHistech multi-tissue slides). Defer until a real consumer
+  needs it.
+- **No `Quickhash` content hash** in `Metadata`. openslide computed this
+  as a cache identity helper. wsitools already provides `wsitools hash`
+  for the analogous use case; opentile-go doesn't need to compute it
+  internally.
 
 ### Cache policy
 
