@@ -49,6 +49,20 @@ func (s *spool) Rewind() error {
 // Read implements io.Reader on the underlying file (post-Rewind).
 func (s *spool) Read(p []byte) (int, error) { return s.f.Read(p) }
 
+// ReadEntryAt reads the compressed bytes for entry idx (0-based, raster order)
+// into a freshly allocated buffer and returns it. idx must be in [0, len(entries)).
+// Uses ReadAt so it does not disturb the sequential read position used by Rewind+Read.
+func (s *spool) ReadEntryAt(idx int) ([]byte, error) {
+	// Compute byte offset by summing lengths of preceding entries.
+	var off int64
+	for i := 0; i < idx; i++ {
+		off += int64(s.entries[i].Length)
+	}
+	buf := make([]byte, s.entries[idx].Length)
+	_, err := s.f.ReadAt(buf, off)
+	return buf, err
+}
+
 // Close closes the file handle without removing the file. Use Remove to
 // also delete from disk.
 func (s *spool) Close() error {
