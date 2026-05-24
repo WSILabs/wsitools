@@ -19,6 +19,15 @@ transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:33b411f8e26fc9bca3c4d6f1fc1
 transcode-tiff  jpeg  CMU-1.svs  sha256:fd940aa33eae366951bde5a765f7394e74f2e44a275769fb26569ed4800f09b4
 downsample-2x  CMU-1-Small-Region.svs  sha256:7c733bc1af339b9d0c2bbfb164824655846e65830701497387c278432127b171
 
+# === Post-v0.9.0-port verification PASSED on 2026-05-24 (pixel-equality) ===
+# Byte-level SHA differs run-to-run on both pre-port and post-port binaries
+# due to nondeterministic tile write order. Pixel-level hash (wsitools hash
+# --mode pixel) is byte-identical between pre-port and post-port binaries,
+# confirming the decoder + resample port preserves output semantics.
+#
+# transcode-svs  jpeg  CMU-1-Small-Region.svs  sha256-pixel:08301acdbb8b3100ddf98d06e0121acf9a05e3aff0a5ae50a56715820d518704
+# downsample-2x  CMU-1-Small-Region.svs  sha256-pixel:51c074e26c4982eaacd40d2c4b23c37a9101c76e742b71013a73a70e58dc1c4b
+
 # Historical (pre-landing-3, wsiwriter):
 # transcode-svs  jpeg  CMU-1-Small-Region.svs  sha256:dadbf53549f93f4e72df1e499b2569b0efbe06c69bfe60985bad067b24f9b4a5
 # transcode-svs  jpeg  CMU-1.svs  sha256:b9673c91c884a4338645f4827dc671a0b765d1093547e99a07ca1731262c9e3e
