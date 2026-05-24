@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	_ "github.com/wsilabs/wsitools/internal/codec/all"
+	_ "github.com/wsilabs/opentile-go/decoder/all"
 	"github.com/spf13/cobra"
 )
 
