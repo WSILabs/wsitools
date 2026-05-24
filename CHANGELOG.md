@@ -2,6 +2,46 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-05-24
+
+Consumes opentile-go v0.22.0's new `decoder/` and `resample/`
+subpackages. Deletes wsitools' own `internal/decoder` +
+`internal/resample`; transcode + downsample now source decoders from
+opentile-go. No behavior change — transcode + downsample output is
+**pixel-identical** to v0.8.1 (verified by `wsitools hash --mode pixel`).
+Byte-level file hashes vary run-to-run on both v0.8 and v0.9 due to
+wsitools' nondeterministic concurrent tile-writer; the decoded pixel
+content is preserved exactly.
+
+### Dependencies
+
+- Bumped `github.com/wsilabs/opentile-go` to v0.22.0.
+
+### Changed (internal)
+
+- Deleted `internal/decoder/` (JPEG + JPEG 2000 decoders moved to
+  `github.com/wsilabs/opentile-go/decoder/{jpeg,jpeg2000}`).
+- Deleted `internal/resample/` (Lanczos + Box resamplers moved to
+  `github.com/wsilabs/opentile-go/resample`).
+- transcode.go + downsample.go updated to use the new decoder API
+  (registry-based factory lookup; `*decoder.Image` return type instead
+  of `[]byte`).
+- `cmd/wsitools/main.go` now blank-imports
+  `github.com/wsilabs/opentile-go/decoder/all` to register every codec.
+
+### Unchanged
+
+- All command-line surfaces (transcode, downsample, convert, info,
+  dump-ifds, extract, hash, doctor, version).
+- All output formats; decoded pixel content pixel-identical to v0.8.1.
+- `internal/codec/` (encoders) unchanged.
+
+### Install
+
+```sh
+go install github.com/wsilabs/wsitools/cmd/wsitools@v0.9.0
+```
+
 ## [0.8.1] — 2026-05-23
 
 Patch release: corrects the embedded `Version` constant. v0.8.0 was
