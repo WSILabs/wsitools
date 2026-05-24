@@ -4,8 +4,8 @@
 # Future regressions show up as goldens-byte-stable failures here.
 # Update entries with a justification in the PR description.
 
-v0.10.0  transcode-svs   jpeg  CMU-1-Small-Region.svs  sha256:643be4be9032315ef5d547227337aeabc137784ad5c2a896e3a5ba98ef0f43ec
-v0.10.0  transcode-svs   jpeg  CMU-1.svs  sha256:c69225b17798241a34d1c66baeaa6d171389c7700c5512f9a81e83f5821aca1c
-v0.10.0  transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:25a0ec72777eda98785b35ed629cc6b2b8f80576b7a37bfd7146997ec70cb531
-v0.10.0  transcode-tiff  jpeg  CMU-1.svs  sha256:6af43da7204904c1782a0bf04d685002c4415cb5c054d53fa1c37a13ee502cc8
-v0.10.0  downsample-2x   CMU-1-Small-Region.svs  sha256:0e56e0ad7e30655134473207b33ac0330a611478c15aa0173a30ea29ab0c31c7
+v0.10.0  transcode-svs   jpeg  CMU-1-Small-Region.svs  sha256:792bac148ed1892fce96b277d86498798472e3ccfcdc797e4a1cc21687bfb925
+v0.10.0  transcode-svs   jpeg  CMU-1.svs  sha256:3de558dd004809f5bc85eddee2db9148cb824994bd696dfef9459f2f10f72755
+v0.10.0  transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:59d18de107da1470d66d73a58369a5b0595f54aee5991d007aaadb1635865e78
+v0.10.0  transcode-tiff  jpeg  CMU-1.svs  sha256:680259fc8b57461ee11bc928d92d3c428efb6b9131545f906435fca2dbe9cc7d
+v0.10.0  downsample-2x   CMU-1-Small-Region.svs  sha256:731592c763d2033df975e13b07ebbb11fea8496c27282308ad41e92ed2ea676e
