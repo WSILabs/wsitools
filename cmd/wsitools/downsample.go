@@ -35,11 +35,11 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
+	otresample "github.com/wsilabs/opentile-go/resample"
 	codec "github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
-	"github.com/wsilabs/wsitools/internal/decoder"
 	"github.com/wsilabs/wsitools/internal/pipeline"
-	"github.com/wsilabs/wsitools/internal/resample"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
@@ -463,14 +463,21 @@ func buildPyramid(ctx context.Context, src opentile.Tiler, w *streamwriter.Write
 				currentRaster = cropRaster(currentRaster, currentW, currentH, evenW, evenH)
 				currentW, currentH = evenW, evenH
 			}
-			next, err := resample.Area2x2(currentRaster, currentW, currentH)
-			if err != nil {
+			srcImg := &otdecoder.Image{
+				Width:  currentW,
+				Height: currentH,
+				Stride: currentW * 3,
+				Format: otdecoder.PixelFormatRGB,
+				Pix:    currentRaster,
+			}
+			dstImg := otdecoder.NewImageFormat(currentW/2, currentH/2, otdecoder.PixelFormatRGB)
+			if err := otresample.ImageInto(srcImg, dstImg, otresample.Box); err != nil {
 				if progress != nil {
 					progress.Wait()
 				}
-				return fmt.Errorf("Area2x2 level %d→%d: %w", outLvl, outLvl+1, err)
+				return fmt.Errorf("Box halving level %d→%d: %w", outLvl, outLvl+1, err)
 			}
-			currentRaster = next
+			currentRaster = dstImg.Pix
 			currentW /= 2
 			currentH /= 2
 			if currentW == 0 || currentH == 0 {
@@ -514,8 +521,8 @@ func materializeOutputL0(ctx context.Context, srcL0 opentile.Level, outL0 []byte
 	// For interior tiles this is srcTileW/factor, srcTileH/factor exactly
 	// (we choose factors that divide common tile sizes 240/256 cleanly:
 	// 240/2=120, 240/4=60, 240/8=30, 240/16=15; same shape for 256).
-	jpegDec := decoder.NewJPEG()
-	jp2kDec := decoder.NewJPEG2000()
+	jpegFac, jpegOK := otdecoder.Get("jpeg")
+	jp2kFac, jp2kOK := otdecoder.Get("jpeg2000")
 
 	tileBuf := make([]byte, srcL0.TileMaxSize())
 
@@ -556,19 +563,36 @@ func materializeOutputL0(ctx context.Context, srcL0 opentile.Level, outL0 []byte
 				// × ceil(srcTileH/factor) RGB. The "valid" sub-region inside
 				// the decoded tile is ceil(validSrcW/factor) × ceil(validSrcH/factor)
 				// — at slide edges, padding pixels follow.
-				decoded, err = jpegDec.DecodeTile(compressed, nil, 1, factor)
+				if !jpegOK {
+					return fmt.Errorf("jpeg decoder not registered")
+				}
+				dec := jpegFac.New()
+				defer dec.Close()
+				img, err := dec.Decode(compressed, otdecoder.DecodeOptions{
+					Scale:  factor,
+					Format: otdecoder.PixelFormatRGB,
+				})
 				if err != nil {
 					return fmt.Errorf("decode JPEG tile (%d,%d): %w", tx, ty, err)
 				}
+				decoded = img.Pix
 				decW = (srcTileW + factor - 1) / factor
 				decH = (srcTileH + factor - 1) / factor
 			case opentile.CompressionJP2K:
-				// Full-decode then chained 2x2 area-average factor/2 times.
-				full, err := jp2kDec.DecodeTile(compressed, nil, 1, 1)
+				// Full-decode then chained Box-halving factor/2 times.
+				if !jp2kOK {
+					return fmt.Errorf("jpeg2000 decoder not registered")
+				}
+				dec := jp2kFac.New()
+				defer dec.Close()
+				fullImg, err := dec.Decode(compressed, otdecoder.DecodeOptions{
+					Scale:  1,
+					Format: otdecoder.PixelFormatRGB,
+				})
 				if err != nil {
 					return fmt.Errorf("decode JP2K tile (%d,%d): %w", tx, ty, err)
 				}
-				decoded, decW, decH, err = downsampleByPowerOf2(full, srcTileW, srcTileH, factor)
+				decoded, decW, decH, err = downsampleByPowerOf2(fullImg.Pix, srcTileW, srcTileH, factor)
 				if err != nil {
 					return fmt.Errorf("downsample JP2K tile (%d,%d): %w", tx, ty, err)
 				}
@@ -622,8 +646,8 @@ func pasteIntoRaster(dst []byte, dstW, dstH, dx, dy int, src []byte, srcStrideW,
 	}
 }
 
-// downsampleByPowerOf2 chains Area2x2 calls log2(factor) times to produce a
-// downsampled RGB buffer. Returns the downsampled bytes and its dimensions.
+// downsampleByPowerOf2 chains Box-halving steps log2(factor) times to produce
+// a downsampled RGB buffer. Returns the downsampled bytes and its dimensions.
 // Requires factor to be a power of two and srcW/srcH to be even at every
 // step (the v0.1 caller ensures this by choosing factor ∈ {2,4,8,16} and
 // using source tile sizes that are multiples of 16).
@@ -631,11 +655,18 @@ func downsampleByPowerOf2(rgb []byte, srcW, srcH, factor int) ([]byte, int, int,
 	cur := rgb
 	curW, curH := srcW, srcH
 	for f := factor; f > 1; f /= 2 {
-		next, err := resample.Area2x2(cur, curW, curH)
-		if err != nil {
+		srcImg := &otdecoder.Image{
+			Width:  curW,
+			Height: curH,
+			Stride: curW * 3,
+			Format: otdecoder.PixelFormatRGB,
+			Pix:    cur,
+		}
+		dstImg := otdecoder.NewImageFormat(curW/2, curH/2, otdecoder.PixelFormatRGB)
+		if err := otresample.ImageInto(srcImg, dstImg, otresample.Box); err != nil {
 			return nil, 0, 0, err
 		}
-		cur = next
+		cur = dstImg.Pix
 		curW /= 2
 		curH /= 2
 	}
