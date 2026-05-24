@@ -2,6 +2,41 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-05-24
+
+Deterministic tile-write order. `transcode` + `downsample` + `convert`
+output is now byte-identical across runs and CPU counts. Adds a
+pluggable tile-order strategy (RowMajor default; HilbertCurve, Morton
+available on permissive formats; SVS strict row-major).
+
+### Added
+
+- New `--tile-order={row-major|hilbert|morton}` CLI flag on transcode,
+  downsample, convert. Format-validated: SVS accepts row-major only;
+  COG-WSI, generic-TIFF, OME-TIFF accept all three.
+- `internal/tiff/tileorder` package: OrderStrategy interface, RowMajor,
+  HilbertCurve, Morton, ByName registry.
+- Reorder buffer in streamwriter Sink (bounded; back-pressures workers
+  when full).
+- cogwsiwriter finalize pass consults the strategy for write order.
+- `make goldens-byte-stable` Makefile target asserting deterministic
+  output across GOMAXPROCS.
+
+### Changed
+
+- Output bytes are now stable run-to-run. Existing pre-v0.10 file SHAs
+  in `docs/superpowers/golden-masters-v0.6.0-transcode.txt` are
+  historical-only; see `golden-masters-v0.10.0.txt` for v0.10
+  canonical hashes.
+
+### Unchanged
+
+- All CLI surfaces and Go APIs (additive only).
+- Default behavior — unflagged invocations produce row-major output as
+  before.
+- Pixel-equality with v0.9 — only on-disk byte order changes, never
+  decoded pixel values.
+
 ## [0.9.0] — 2026-05-24
 
 Consumes opentile-go v0.22.0's new `decoder/` and `resample/`
