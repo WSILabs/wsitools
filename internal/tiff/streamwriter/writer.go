@@ -37,8 +37,9 @@ type Writer struct {
 	bigtiff bool
 	off     int64 // current write offset (end of file)
 
-	imgs   []*imageEntry
-	closed bool
+	imgs    []*imageEntry
+	handles map[*imageEntry]*LevelHandle // populated in AddLevel; used for synchronous drain
+	closed  bool
 
 	// L0 metadata from Options.
 	imageDescription string
