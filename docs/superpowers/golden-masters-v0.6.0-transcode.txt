@@ -25,3 +25,12 @@ downsample-2x  CMU-1-Small-Region.svs  sha256:7c733bc1af339b9d0c2bbfb16482465584
 # transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:dd05d34ad9cb56b7bf55db5120f81ad8af43f9bafdbc6cd6afd52c6728d45f86
 # transcode-tiff  jpeg  CMU-1.svs  sha256:64fb01e3708ab63922461fcd726419bcfab5e6b3ef1382d3b363fa515a9f3d6c
 # downsample-2x  CMU-1-Small-Region.svs  sha256:c6b6bae18b8bfd4420b7425bca9fd866dcdd68f65b8bcd2e26e47071a6994039
+
+# === Pre-v0.9.0-port capture (decoder + resample lift) ===
+# These hashes capture transcode + downsample output using the
+# PRE-PORT wsitools (still using internal/decoder + internal/resample).
+v0.9.0-pre  transcode-svs   jpeg  CMU-1-Small-Region.svs  sha256:bdf95da948704c3b8fb5fd312aab807e1f7c13a007f09840e852115e728a2bbc
+v0.9.0-pre  transcode-svs   jpeg  CMU-1.svs  sha256:b4d459aa1d127638bc591a6057f4acf04daf17452f475dcb5866d5cfaaf249d6
+v0.9.0-pre  transcode-tiff  jpeg  CMU-1-Small-Region.svs  sha256:c1a38bc51b135259c6195285b51c0fb2aafb61d9827a5366be9f560de6d1335d
+v0.9.0-pre  transcode-tiff  jpeg  CMU-1.svs  sha256:bffb255f5053eb5c9db118ec7ca12ed5687c49bee3d34afe70a1936483d0a1d1
+v0.9.0-pre  downsample-2x   CMU-1-Small-Region.svs  sha256:ad70f06ba164deca05ea9d656287aa6f36a29f2f49447aae71c59a592fc77796
