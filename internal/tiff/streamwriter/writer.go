@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 // imageEntry is the internal per-IFD state held by the Writer.
@@ -51,6 +52,12 @@ type Writer struct {
 
 	// computed during Close.
 	pyramidLevelCount int
+
+	// tile-order config populated from Options in Create.
+	formatName             string
+	acceptedOrders         map[string]bool // nil → permissive
+	defaultOrder           tileorder.OrderStrategy
+	defaultReorderCapacity uint32
 }
 
 // Create opens a new streaming TIFF for writing at path. The file is
@@ -89,6 +96,22 @@ func Create(path string, opts Options) (*Writer, error) {
 		os.Remove(tmp)
 		return nil, fmt.Errorf("streamwriter: seek after header: %w", err)
 	}
+	// Populate tile-order config from Options.
+	w.formatName = opts.FormatName
+	if w.formatName == "" {
+		w.formatName = "tiff"
+	}
+	if len(opts.AcceptedOrders) > 0 {
+		w.acceptedOrders = make(map[string]bool, len(opts.AcceptedOrders))
+		for _, n := range opts.AcceptedOrders {
+			w.acceptedOrders[n] = true
+		}
+	}
+	w.defaultOrder = opts.DefaultOrder
+	if w.defaultOrder == nil {
+		w.defaultOrder = tileorder.RowMajor
+	}
+	w.defaultReorderCapacity = opts.DefaultReorderCapacity
 	return w, nil
 }
 
@@ -271,4 +294,28 @@ func (w *Writer) addL0Metadata(b *tiff.EntryBuilder) {
 // formatTIFFDateTime formats t as TIFF 6.0's "YYYY:MM:DD HH:MM:SS".
 func formatTIFFDateTime(t time.Time) string {
 	return t.Format("2006:01:02 15:04:05")
+}
+
+// AcceptsOrder returns true iff this writer's format permits the given
+// tile-order strategy. A writer with no acceptedOrders restriction
+// (the "tiff" default) accepts all strategies. SVS-configured writers
+// accept only "row-major".
+func (w *Writer) AcceptsOrder(s tileorder.OrderStrategy) bool {
+	if w.acceptedOrders == nil {
+		return true
+	}
+	return w.acceptedOrders[s.Name()]
+}
+
+// AcceptedOrderNames returns the canonical names this writer accepts,
+// or nil for permissive writers.
+func (w *Writer) AcceptedOrderNames() []string {
+	if w.acceptedOrders == nil {
+		return nil
+	}
+	out := make([]string, 0, len(w.acceptedOrders))
+	for n := range w.acceptedOrders {
+		out = append(out, n)
+	}
+	return out
 }

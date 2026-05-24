@@ -31,4 +31,15 @@ type Options struct {
 	// capacity. 0 → max(8, 2*workers) computed at AddLevel time.
 	// Debug knob; CLI does not expose this.
 	DefaultReorderCapacity uint32
+
+	// FormatName identifies the target file format for tile-order
+	// validation: "svs", "tiff", "ome-tiff", "cog-wsi". Empty defaults
+	// to "tiff" (permissive: accepts all strategies).
+	FormatName string
+
+	// AcceptedOrders restricts which tile-order strategies are
+	// permitted at AddLevel time. Empty means "all registered
+	// strategies allowed" (the "tiff" default). For SVS callers
+	// should set this to ["row-major"].
+	AcceptedOrders []string
 }
