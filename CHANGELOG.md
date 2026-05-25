@@ -2,6 +2,30 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-05-24
+
+Migrates to opentile-go v0.23.0's new `*Slide` API. No behavior change
+for end-users; this is an internal type migration. CLI surface
+unchanged.
+
+### Dependencies
+
+- Bumped `github.com/wsilabs/opentile-go` to v0.23.0 (BREAKING upstream:
+  `opentile.Tiler` interface replaced by `*opentile.Slide` struct).
+
+### Changed (internal)
+
+- Every `opentile.OpenTiler(...)` call site migrated to
+  `opentile.OpenFile(...)`. Every `opentile.Tiler` typed variable
+  migrated to `*opentile.Slide`. Method-call shape preserved exactly.
+
+### Unchanged
+
+- All CLI surfaces (transcode, downsample, convert, info, dump-ifds,
+  extract, hash, doctor, version).
+- Output bytes — pixel-identical AND byte-identical to v0.10 (verified
+  via `make goldens-byte-stable`).
+
 ## [0.10.0] — 2026-05-24
 
 Deterministic tile-write order. `transcode` + `downsample` + `convert`
