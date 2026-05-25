@@ -95,9 +95,9 @@ func TestSyntheticSVSRoundTrip(t *testing.T) {
 	} else {
 		t.Errorf("svs.MetadataOf returned !ok")
 	}
-	got, err := tlr.Levels()[0].Tile(0, 0)
+	got, err := tlr.RawTile(0, 0, 0)
 	if err != nil {
-		t.Fatalf("Tile(0,0): %v", err)
+		t.Fatalf("RawTile(0,0,0): %v", err)
 	}
 	if len(got) == 0 {
 		t.Errorf("empty tile bytes from opentile-go")

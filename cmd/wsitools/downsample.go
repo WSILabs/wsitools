@@ -167,8 +167,8 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 
 	// Compute output L0 dimensions.
 	srcL0 := src.Levels()[0]
-	srcW := srcL0.Size().W
-	srcH := srcL0.Size().H
+	srcW := srcL0.Size.W
+	srcH := srcL0.Size.H
 	outW := srcW / dsFactor
 	outH := srcH / dsFactor
 	if outW <= 0 || outH <= 0 {
@@ -343,8 +343,8 @@ func isValidFactor(f int) bool {
 func predictBigTIFFNeeded(srcL0 opentile.Level, levels []opentile.Level, factor int) bool {
 	var total int64
 	for _, l := range levels {
-		w := int64(l.Size().W / factor)
-		h := int64(l.Size().H / factor)
+		w := int64(l.Size.W / factor)
+		h := int64(l.Size.H / factor)
 		// JPEG 1/8 compression ratio rough estimate for RGB888.
 		total += w * h * 3 / 8
 	}
@@ -371,8 +371,8 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	srcLevels := src.Levels()
 	srcL0 := srcLevels[0]
 
-	srcW := srcL0.Size().W
-	srcH := srcL0.Size().H
+	srcW := srcL0.Size.W
+	srcH := srcL0.Size.H
 	outW := srcW / factor
 	outH := srcH / factor
 
@@ -419,7 +419,7 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	}
 	slog.Debug("materialising output L0 raster", "out_w", outW, "out_h", outH, "raster_mb", rasterBytes/(1024*1024))
 	outL0 := make([]byte, rasterBytes)
-	if err := materializeOutputL0(ctx, srcL0, outL0, outW, outH, factor); err != nil {
+	if err := materializeOutputL0(ctx, src, srcL0, outL0, outW, outH, factor); err != nil {
 		if progress != nil {
 			progress.Wait()
 		}
@@ -523,13 +523,13 @@ func cropRaster(src []byte, srcW, srcH, dstW, dstH int) []byte {
 // materializeOutputL0 decodes every source-L0 tile at libjpeg-turbo fast-scale
 // 1/factor (JPEG path) or full-decode + chained 2x2 area-average (JP2K path)
 // and pastes the result into outL0 at the correct image-space position.
-func materializeOutputL0(ctx context.Context, srcL0 opentile.Level, outL0 []byte, outW, outH, factor int) error {
-	srcCompression := srcL0.Compression()
-	srcGrid := srcL0.Grid()
-	srcTileW := srcL0.TileSize().W
-	srcTileH := srcL0.TileSize().H
-	srcW := srcL0.Size().W
-	srcH := srcL0.Size().H
+func materializeOutputL0(ctx context.Context, src *opentile.Slide, srcL0 opentile.Level, outL0 []byte, outW, outH, factor int) error {
+	srcCompression := srcL0.Compression
+	srcGrid := srcL0.Grid
+	srcTileW := srcL0.TileSize.W
+	srcTileH := srcL0.TileSize.H
+	srcW := srcL0.Size.W
+	srcH := srcL0.Size.H
 
 	// libjpeg-turbo's scale formula: outDim = ceil(inDim * 1 / factor).
 	// For interior tiles this is srcTileW/factor, srcTileH/factor exactly
@@ -538,7 +538,7 @@ func materializeOutputL0(ctx context.Context, srcL0 opentile.Level, outL0 []byte
 	jpegFac, jpegOK := otdecoder.Get("jpeg")
 	jp2kFac, jp2kOK := otdecoder.Get("jpeg2000")
 
-	tileBuf := make([]byte, srcL0.TileMaxSize())
+	tileBuf := make([]byte, src.TileMaxSize(srcL0.Index))
 
 	for ty := 0; ty < srcGrid.H; ty++ {
 		for tx := 0; tx < srcGrid.W; tx++ {
@@ -547,7 +547,7 @@ func materializeOutputL0(ctx context.Context, srcL0 opentile.Level, outL0 []byte
 				return ctx.Err()
 			default:
 			}
-			n, err := srcL0.TileInto(tx, ty, tileBuf)
+			n, err := src.RawTileInto(srcL0.Index, tx, ty, tileBuf)
 			if err != nil {
 				return fmt.Errorf("read source tile (%d,%d): %w", tx, ty, err)
 			}
