@@ -2,6 +2,30 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-05-25
+
+Adopts opentile-go v0.24.0 (Level value-type + DecodedTile). No
+behavior change for end-users; this is an internal type migration.
+
+### Dependencies
+
+- Bumped `github.com/wsilabs/opentile-go` to v0.24.0 (BREAKING
+  upstream: Level/Image interfaces → value-type structs; tile reads
+  moved to *Slide methods).
+
+### Changed (internal)
+
+- Every `slide.Levels()[i].Tile(...)` migrated to
+  `slide.RawTile(i, ...)`. Every Level field access migrated from
+  method call to struct field. CLI surface unchanged.
+
+### Unchanged
+
+- All CLI surfaces (transcode, downsample, convert, info, dump-ifds,
+  extract, hash, doctor, version).
+- Output bytes — pixel-identical to v0.11 (verified via
+  `make goldens-byte-stable`).
+
 ## [0.11.0] — 2026-05-24
 
 Migrates to opentile-go v0.23.0's new `*Slide` API. No behavior change
