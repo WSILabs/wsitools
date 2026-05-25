@@ -367,7 +367,7 @@ func countTilesForLevel(w, h int) int {
 // postL0Hook, if non-nil, is called after writing L0 and before writing L1.
 // The caller uses this to inject the thumbnail IFD between L0 and L1 to match
 // Aperio's quirky IFD ordering convention.
-func buildPyramid(ctx context.Context, src opentile.Tiler, w *streamwriter.Writer, factor, quality, workers int, postL0Hook func() error) error {
+func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writer, factor, quality, workers int, postL0Hook func() error) error {
 	srcLevels := src.Levels()
 	srcL0 := srcLevels[0]
 

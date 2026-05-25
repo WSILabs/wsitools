@@ -40,7 +40,7 @@ func Open(path string) (Source, error) {
 	return &opentileSource{t: t, path: path, desc: desc}, nil
 }
 
-func oneFrameOME(t opentile.Tiler) bool {
+func oneFrameOME(t *opentile.Slide) bool {
 	for _, lvl := range t.Levels() {
 		if lvl.TileSize() == (opentile.Size{}) {
 			return true
@@ -50,7 +50,7 @@ func oneFrameOME(t opentile.Tiler) bool {
 }
 
 type opentileSource struct {
-	t    opentile.Tiler
+	t    *opentile.Slide
 	path string
 	desc string
 }
