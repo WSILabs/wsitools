@@ -17,10 +17,10 @@ bench:
 	$(GO) test ./tests/bench/... -bench=. -benchmem -run=^$$
 
 install:
-	$(GO) install -tags nohtj2k ./cmd/wsitools
+	$(GO) install ./cmd/wsitools
 
 build:
-	$(GO) build -tags nohtj2k -o $(BIN) ./cmd/wsitools
+	$(GO) build -o $(BIN) ./cmd/wsitools
 
 clean:
 	rm -rf bin/ coverage.txt
