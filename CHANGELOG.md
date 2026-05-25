@@ -2,6 +2,42 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-05-25
+
+### Added
+
+- `wsitools region` subcommand — extract a rectangular pixel region
+  from a slide at a chosen pyramid level and write as PNG.
+
+  Flags:
+  - `--level N` (required) — pyramid level index.
+  - `--rect X,Y,W,H` OR `--x X --y Y --w W --h H` (mutually
+    exclusive; one form required).
+  - `--image N` (default 0) — for multi-image OME-TIFF.
+  - `--format rgb|rgba` (default rgb).
+  - `-o, --output PATH` (required) — PNG output path.
+  - `-f, --force` — overwrite existing output file.
+
+  Out-of-bounds regions are white-filled per opentile-go v0.25's
+  ReadRegion semantics.
+
+  Examples:
+
+      wsitools region --level 0 --rect 1000,1000,512,512 -o patch.png slide.svs
+      wsitools region --level 2 --x 0 --y 0 --w 512 --h 512 -o thumb.png slide.svs
+
+### Dependencies
+
+- Bumped `github.com/wsilabs/opentile-go` to v0.25.0 (adds the
+  `ReadRegion` family the new subcommand consumes).
+
+### Unchanged
+
+- All other CLI surfaces (transcode, downsample, convert, info,
+  dump-ifds, extract, hash, doctor, version).
+- Output bytes from existing commands — pixel-identical to v0.12
+  (verified via `make goldens-byte-stable`).
+
 ## [0.12.0] — 2026-05-25
 
 Adopts opentile-go v0.24.0 (Level value-type + DecodedTile). No
