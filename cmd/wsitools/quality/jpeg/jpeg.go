@@ -11,6 +11,37 @@ import (
 	"github.com/wsilabs/wsitools/cmd/wsitools/quality"
 )
 
+// libjpegTableCoeffOfVariation returns the coefficient of variation (stdev/mean)
+// of the per-entry ratios qt[i]/standardLumaTable[i]. A libjpeg-scaled table
+// has a nearly constant ratio (CV ≈ 0.05–0.15); a custom or non-standard table
+// will have CV >> 0.3.
+func libjpegTableCoeffOfVariation(qt []int) float64 {
+	if len(qt) == 0 {
+		return 0
+	}
+	var mean float64
+	for i := 0; i < 64 && i < len(qt); i++ {
+		if standardLumaTable[i] == 0 {
+			continue
+		}
+		mean += float64(qt[i]) / float64(standardLumaTable[i])
+	}
+	mean /= 64
+	if mean == 0 {
+		return 0
+	}
+	var variance float64
+	for i := 0; i < 64 && i < len(qt); i++ {
+		if standardLumaTable[i] == 0 {
+			continue
+		}
+		r := float64(qt[i]) / float64(standardLumaTable[i])
+		variance += (r - mean) * (r - mean)
+	}
+	variance /= 64
+	return math.Sqrt(variance) / mean
+}
+
 func init() {
 	quality.Register(&inspector{})
 }
@@ -25,7 +56,9 @@ func (*inspector) Inspect(tileBytes []byte) (quality.Info, error) {
 	}
 
 	var (
-		dqtQuant     [64]int
+		// dqtTables holds all quantization tables keyed by tableID (0–3).
+		// We accumulate across all DQT segments and prefer tableID 0 (luma).
+		dqtTables    [4]*[64]int
 		dqtFound     bool
 		sofComponents []sofComponent
 		sofFound     bool
@@ -68,11 +101,9 @@ func (*inspector) Inspect(tileBytes []byte) (quality.Info, error) {
 		i += segLen
 
 		switch marker {
-		case 0xDB: // DQT
-			if !dqtFound {
-				parseFirstDQT(segData, &dqtQuant)
-				dqtFound = true
-			}
+		case 0xDB: // DQT — accumulate all tables; a single DQT segment may carry multiple tables.
+			parseDQTSegment(segData, &dqtTables)
+			dqtFound = true
 		case 0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF: // SOFn (excluding 0xC4 DHT and 0xC8 reserved)
 			if !sofFound {
 				comps := parseSOF(segData)
@@ -88,8 +119,36 @@ done:
 			missingStr(dqtFound, sofFound))
 	}
 
-	q := estimateQuality(dqtQuant[:])
+	// Prefer tableID 0 (luma). Fall back to the first non-nil table if absent.
+	lumaTable := dqtTables[0]
+	if lumaTable == nil {
+		for _, t := range dqtTables {
+			if t != nil {
+				lumaTable = t
+				break
+			}
+		}
+	}
+	if lumaTable == nil {
+		return quality.Info{}, fmt.Errorf("jpeg: DQT segment present but no table parsed")
+	}
+
+	q := estimateQuality(lumaTable[:])
 	cs, notes := chromaSubsampling(sofComponents)
+
+	// Detect non-libjpeg-standard quantization tables. Aperio SVS and some
+	// other encoders use custom tables that don't follow the libjpeg scaling
+	// formula (Q=50 baseline scaled by S). For such tables the Q estimate is
+	// derived mechanically from the libjpeg inverse formula and may not
+	// reflect the encoder's intended perceptual quality level.
+	if cv := libjpegTableCoeffOfVariation(lumaTable[:]); cv > 0.3 {
+		customNote := "Q estimate is best-effort; encoder uses a custom quantization table (non-libjpeg)"
+		if notes == "" {
+			notes = customNote
+		} else {
+			notes = notes + "; " + customNote
+		}
+	}
 
 	return quality.Info{
 		Codec:             "JPEG",
@@ -111,30 +170,45 @@ func missingStr(dqt, sof bool) string {
 	}
 }
 
-// parseFirstDQT extracts the first quantization table found in the
-// DQT segment. Stores into out (64 ints). Handles both 8-bit and
-// 16-bit precision tables. Subsequent tables (if any) ignored.
-func parseFirstDQT(seg []byte, out *[64]int) {
-	if len(seg) < 1 {
-		return
-	}
-	precision := (seg[0] >> 4) & 0x0F // 0 = 8-bit, 1 = 16-bit
-	tableSize := 64
-	if precision == 1 {
-		tableSize = 128 // 64 * 2 bytes
-	}
-	if len(seg) < 1+tableSize {
-		return
-	}
-	data := seg[1 : 1+tableSize]
-	if precision == 0 {
-		for i := 0; i < 64; i++ {
-			out[i] = int(data[i])
+// parseDQTSegment parses a DQT segment payload and stores all quantization
+// tables found in it into tables, keyed by tableID (0–3). A single DQT
+// segment may carry multiple concatenated tables. Handles both 8-bit
+// (precision=0) and 16-bit (precision=1) tables.
+func parseDQTSegment(seg []byte, tables *[4]*[64]int) {
+	offset := 0
+	for offset < len(seg) {
+		if offset+1 > len(seg) {
+			break
 		}
-	} else {
-		for i := 0; i < 64; i++ {
-			out[i] = int(binary.BigEndian.Uint16(data[i*2 : i*2+2]))
+		hdr := seg[offset]
+		precision := (hdr >> 4) & 0x0F // 0 = 8-bit, 1 = 16-bit
+		tableID := hdr & 0x0F
+		offset++
+
+		tableSize := 64
+		if precision == 1 {
+			tableSize = 128 // 64 * 2 bytes
 		}
+		if offset+tableSize > len(seg) {
+			break // truncated; ignore remainder
+		}
+		data := seg[offset : offset+tableSize]
+		offset += tableSize
+
+		if tableID > 3 {
+			continue // invalid table ID; skip
+		}
+		t := new([64]int)
+		if precision == 0 {
+			for i := 0; i < 64; i++ {
+				t[i] = int(data[i])
+			}
+		} else {
+			for i := 0; i < 64; i++ {
+				t[i] = int(binary.BigEndian.Uint16(data[i*2 : i*2+2]))
+			}
+		}
+		tables[tableID] = t
 	}
 }
 
