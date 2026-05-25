@@ -8,8 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wsilabs/wsitools/cmd/wsitools/quality"
+	_ "github.com/wsilabs/wsitools/cmd/wsitools/quality/all"
 	"github.com/wsilabs/wsitools/internal/cliout"
 	"github.com/wsilabs/wsitools/internal/source"
+
+	opentile "github.com/wsilabs/opentile-go"
 )
 
 var infoJSON *bool
@@ -33,12 +37,13 @@ func init() {
 }
 
 type infoLevel struct {
-	Index       int    `json:"index"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-	TileWidth   int    `json:"tile_width"`
-	TileHeight  int    `json:"tile_height"`
-	Compression string `json:"compression"`
+	Index       int           `json:"index"`
+	Width       int           `json:"width"`
+	Height      int           `json:"height"`
+	TileWidth   int           `json:"tile_width"`
+	TileHeight  int           `json:"tile_height"`
+	Compression string        `json:"compression"`
+	Quality     *quality.Info `json:"quality,omitempty"`
 }
 
 type infoAssoc struct {
@@ -105,6 +110,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 			TileWidth:   lvl.TileSize().X,
 			TileHeight:  lvl.TileSize().Y,
 			Compression: lvl.Compression().String(),
+			Quality:     inspectLevel(lvl),
 		})
 	}
 	for _, a := range src.Associated() {
@@ -149,9 +155,13 @@ func renderInfoText(w io.Writer, r *infoResult) error {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Levels:")
 		for _, lvl := range r.Levels {
-			fmt.Fprintf(w, "  L%d  %d × %d   tile %d×%d   %s\n",
+			fmt.Fprintf(w, "  L%d  %d × %d   tile %d×%d   %s",
 				lvl.Index, lvl.Width, lvl.Height,
 				lvl.TileWidth, lvl.TileHeight, lvl.Compression)
+			if lvl.Quality != nil {
+				fmt.Fprintf(w, "  %s", formatQuality(lvl.Quality))
+			}
+			fmt.Fprintln(w)
 		}
 	}
 	if len(r.Associated) > 0 {
@@ -163,4 +173,87 @@ func renderInfoText(w io.Writer, r *infoResult) error {
 		}
 	}
 	return nil
+}
+
+// sourceToOpentileCompression maps source.Compression to the equivalent
+// opentile.Compression used as the registry key in the quality package.
+func sourceToOpentileCompression(c source.Compression) opentile.Compression {
+	switch c {
+	case source.CompressionJPEG:
+		return opentile.CompressionJPEG
+	case source.CompressionJPEG2000:
+		return opentile.CompressionJP2K
+	case source.CompressionLZW:
+		return opentile.CompressionLZW
+	case source.CompressionDeflate:
+		return opentile.CompressionDeflate
+	case source.CompressionNone:
+		return opentile.CompressionNone
+	case source.CompressionAVIF:
+		return opentile.CompressionAVIF
+	case source.CompressionWebP:
+		return opentile.CompressionWebP
+	case source.CompressionJPEGXL:
+		return opentile.CompressionJPEGXL
+	case source.CompressionHTJ2K:
+		return opentile.CompressionHTJ2K
+	}
+	return opentile.CompressionUnknown
+}
+
+// inspectLevel reads a representative tile from the given level and
+// runs the registered quality inspector for the level's codec.
+// Returns a fallback Info (codec name + lossless flag) if no inspector
+// is registered, or nil if the tile read or inspection fails in an
+// unexpected way.
+func inspectLevel(lvl source.Level) *quality.Info {
+	oc := sourceToOpentileCompression(lvl.Compression())
+	insp, ok := quality.For(oc)
+	if !ok {
+		// Fallback: codec name + lossless flag for known-lossless codecs.
+		fallback := quality.Info{
+			Codec:    lvl.Compression().String(),
+			Lossless: isLosslessCompression(lvl.Compression()),
+		}
+		return &fallback
+	}
+	maxSize := lvl.TileMaxSize()
+	if maxSize <= 0 {
+		return nil
+	}
+	buf := make([]byte, maxSize)
+	n, err := lvl.TileInto(0, 0, buf)
+	if err != nil || n == 0 {
+		return nil
+	}
+	info, err := insp.Inspect(buf[:n])
+	if err != nil {
+		return nil
+	}
+	return &info
+}
+
+func isLosslessCompression(c source.Compression) bool {
+	switch c {
+	case source.CompressionNone, source.CompressionLZW, source.CompressionDeflate:
+		return true
+	}
+	return false
+}
+
+func formatQuality(q *quality.Info) string {
+	switch {
+	case q.Lossless && q.LayerCount > 0:
+		return fmt.Sprintf("lossless, %d layers", q.LayerCount)
+	case q.Lossless:
+		return "lossless"
+	case q.LayerCount > 0:
+		return fmt.Sprintf("lossy, %d layers", q.LayerCount)
+	case q.QualityEstimate > 0 && q.ChromaSubsampling != "":
+		return fmt.Sprintf("Q≈%d, %s", q.QualityEstimate, q.ChromaSubsampling)
+	case q.QualityEstimate > 0:
+		return fmt.Sprintf("Q≈%d", q.QualityEstimate)
+	default:
+		return q.Codec
+	}
 }
