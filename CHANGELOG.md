@@ -2,6 +2,37 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-05-25
+
+### Added
+
+- `wsitools info` now includes a per-level codec quality summary
+  alongside compression. JPEG levels show estimated Q value +
+  chroma subsampling (4:4:4 / 4:2:2 / 4:2:0). JPEG 2000 levels show
+  reversible/irreversible transform + layer count. WebP levels show
+  lossless flag + estimated Q. Lossless codecs (LZW/Deflate/None)
+  surface as "lossless". Other codecs (AVIF, JPEG XL, HTJ2K)
+  currently surface compression only; quality inspectors land in
+  future releases without info-command changes.
+- New `cmd/wsitools/quality/` package with pluggable Inspector
+  interface and per-codec subpackages: `quality/jpeg`,
+  `quality/jpeg2000`, `quality/webp`. New codecs register via
+  `quality.Register` in their init().
+
+### Changed
+
+- Dropped `-tags nohtj2k` from `Makefile`'s default `build` /
+  `install` targets. Local builds now exercise the full htj2k cgo
+  path against openjph (`brew install openjph` on macOS). Opt-out
+  with `go build -tags nohtj2k ./cmd/wsitools` if needed.
+
+### Unchanged
+
+- All other CLI surfaces (transcode, downsample, convert, dump-ifds,
+  extract, hash, doctor, version, region).
+- Output bytes from `transcode` / `downsample` / `convert` — same
+  bytes as v0.13.
+
 ## [0.13.0] — 2026-05-25
 
 ### Added
