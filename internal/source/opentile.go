@@ -42,7 +42,7 @@ func Open(path string) (Source, error) {
 
 func oneFrameOME(t *opentile.Slide) bool {
 	for _, lvl := range t.Levels() {
-		if lvl.TileSize() == (opentile.Size{}) {
+		if lvl.TileSize == (opentile.Size{}) {
 			return true
 		}
 	}
@@ -62,7 +62,7 @@ func (s *opentileSource) Close() error                   { return s.t.Close() }
 func (s *opentileSource) Levels() []Level {
 	out := make([]Level, 0, len(s.t.Levels()))
 	for i, lvl := range s.t.Levels() {
-		out = append(out, &opentileLevel{lvl: lvl, index: i})
+		out = append(out, &opentileLevel{lvl: lvl, slide: s.t, index: i})
 	}
 	return out
 }
@@ -100,30 +100,28 @@ func (s *opentileSource) Metadata() Metadata {
 
 type opentileLevel struct {
 	lvl   opentile.Level
+	slide *opentile.Slide
 	index int
 }
 
 func (l *opentileLevel) Index() int { return l.index }
 func (l *opentileLevel) Size() image.Point {
-	sz := l.lvl.Size()
-	return image.Point{X: sz.W, Y: sz.H}
+	return image.Point{X: l.lvl.Size.W, Y: l.lvl.Size.H}
 }
 func (l *opentileLevel) TileSize() image.Point {
-	sz := l.lvl.TileSize()
-	return image.Point{X: sz.W, Y: sz.H}
+	return image.Point{X: l.lvl.TileSize.W, Y: l.lvl.TileSize.H}
 }
 func (l *opentileLevel) Grid() image.Point {
-	g := l.lvl.Grid()
-	return image.Point{X: g.W, Y: g.H}
+	return image.Point{X: l.lvl.Grid.W, Y: l.lvl.Grid.H}
 }
-func (l *opentileLevel) TileMaxSize() int { return l.lvl.TileMaxSize() }
+func (l *opentileLevel) TileMaxSize() int { return l.slide.TileMaxSize(l.index) }
 
 func (l *opentileLevel) TileInto(x, y int, dst []byte) (int, error) {
-	return l.lvl.TileInto(x, y, dst)
+	return l.slide.RawTileInto(l.index, x, y, dst)
 }
 
 func (l *opentileLevel) Compression() Compression {
-	return mapOpentileCompression(l.lvl.Compression())
+	return mapOpentileCompression(l.lvl.Compression)
 }
 
 type opentileAssociated struct {
