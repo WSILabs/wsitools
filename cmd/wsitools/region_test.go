@@ -1,6 +1,11 @@
 package main
 
 import (
+	"image"
+	"image/png"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -165,5 +170,177 @@ func TestResolveRectIndividualNonPositiveWH(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be positive") {
 		t.Errorf("want substring 'must be positive', got: %v", err)
+	}
+}
+
+// regionBinary returns the absolute path to the wsitools binary built
+// via `make build`. Tests skip if it's not present.
+func regionBinary(t *testing.T) string {
+	t.Helper()
+	for _, candidate := range []string{"./bin/wsitools", "../../bin/wsitools"} {
+		if abs, err := filepath.Abs(candidate); err == nil {
+			if _, err := os.Stat(abs); err == nil {
+				return abs
+			}
+		}
+	}
+	t.Skip("wsitools binary not found; run `make build` first")
+	return ""
+}
+
+func regionSample(t *testing.T) string {
+	t.Helper()
+	candidate := filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files/svs/CMU-1-Small-Region.svs")
+	if _, err := os.Stat(candidate); err != nil {
+		t.Skip("sample slide not available")
+	}
+	return candidate
+}
+
+func TestRegionBasicSVS(t *testing.T) {
+	bin := regionBinary(t)
+	sample := regionSample(t)
+	out := filepath.Join(t.TempDir(), "out.png")
+
+	cmd := exec.Command(bin, "region", "--level", "0", "--rect", "0,0,128,128", "-o", out, sample)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("wsitools region: %v\n%s", err, output)
+	}
+
+	info, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("output not created: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Errorf("output is empty")
+	}
+
+	// Decode the PNG and check dimensions.
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatalf("open output: %v", err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatalf("png.Decode: %v", err)
+	}
+	if img.Bounds().Dx() != 128 || img.Bounds().Dy() != 128 {
+		t.Errorf("dims: got %dx%d, want 128x128", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
+func TestRegionRGBAOutput(t *testing.T) {
+	bin := regionBinary(t)
+	sample := regionSample(t)
+	out := filepath.Join(t.TempDir(), "out.png")
+
+	cmd := exec.Command(bin, "region",
+		"--level", "0", "--rect", "0,0,64,64",
+		"--format", "rgba",
+		"-o", out, sample)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("wsitools region: %v\n%s", err, output)
+	}
+
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// All alpha bytes must be 0xFF (the decoder synthesizes opaque alpha).
+	nrgba, ok := img.(*image.NRGBA)
+	if !ok {
+		t.Skipf("PNG decoded to %T (not NRGBA); skipping alpha-byte check", img)
+	}
+	for i := 3; i < len(nrgba.Pix); i += 4 {
+		if nrgba.Pix[i] != 0xFF {
+			t.Fatalf("alpha at offset %d: got %d, want 0xFF", i, nrgba.Pix[i])
+		}
+	}
+}
+
+func TestRegionExtensionCheck(t *testing.T) {
+	bin := regionBinary(t)
+	sample := regionSample(t)
+	out := filepath.Join(t.TempDir(), "out.bmp")
+
+	cmd := exec.Command(bin, "region", "--level", "0", "--rect", "0,0,64,64", "-o", out, sample)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit, got success\n%s", output)
+	}
+	if !strings.Contains(string(output), "only PNG output is supported") {
+		t.Errorf("want 'only PNG output is supported' in error, got: %s", output)
+	}
+}
+
+func TestRegionOverwriteWithoutForce(t *testing.T) {
+	bin := regionBinary(t)
+	sample := regionSample(t)
+	out := filepath.Join(t.TempDir(), "out.png")
+
+	// Pre-create the output file.
+	if err := os.WriteFile(out, []byte("placeholder"), 0644); err != nil {
+		t.Fatalf("pre-create output: %v", err)
+	}
+
+	cmd := exec.Command(bin, "region", "--level", "0", "--rect", "0,0,64,64", "-o", out, sample)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit, got success\n%s", output)
+	}
+	if !strings.Contains(string(output), "output exists") {
+		t.Errorf("want 'output exists' in error, got: %s", output)
+	}
+}
+
+func TestRegionOverwriteWithForce(t *testing.T) {
+	bin := regionBinary(t)
+	sample := regionSample(t)
+	out := filepath.Join(t.TempDir(), "out.png")
+
+	// Pre-create the output file.
+	if err := os.WriteFile(out, []byte("placeholder"), 0644); err != nil {
+		t.Fatalf("pre-create output: %v", err)
+	}
+
+	cmd := exec.Command(bin, "region", "--level", "0", "--rect", "0,0,64,64",
+		"--force", "-o", out, sample)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success with --force, got: %v\n%s", err, output)
+	}
+
+	// Verify it was actually overwritten (file should now decode as PNG, not be "placeholder").
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+	if _, err := png.Decode(f); err != nil {
+		t.Errorf("output is not a valid PNG: %v", err)
+	}
+}
+
+func TestRegionOutOfRangeLevel(t *testing.T) {
+	bin := regionBinary(t)
+	sample := regionSample(t)
+	out := filepath.Join(t.TempDir(), "out.png")
+
+	cmd := exec.Command(bin, "region", "--level", "99", "--rect", "0,0,64,64", "-o", out, sample)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit, got success\n%s", output)
+	}
+	if !strings.Contains(string(output), "out of range") {
+		t.Errorf("want 'out of range' in error, got: %s", output)
 	}
 }
