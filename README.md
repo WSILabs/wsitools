@@ -17,9 +17,9 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   (label, macro, thumbnail, overview) verbatim. SVS-only.
 - `wsitools transcode` — re-encode the pyramid in a different codec while preserving
   source tile geometry and associated images. Streaming (no L0 raster materialisation).
-  Five codec targets: `jpeg`, `jpegxl`, `avif`, `webp`, `htj2k`. Six source formats:
-  SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE, generic-TIFF. NDPI, OME-OneFrame,
-  and Leica SCN error cleanly with `ErrUnsupportedFormat`.
+  Five codec targets: `jpeg`, `jpegxl`, `avif`, `webp`, `htj2k`. Nine source formats:
+  SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE, generic-TIFF, NDPI, OME-OneFrame,
+  and Leica SCN (single-image).
 - `wsitools convert --to cog-wsi` — losslessly copy a WSI into the
   COG-WSI container (Cloud Optimized GeoTIFF + WSI extensions). Tile
   bytes are copied verbatim; no decode, no re-encode. See

@@ -36,6 +36,9 @@ queued, deferred, or under consideration.
 ### v0.8
 - (no new utilities — repository relocation: module path moved from `github.com/cornish/wsitools` to `github.com/wsilabs/wsitools` under the new WSILabs GitHub organization. opentile-go also relocated to `github.com/wsilabs/opentile-go` at v0.21.0. No behavior change. v0.8.1 corrects the embedded `Version` constant that was missed when v0.8.0 was tagged).
 
+### v0.15
+- (no new utilities — source-format expansion: NDPI, OME-OneFrame, and Leica SCN (single-image) slides now work across all CLI subcommands. opentile-go synthesizes tile geometry for striped sources; wsitools' source layer trusts the synthesis. Bit-exact tile-copy promise for `convert` applies to natively-tiled sources only; striped sources produce reproducible but synthesized JPEG tiles in the output.)
+
 ## Planned
 
 ### Batch 2 — extends batch 1
@@ -64,7 +67,7 @@ queued, deferred, or under consideration.
 ## Source format support
 
 ### Deferred from v0.2
-- Leica SCN — multi-image / multi-channel pipeline plumbing.
+- Leica SCN (multi-channel fluorescence) — multi-channel pipeline plumbing deferred.
 
 ## Architectural
 

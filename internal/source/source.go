@@ -1,8 +1,7 @@
 // Package source is a thin adapter between the wsitools CLI and opentile-go.
-// It enforces the v0.2 sanity gate (rejecting NDPI, OME-OneFrame, and Leica
-// SCN at the boundary) and exposes a unified streaming-friendly tile API.
-// Whatever opentile-go's various format-specific quirks are, the CLI consumes
-// them through the Source interface uniformly.
+// It exposes a unified streaming-friendly tile API over opentile-go's
+// synthesized tile geometry. Whatever opentile-go's various format-specific
+// quirks are, the CLI consumes them through the Source interface uniformly.
 package source
 
 import (
@@ -11,8 +10,7 @@ import (
 	"time"
 )
 
-// Source is what the transcode CLI consumes. Wraps an opentile-go Tiler
-// after the sanity gate.
+// Source is what the transcode CLI consumes. Wraps an opentile-go Tiler.
 type Source interface {
 	// Format returns one of the opentile.Format* string values.
 	Format() string
@@ -118,11 +116,10 @@ type Metadata struct {
 }
 
 var (
-	// ErrUnsupportedFormat is returned by Open for source formats that
-	// don't have intrinsic per-tile geometry (NDPI, OME-OneFrame) or that
-	// require multi-image / multi-channel pipeline plumbing not in v0.2.0
-	// scope (Leica SCN).
-	ErrUnsupportedFormat = errors.New("source: format unsupported at v0.2 (NDPI, OME-OneFrame, and Leica SCN are skipped)")
+	// ErrUnsupportedFormat is returned by Open for source formats whose
+	// opentile-go reader reports zero tile geometry on level 0. Call sites
+	// wrap this sentinel with a format-specific diagnostic via fmt.Errorf.
+	ErrUnsupportedFormat = errors.New("source: format unsupported")
 
 	// ErrUnsupportedSourceCompression is returned when a tile uses a
 	// compression we can't decode (e.g., Iris-proprietary, or AVIF source

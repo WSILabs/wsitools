@@ -34,6 +34,18 @@ COG-WSI is an extension of Cloud Optimized GeoTIFF for whole-slide images:
 header-front IFDs, reverse-order tile data (lowest-resolution overview
 first), and an associated-image (label/macro/thumbnail) tail section.
 
+Bit-exact tile-copy promise: for natively-tiled sources (SVS, Philips,
+OME-tiled, BIF, IFE, generic-TIFF, COG-WSI, SZI, single-image Leica-SCN),
+the source's compressed tile bytes appear verbatim in the destination —
+the operation is a pure copy with no re-encoding.
+
+For striped sources (NDPI, OME-OneFrame), the source file has no tile
+bytes — only strip bytes. opentile-go synthesizes JPEG tile bytes on
+demand by extracting MCU-aligned sub-regions. The COG-WSI output is
+reproducible byte-for-byte from the same source (deterministic
+synthesis), but the bytes in the output are opentile-go's synthesized
+JPEG bytes, not the source's strip bytes.
+
 Examples:
 
   wsitools convert --to cog-wsi -o slide.cog.tiff slide.svs
