@@ -2,6 +2,56 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] — 2026-05-25
+
+### Added
+
+- NDPI, OME-OneFrame, and Leica SCN (single-image) slides are now
+  supported across all CLI subcommands (info, transcode, downsample,
+  convert, hash, extract, dump-ifds, region). opentile-go synthesizes
+  tile geometry from striped MCU streams (NDPI) and single-frame OME
+  (OME-OneFrame); wsitools' tile-pipeline now operates on
+  opentile-go-tiled output verbatim.
+
+### Changed
+
+- Dropped the "v0.2 sanity gate" in `internal/source/opentile.go`
+  that rejected NDPI / OME-OneFrame / Leica-SCN. Stale since
+  opentile-go v0.14+ began synthesizing tile geometry.
+- `ErrUnsupportedFormat`'s message updated to drop the "v0.2"
+  version marker; the sentinel remains for genuinely-unsupported
+  future formats.
+
+### Bit-exact tile-copy caveat (convert)
+
+`convert --to cog-wsi` from natively-tiled sources (SVS, Philips,
+OME-tiled, BIF, IFE, generic-TIFF, COG-WSI, SZI, single-image
+Leica-SCN) continues to produce bit-exact tile-copy COG-WSI output
+— the source's compressed tile bytes appear verbatim in the
+destination.
+
+From striped sources (NDPI, OME-OneFrame), the COG-WSI output
+contains opentile-go's synthesized JPEG tile bytes. These bytes
+decode to the same pixels as the source region and are
+deterministic (same input → same output), but they are NOT the
+source's on-disk bytes (NDPI / OneFrame source files don't carry
+tile bytes — they carry strip bytes).
+
+### Out of scope (deferred)
+
+- Multi-channel fluorescence Leica SCN
+  (Leica-Fluorescence-1.scn). transcode/downsample assume RGB
+  channels; multi-channel handling is a future release.
+- Multi-image OME-TIFF where multiple `<Image>` series each carry
+  their own pyramid. `info` shows image 0 only.
+
+### Unchanged
+
+- All other CLI surfaces (region, transcode/downsample/convert
+  on natively-tiled sources, etc.).
+- Output bytes from natively-tiled-source operations — same bytes
+  as v0.14.
+
 ## [0.14.0] — 2026-05-25
 
 ### Added
