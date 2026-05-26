@@ -24,7 +24,7 @@ func TestConvertFailsForBadTo(t *testing.T) {
 	rootCmd.SetArgs([]string{"convert", "--to", "iris", "-o", dir + "/out.tiff", dir + "/in.tiff"})
 	t.Cleanup(func() { rootCmd.SetArgs(nil) })
 	err := rootCmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "only 'cog-wsi'") {
+	if err == nil || !strings.Contains(err.Error(), "unknown target") {
 		t.Errorf("expected unsupported --to error, got %v", err)
 	}
 }
