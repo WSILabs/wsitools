@@ -208,6 +208,127 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runTranscodeAsConvert is the convert-side entry into the transcode
+// re-encode pipeline. It accepts the convert command's flag values
+// directly (instead of reading the tc* globals) so convert can drive
+// the same code path without flag-name collisions. The transcode
+// subcommand still exists and uses runTranscode + the tc* vars.
+func runTranscodeAsConvert(cmd *cobra.Command, input, container, codecName, quality string, workers int, start time.Time) error {
+	if _, err := os.Stat(input); err != nil {
+		return fmt.Errorf("input %s: %w", input, err)
+	}
+	if !cvForce {
+		if _, err := os.Stat(cvOutput); err == nil {
+			return fmt.Errorf("output %s already exists (use --force)", cvOutput)
+		}
+	}
+
+	// Parse quality: default 85 when absent.
+	qualityInt := 85
+	if quality != "" {
+		if _, err := fmt.Sscanf(quality, "%d", &qualityInt); err != nil {
+			return fmt.Errorf("--quality %q: must be an integer 1..100", quality)
+		}
+	}
+	if qualityInt < 1 || qualityInt > 100 {
+		return fmt.Errorf("--quality must be 1..100")
+	}
+
+	// Workers: 0 means GOMAXPROCS.
+	if workers == 0 {
+		workers = runtime.NumCPU()
+	}
+
+	fac, err := codec.Lookup(codecName)
+	if err != nil {
+		return fmt.Errorf("--codec %q: %w", codecName, err)
+	}
+
+	src, err := source.Open(input)
+	if err != nil {
+		if errors.Is(err, source.ErrUnsupportedFormat) {
+			return fmt.Errorf("source format unsupported at v0.2.0: %w", err)
+		}
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer src.Close()
+
+	// container arg from --to; resolveContainer maps it to the canonical name.
+	resolvedContainer := resolveContainer(src.Format(), codecName, container)
+	bigtiffMode := resolveBigTIFFMode(cvBigTIFFFlag, src)
+
+	order, err := tileorder.ByName(cvTileOrder)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
+	knobs := map[string]string{"q": fmt.Sprintf("%d", qualityInt)}
+
+	md := src.Metadata()
+
+	// Build writer options.
+	opts := streamwriter.Options{
+		BigTIFF:        bigtiffMode,
+		ToolsVersion:   Version,
+		SourceFormat:   src.Format(),
+		FormatName:     resolvedContainer,
+		AcceptedOrders: acceptedOrdersForFormat(resolvedContainer),
+		DefaultOrder:   order,
+	}
+	if md.Make != "" {
+		opts.Make = md.Make
+	}
+	if md.Model != "" {
+		opts.Model = md.Model
+	}
+	if md.Software != "" {
+		opts.Software = md.Software
+	}
+	if !md.AcquisitionDateTime.IsZero() {
+		opts.DateTime = md.AcquisitionDateTime
+	}
+
+	// ImageDescription handling (same logic as runTranscode).
+	var srcImageDesc string
+	if resolvedContainer == "svs" && src.Format() == string(opentile.FormatSVS) {
+		srcImageDesc = src.SourceImageDescription()
+	} else {
+		opts.ImageDescription = buildProvenanceDesc(src, codecName, md)
+	}
+
+	w, err := streamwriter.Create(cvOutput, opts)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+
+	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc); err != nil {
+		w.Abort()
+		return err
+	}
+
+	if !cvNoAssociated {
+		if err := writeAssociatedImages(src, w, resolvedContainer); err != nil {
+			w.Abort()
+			return err
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close output: %w", err)
+	}
+
+	stat, _ := os.Stat(cvOutput)
+	if stat != nil {
+		slog.Info("convert complete",
+			"output", cvOutput,
+			"size", formatBytes(stat.Size()),
+			"elapsed", time.Since(start).Round(time.Millisecond),
+		)
+		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+	}
+	return nil
+}
+
 func resolveContainer(srcFormat, codecName, override string) string {
 	if override != "" {
 		return override

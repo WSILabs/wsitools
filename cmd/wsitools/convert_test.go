@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,6 +42,28 @@ func TestConvertFailsWhenOutputExists(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("expected 'already exists' error, got %v", err)
+	}
+}
+
+func TestConvertToSVSReencode(t *testing.T) {
+	bin := findBinary(t)
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.svs")
+	cmd := exec.Command(bin,
+		"convert", "--to", "svs", "--codec", "jpeg", "--quality", "85", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	fi, err := os.Stat(out)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("output missing or empty")
 	}
 }
 

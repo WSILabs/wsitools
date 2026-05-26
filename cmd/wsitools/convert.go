@@ -17,6 +17,9 @@ var (
 	cvBigTIFFFlag  string
 	cvNoAssociated bool
 	cvTileOrder    string
+	cvCodec        string
+	cvQuality      string
+	cvWorkers      int
 )
 
 var convertCmd = &cobra.Command{
@@ -60,6 +63,9 @@ func init() {
 		"Tile emission order within each level (row-major|hilbert|morton). "+
 			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
 			"accept all three.")
+	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpegxl|avif|webp|htj2k); absent = tile-copy when eligible")
+	convertCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs accepted)")
+	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
 	_ = convertCmd.MarkFlagRequired("output")
 	_ = convertCmd.MarkFlagRequired("to")
 	rootCmd.AddCommand(convertCmd)
@@ -74,7 +80,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	case "cog-wsi":
 		return runConvertCOGWSI(cmd, input, start)
 	case "svs", "tiff", "ome-tiff":
-		return fmt.Errorf("--to %q: not yet wired in this commit", cvTo)
+		return runConvertTIFF(cmd, input, cvTo, start)
 	case "dzi":
 		return fmt.Errorf("--to dzi: not yet wired in this commit")
 	case "szi":
