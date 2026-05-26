@@ -1,7 +1,6 @@
 package source
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,28 +35,84 @@ func TestOpen_SVS(t *testing.T) {
 	}
 }
 
-func TestOpen_NDPI_Rejects(t *testing.T) {
+func TestOpen_NDPI_Accepts(t *testing.T) {
 	td := testdir(t)
 	candidate := filepath.Join(td, "ndpi", "CMU-1.ndpi")
 	if _, err := os.Stat(candidate); err != nil {
 		t.Skipf("NDPI fixture missing: %v", err)
 	}
-	_, err := Open(candidate)
-	if !errors.Is(err, ErrUnsupportedFormat) {
-		t.Errorf("expected ErrUnsupportedFormat, got %v", err)
+	src, err := Open(candidate)
+	if err != nil {
+		t.Fatalf("Open(NDPI): %v", err)
+	}
+	defer src.Close()
+	levels := src.Levels()
+	if len(levels) == 0 {
+		t.Fatal("NDPI source reports no levels")
+	}
+	lvl0 := levels[0]
+	if lvl0.Size().X == 0 || lvl0.Size().Y == 0 {
+		t.Errorf("NDPI L0 Size is zero: %+v", lvl0.Size())
+	}
+	if lvl0.TileSize().X == 0 || lvl0.TileSize().Y == 0 {
+		t.Errorf("NDPI L0 TileSize is zero: %+v", lvl0.TileSize())
 	}
 }
 
-func TestOpen_LeicaSCN_Rejects(t *testing.T) {
+func TestOpen_LeicaSCN_Accepts(t *testing.T) {
 	td := testdir(t)
 	// opentile-go's sample fixture directory is `scn/` (not `leica-scn/`).
 	candidate := filepath.Join(td, "scn", "Leica-1.scn")
 	if _, err := os.Stat(candidate); err != nil {
 		t.Skipf("Leica SCN fixture missing: %v", err)
 	}
-	_, err := Open(candidate)
-	if !errors.Is(err, ErrUnsupportedFormat) {
-		t.Errorf("expected ErrUnsupportedFormat, got %v", err)
+	src, err := Open(candidate)
+	if err != nil {
+		t.Fatalf("Open(SCN): %v", err)
+	}
+	defer src.Close()
+	levels := src.Levels()
+	if len(levels) == 0 {
+		t.Fatal("SCN source reports no levels")
+	}
+	lvl0 := levels[0]
+	if lvl0.Size().X == 0 || lvl0.Size().Y == 0 {
+		t.Errorf("SCN L0 Size is zero")
+	}
+	if lvl0.TileSize().X == 0 || lvl0.TileSize().Y == 0 {
+		t.Errorf("SCN L0 TileSize is zero")
+	}
+}
+
+// TestOpen_OMEOneFrame_Accepts verifies single-frame OME-TIFF
+// (no native tile geometry; opentile-go synthesizes) opens cleanly
+// via source.Open. Skips if no OneFrame fixture is available — the
+// gate removal still ships without the integration check.
+func TestOpen_OMEOneFrame_Accepts(t *testing.T) {
+	td := testdir(t)
+	// Try a few candidate paths for OneFrame fixtures.
+	candidates := []string{
+		filepath.Join(td, "ome-tiff", "oneframe-1.ome.tiff"),
+		filepath.Join(td, "ome-tiff", "Leica-1.ome.tiff"),
+	}
+	var path string
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			path = p
+			break
+		}
+	}
+	if path == "" {
+		t.Skip("no OME-OneFrame fixture available")
+	}
+	src, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(OME-OneFrame): %v", err)
+	}
+	defer src.Close()
+	levels := src.Levels()
+	if len(levels) == 0 {
+		t.Fatal("OME source reports no levels")
 	}
 }
 
