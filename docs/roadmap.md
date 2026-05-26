@@ -81,3 +81,8 @@ queued, deferred, or under consideration.
 
 ### Deferred from v0.2
 - Visual-fidelity tests via mini decoders — decode v0.2 codec outputs through matching codec library; pixel-compare against source.
+
+### Test coverage (added 2026-05-26)
+- **CI fixture pipeline.** wsitools' GH Actions should pull sample slides from a release artifact / S3 / object-store before running fixture-gated tests. Today CI skips every fixture-gated test (samples are gitignored), so the bulk of integration coverage runs only on local pre-release sweeps.
+- **Cross-version pixel parity check.** Compare v(N) transcode/downsample output's decoded pixels to v(N-1) output's decoded pixels. File-SHA comparison won't work (embedded TagWSIToolsVersion changes with each release), but pixel-equality should hold if no decoder/encoder/resample logic changed. Would catch silent regressions in the decode-resample-encode chain across version bumps.
+- **`make ci-full` target.** A comprehensive per-release sweep that runs every fixture-gated test and refuses to pass on ENOSPC (instead of silently skipping). Today's pattern of "allow ENOSPC as environmental" is too forgiving — regressions hiding specifically in the largest-sample path can slip through.
