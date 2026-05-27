@@ -2,10 +2,10 @@ package main
 
 import "github.com/wsilabs/wsitools/internal/tiff"
 
-// buildSVSL0ExtraTags returns the Aperio-specific tag set for the L0
-// pyramid IFD of an SVS-shaped transcode output. desc is the source
-// Aperio ImageDescription string (preserved verbatim from the source SVS).
-func buildSVSL0ExtraTags(desc string) []tiff.RawTag {
+// buildL0ImageDescriptionTag returns an L0-only ExtraTags slice that
+// emits the supplied ImageDescription on the L0 IFD. Used by SVS
+// (Aperio header) and OME-TIFF (OME-XML document) output paths.
+func buildL0ImageDescriptionTag(desc string) []tiff.RawTag {
 	return []tiff.RawTag{
 		{Tag: tiff.TagImageDescription, Type: tiff.TypeASCII, Value: desc},
 	}

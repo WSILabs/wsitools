@@ -9,7 +9,7 @@ import (
 
 func TestBuildSVSL0ExtraTagsContainsImageDescription(t *testing.T) {
 	desc := "Aperio Image Library v11.2.1\r\nMPP = 0.499"
-	tags := buildSVSL0ExtraTags(desc)
+	tags := buildL0ImageDescriptionTag(desc)
 	found := false
 	for _, raw := range tags {
 		if raw.Tag == tiff.TagImageDescription {

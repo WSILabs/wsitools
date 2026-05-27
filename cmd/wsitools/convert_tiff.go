@@ -108,30 +108,38 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		opts.DateTime = md.AcquisitionDateTime
 	}
 
-	// ImageDescription handling: for SVS output, the L0 ImageDescription
-	// must start with "Aperio" so opentile-go's detection identifies the
-	// result as SVS. For SVS→SVS tile-copy we preserve the source's
-	// description verbatim; for non-SVS→SVS we synthesize a Grundium-style
-	// "Aperio Image, wsitools/<ver>" header. Other containers emit a plain
-	// wsitools provenance string.
+	// ImageDescription handling: each container has its own L0
+	// detection signal — SVS needs "Aperio" prefix, OME needs "OME>"
+	// suffix. For native source→native target we preserve the source's
+	// description verbatim; for cross-format conversion we synthesize a
+	// minimal but detection-passing document. Other containers emit a
+	// plain wsitools provenance string.
 	var srcImageDesc string
-	if container == "svs" {
+	l0 := src.Levels()[0]
+	srcSoft := strings.TrimSpace(md.Make + " " + md.Model)
+	switch container {
+	case "svs":
 		if src.Format() == string(opentile.FormatSVS) {
 			srcImageDesc = src.SourceImageDescription()
 		} else {
-			l0 := src.Levels()[0]
-			// Tile-copy preserves the source codec verbatim; tile-copy to SVS
-			// is only eligible for JPEG sources, so JPEG is correct for the
-			// geometry-line codec hint.
 			srcImageDesc = SyntheticAperioDescription(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				uint32(l0.TileSize().X), uint32(l0.TileSize().Y),
 				0, // Q unknown on tile-copy
 				md.MPP, md.Magnification,
-				strings.TrimSpace(md.Make+" "+md.Model),
+				srcSoft,
 			).Encode()
 		}
-	} else {
+	case "ome-tiff":
+		if src.Format() == string(opentile.FormatOMETIFF) {
+			srcImageDesc = src.SourceImageDescription()
+		} else {
+			srcImageDesc = SyntheticOMEDescription(
+				uint32(l0.Size().X), uint32(l0.Size().Y),
+				md.MPP, md.MPP, "Image", srcSoft,
+			)
+		}
+	default:
 		opts.ImageDescription = buildProvenanceDesc(src, "tile-copy", md)
 	}
 
@@ -154,9 +162,11 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 			NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),
 			WSIImageType:    tiff.WSIImageTypePyramid,
 		}
-		// SVS-shaped output: emit Aperio ImageDescription verbatim on L0.
-		if container == "svs" && lvl.Index() == 0 && srcImageDesc != "" {
-			spec.ExtraTags = buildSVSL0ExtraTags(srcImageDesc)
+		// SVS / OME-TIFF: emit the container-shaped ImageDescription on L0.
+		// SVS needs the "Aperio" prefix; OME needs the "OME>" suffix; both
+		// are emitted as L0-only ExtraTags so other IFDs aren't tagged.
+		if lvl.Index() == 0 && srcImageDesc != "" && (container == "svs" || container == "ome-tiff") {
+			spec.ExtraTags = buildL0ImageDescriptionTag(srcImageDesc)
 		}
 
 		lh, err := w.AddLevel(spec)
@@ -293,20 +303,31 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 
 	// ImageDescription handling (same logic as runConvertTIFFTileCopy).
 	var srcImageDesc string
-	if resolvedContainer == "svs" {
+	l0 := src.Levels()[0]
+	srcSoft := strings.TrimSpace(md.Make + " " + md.Model)
+	switch resolvedContainer {
+	case "svs":
 		if src.Format() == string(opentile.FormatSVS) {
 			srcImageDesc = src.SourceImageDescription()
 		} else {
-			l0 := src.Levels()[0]
 			srcImageDesc = SyntheticAperioDescription(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				uint32(l0.TileSize().X), uint32(l0.TileSize().Y),
 				qualityInt,
 				md.MPP, md.Magnification,
-				strings.TrimSpace(md.Make+" "+md.Model),
+				srcSoft,
 			).Encode()
 		}
-	} else {
+	case "ome-tiff":
+		if src.Format() == string(opentile.FormatOMETIFF) {
+			srcImageDesc = src.SourceImageDescription()
+		} else {
+			srcImageDesc = SyntheticOMEDescription(
+				uint32(l0.Size().X), uint32(l0.Size().Y),
+				md.MPP, md.MPP, "Image", srcSoft,
+			)
+		}
+	default:
 		opts.ImageDescription = buildProvenanceDesc(src, codecName, md)
 	}
 
@@ -407,9 +428,9 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 		NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),
 		WSIImageType:    tiff.WSIImageTypePyramid,
 	}
-	// SVS-shaped output: emit Aperio ImageDescription verbatim on L0.
-	if container == "svs" && lvl.Index() == 0 && srcImageDesc != "" {
-		spec.ExtraTags = buildSVSL0ExtraTags(srcImageDesc)
+	// SVS / OME-TIFF: emit container-shaped ImageDescription on L0.
+	if lvl.Index() == 0 && srcImageDesc != "" && (container == "svs" || container == "ome-tiff") {
+		spec.ExtraTags = buildL0ImageDescriptionTag(srcImageDesc)
 	}
 	// NOTE: codec ExtraTIFFTags() currently returns nil for every
 	// registered codec and still uses the legacy TIFFTag type from the

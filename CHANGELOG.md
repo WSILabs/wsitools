@@ -2,6 +2,21 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] — 2026-05-26
+
+### Fixed
+
+- `convert --to ome-tiff` from a non-OME source now produces output
+  that opentile-go's OME-TIFF reader correctly identifies as OME.
+  The L0 ImageDescription is synthesized as a minimal OME-XML 2016-06
+  document (single `<Image>` + `<Pixels SizeX/SizeY/SizeC=3/SizeZ=1/SizeT=1>`
+  + three `<Channel>` entries + `<TiffData IFD="0">`). Ends with the
+  literal `OME>` suffix that drives OME detection (mirrors tifffile's
+  `is_ome`). PhysicalSizeX/Y emitted from `source.Metadata` when
+  available; Creator records wsitools provenance.
+- Renamed `buildSVSL0ExtraTags` → `buildL0ImageDescriptionTag` since
+  it now serves both SVS and OME-TIFF L0 ImageDescription emission.
+
 ## [0.16.1] — 2026-05-26
 
 ### Fixed
