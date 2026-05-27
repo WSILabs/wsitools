@@ -2,6 +2,51 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] — 2026-05-26
+
+### BREAKING
+
+- `transcode` subcommand removed. Use `convert --to <target>` with
+  the same `--codec` / `--quality` / `--workers` flags.
+  Migration is mechanical:
+  - `wsitools transcode --container svs --codec jpeg IN OUT`
+    → `wsitools convert --to svs --codec jpeg IN OUT`
+  - `wsitools transcode --container tiff --codec webp IN OUT`
+    → `wsitools convert --to tiff --codec webp IN OUT`
+
+### Added
+
+- `convert --to dzi` — DeepZoom pyramid output for OpenSeadragon
+  and IIIF consumers. Defaults: 256×256 tiles, 1px overlap,
+  JPEG Q=85.
+- `convert --to szi` — Smart Zoom Image output: DZI pyramid wrapped
+  in an uncompressed-stored ZIP archive with optional
+  `scan-properties.xml` populated from source metadata.
+- `convert --to {svs,tiff,ome-tiff}` — re-encode targets that
+  subsume the former `transcode` flows.
+- Tile-copy fast path now applies to `--to svs`, `--to tiff`,
+  `--to ome-tiff` when no `--codec` is specified and the source is
+  natively-tiled. Previously this was a cog-wsi-only optimisation.
+
+### Internal
+
+- `internal/dzi/` — pure-Go DZI writer (manifest + tile tree +
+  level math). No cgo dependency.
+- `internal/szi/` — SZI writer wrapping `internal/dzi` with an
+  `archive/zip` store-method central directory.
+
+### Deferred to v0.17
+
+- ScaledStrips iterator (opentile-go v0.26) wired into the convert
+  pipeline.
+- libvips `dzsave` performance-comparison benchmark harness.
+
+### Deferred indefinitely
+
+- `--to dicom-wsi` — separate writer; tracked on roadmap.
+- Narrow tile-copy path for DZI / SZI when `--dzi-overlap 0` +
+  matching geometry + matching codec.
+
 ## [0.15.0] — 2026-05-25
 
 ### Added
