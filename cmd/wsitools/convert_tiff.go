@@ -23,90 +23,11 @@ import (
 	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
-var (
-	tcOutput     string
-	tcCodec      string
-	tcQuality    int
-	tcCodecOpts  []string
-	tcContainer  string
-	tcJobs       int
-	tcBigTIFF    string
-	tcForce      bool
-	tcTileOrder  string
-)
-
-var transcodeCmd = &cobra.Command{
-	Use:   "transcode [flags] <input>",
-	Short: "Re-encode the pyramid tiles in a different compression codec",
-	Long: `Re-encode the pyramid tiles of a WSI in a different compression codec
-while preserving the source's tile geometry and metadata. Associated images
-(label, macro, thumbnail, overview) are passed through verbatim.
-
-Output container defaults:
-  --codec jpeg on SVS source: SVS-shaped output (Aperio convention).
-  Everything else: generic pyramidal TIFF with WSIImageType-tagged IFDs.
-
-v0.2.0 supported source formats: SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE,
-generic-TIFF. NDPI, OME-OneFrame, and Leica SCN error cleanly with
-ErrUnsupportedFormat.
-
-Examples:
-
-  # SVS to JPEG-XL (generic TIFF output, since JPEG-XL doesn't fit SVS).
-  wsitools transcode --codec jpegxl -o slide-jxl.tiff slide.svs
-
-  # SVS re-encoded as JPEG at a different quality (still SVS-shaped).
-  wsitools transcode --codec jpeg --quality 75 -o slide-q75.svs slide.svs
-
-  # AVIF with a faster encoder preset.
-  wsitools transcode --codec avif --codec-opt avif.speed=8 -o out.tiff in.svs
-
-  # Lossless WebP for archival.
-  wsitools transcode --codec webp --codec-opt webp.lossless=true -o out.tiff in.svs`,
-	Args: cobra.ExactArgs(1),
-	RunE: runTranscode,
-}
-
-func init() {
-	transcodeCmd.Flags().StringVarP(&tcOutput, "output", "o", "", "output file path (required)")
-	transcodeCmd.Flags().StringVar(&tcCodec, "codec", "", "target codec: jpeg|jpegxl|avif|webp|htj2k")
-	transcodeCmd.Flags().IntVar(&tcQuality, "quality", 85, "codec-agnostic quality 1..100")
-	transcodeCmd.Flags().StringSliceVar(&tcCodecOpts, "codec-opt", nil, "codec-specific KEY=VAL (repeatable)")
-	transcodeCmd.Flags().StringVar(&tcContainer, "container", "", "output container: svs|tiff (default depends on source + codec)")
-	transcodeCmd.Flags().IntVar(&tcJobs, "jobs", runtime.NumCPU(), "worker goroutines")
-	transcodeCmd.Flags().StringVar(&tcBigTIFF, "bigtiff", "auto", "auto|on|off")
-	transcodeCmd.Flags().BoolVarP(&tcForce, "force", "f", false, "overwrite output if it exists")
-	transcodeCmd.Flags().StringVar(&tcTileOrder, "tile-order", "row-major",
-		"Tile emission order within each level (row-major|hilbert|morton). "+
-			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
-			"accept all three.")
-	_ = transcodeCmd.MarkFlagRequired("output")
-	_ = transcodeCmd.MarkFlagRequired("codec")
-	rootCmd.AddCommand(transcodeCmd)
-}
-
-func runTranscode(cmd *cobra.Command, args []string) error {
-	cmd.SilenceUsage = true
-	input := args[0]
-	start := time.Now()
-
-	if _, err := os.Stat(input); err != nil {
-		return fmt.Errorf("input %s: %w", input, err)
-	}
-	if !tcForce {
-		if _, err := os.Stat(tcOutput); err == nil {
-			return fmt.Errorf("output %s already exists (use --force)", tcOutput)
-		}
-	}
-	if tcQuality < 1 || tcQuality > 100 {
-		return fmt.Errorf("--quality must be 1..100")
-	}
-
-	fac, err := codec.Lookup(tcCodec)
-	if err != nil {
-		return fmt.Errorf("--codec %q: %w", tcCodec, err)
-	}
-
+// runConvertTIFF dispatches --to svs / tiff / ome-tiff. With --codec
+// specified, it invokes the re-encode pipeline via runConvertTIFFReencode.
+// Without --codec, tile-copy applies when the source is natively tiled and
+// the target container accepts the source codec verbatim.
+func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) error {
 	src, err := source.Open(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {
@@ -116,32 +37,56 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 	}
 	defer src.Close()
 
-	container := resolveContainer(src.Format(), tcCodec, tcContainer)
-	bigtiffMode := resolveBigTIFFMode(tcBigTIFF, src)
+	if len(src.Levels()) == 0 {
+		return fmt.Errorf("source has no pyramid levels")
+	}
 
-	order, err := tileorder.ByName(tcTileOrder)
+	l0 := src.Levels()[0]
+	srcCodec := l0.Compression()
+	tiled := nativelyTiled(src.Format())
+
+	if tileCopyEligible(target, cvCodec, srcCodec, tiled) {
+		return runConvertTIFFTileCopy(cmd, src, input, target, start)
+	}
+	if cvCodec == "" {
+		return fmt.Errorf("--codec required for --to %s with source codec %s (no tile-copy path)",
+			target, srcCodec)
+	}
+	return runConvertTIFFReencode(cmd, input, target, cvCodec, cvQuality, cvWorkers, start)
+}
+
+func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target string, start time.Time) error {
+	if _, err := os.Stat(input); err != nil {
+		return fmt.Errorf("input %s: %w", input, err)
+	}
+	if !cvForce {
+		if _, err := os.Stat(cvOutput); err == nil {
+			return fmt.Errorf("output %s already exists (use --force)", cvOutput)
+		}
+	}
+
+	// Validate all levels have a representable TIFF compression tag.
+	for _, lvl := range src.Levels() {
+		if compressionTagFor(lvl.Compression()) == 0 {
+			return fmt.Errorf("level %d: source compression %s has no standard TIFF Compression tag; cannot tile-copy",
+				lvl.Index(), lvl.Compression())
+		}
+	}
+
+	// Resolve the container name: --to svs|tiff|ome-tiff is the user's
+	// explicit target, but we pass it through resolveContainer to apply
+	// the same SVS-shape override logic that runConvertTIFFReencode uses.
+	container := resolveContainer(src.Format(), "", target)
+
+	bigtiffMode := resolveBigTIFFMode(cvBigTIFFFlag, src)
+
+	order, err := tileorder.ByName(cvTileOrder)
 	if err != nil {
 		return fmt.Errorf("--tile-order: %w", err)
 	}
 
-	knobs := map[string]string{"q": fmt.Sprintf("%d", tcQuality)}
-	for _, opt := range tcCodecOpts {
-		k, v, ok := strings.Cut(opt, "=")
-		if !ok {
-			return fmt.Errorf("--codec-opt %q: missing '='", opt)
-		}
-		// Strip codec prefix when present (e.g. "jxl.distance=1.5" → "distance").
-		if pfx := tcCodec + "."; strings.HasPrefix(k, pfx) {
-			k = k[len(pfx):]
-		} else if dotPfx := strings.SplitN(k, ".", 2); len(dotPfx) == 2 {
-			k = dotPfx[1]
-		}
-		knobs[k] = v
-	}
-
 	md := src.Metadata()
 
-	// Build writer options.
 	opts := streamwriter.Options{
 		BigTIFF:        bigtiffMode,
 		ToolsVersion:   Version,
@@ -163,47 +108,209 @@ func runTranscode(cmd *cobra.Command, args []string) error {
 		opts.DateTime = md.AcquisitionDateTime
 	}
 
-	// ImageDescription handling.
-	//   - SVS container: leave opts.ImageDescription empty; the L0 IFD
-	//     gets the Aperio ImageDescription via LevelSpec.ExtraTags
-	//     (buildSVSL0ExtraTags). srcImageDesc is threaded into
-	//     transcodeLevel below.
-	//   - Generic container: set opts.ImageDescription to a wsitools
-	//     provenance string.
+	// ImageDescription handling: for SVS → SVS tile-copy, preserve the
+	// source's Aperio ImageDescription verbatim on L0 via ExtraTags.
+	// For other containers, emit a wsitools provenance string.
 	var srcImageDesc string
 	if container == "svs" && src.Format() == string(opentile.FormatSVS) {
 		srcImageDesc = src.SourceImageDescription()
 	} else {
-		opts.ImageDescription = buildProvenanceDesc(src, tcCodec, md)
+		opts.ImageDescription = buildProvenanceDesc(src, "tile-copy", md)
 	}
 
-	w, err := streamwriter.Create(tcOutput, opts)
+	w, err := streamwriter.Create(cvOutput, opts)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
 
-	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, tcJobs, container, srcImageDesc); err != nil {
-		w.Abort()
-		return err
+	// Tile-copy: emit levels in source order (L0 first).
+	for _, lvl := range src.Levels() {
+		spec := streamwriter.LevelSpec{
+			ImageWidth:      uint32(lvl.Size().X),
+			ImageHeight:     uint32(lvl.Size().Y),
+			TileWidth:       uint32(lvl.TileSize().X),
+			TileHeight:      uint32(lvl.TileSize().Y),
+			Compression:     compressionTagFor(lvl.Compression()),
+			Photometric:     2, // RGB; lossless copy preserves source codec's colour model
+			SamplesPerPixel: 3,
+			BitsPerSample:   []uint16{8, 8, 8},
+			NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),
+			WSIImageType:    tiff.WSIImageTypePyramid,
+		}
+		// SVS-shaped output: emit Aperio ImageDescription verbatim on L0.
+		if container == "svs" && lvl.Index() == 0 && srcImageDesc != "" {
+			spec.ExtraTags = buildSVSL0ExtraTags(srcImageDesc)
+		}
+
+		lh, err := w.AddLevel(spec)
+		if err != nil {
+			w.Abort()
+			return fmt.Errorf("add level %d: %w", lvl.Index(), err)
+		}
+
+		buf := make([]byte, lvl.TileMaxSize())
+		grid := lvl.Grid()
+		for ty := 0; ty < grid.Y; ty++ {
+			for tx := 0; tx < grid.X; tx++ {
+				n, err := lvl.TileInto(tx, ty, buf)
+				if err != nil {
+					w.Abort()
+					return fmt.Errorf("read tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
+				}
+				// WriteTile submits asynchronously into a reorder buffer
+				// and may reference the slice past return; copy out of the
+				// reused tile-read buffer before handing off.
+				tile := append([]byte(nil), buf[:n]...)
+				if err := lh.WriteTile(uint32(tx), uint32(ty), tile); err != nil {
+					w.Abort()
+					return fmt.Errorf("write tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
+				}
+			}
+		}
+		// Signal end of input for this level; the reorder buffer will
+		// drain synchronously during Close/buildLevelEntries.
+		lh.CloseInput()
 	}
 
-	if err := writeAssociatedImages(src, w, container); err != nil {
-		w.Abort()
-		return err
+	if !cvNoAssociated {
+		if err := writeAssociatedImages(src, w, container); err != nil {
+			w.Abort()
+			return err
+		}
 	}
 
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("close output: %w", err)
 	}
 
-	stat, _ := os.Stat(tcOutput)
+	stat, _ := os.Stat(cvOutput)
 	if stat != nil {
-		slog.Info("transcode complete",
-			"output", tcOutput,
+		slog.Info("convert complete",
+			"output", cvOutput,
 			"size", formatBytes(stat.Size()),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
-		fmt.Printf("wrote %s (%s, %s)\n", tcOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+	}
+	return nil
+}
+
+// runConvertTIFFReencode is the convert-side entry into the transcode
+// re-encode pipeline. It accepts the convert command's flag values
+// directly (instead of reading the tc* globals) so convert can drive
+// the same code path without flag-name collisions.
+func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, quality string, workers int, start time.Time) error {
+	if _, err := os.Stat(input); err != nil {
+		return fmt.Errorf("input %s: %w", input, err)
+	}
+	if !cvForce {
+		if _, err := os.Stat(cvOutput); err == nil {
+			return fmt.Errorf("output %s already exists (use --force)", cvOutput)
+		}
+	}
+
+	// Parse quality: default 85 when absent.
+	qualityInt := 85
+	if quality != "" {
+		if _, err := fmt.Sscanf(quality, "%d", &qualityInt); err != nil {
+			return fmt.Errorf("--quality %q: must be an integer 1..100", quality)
+		}
+	}
+	if qualityInt < 1 || qualityInt > 100 {
+		return fmt.Errorf("--quality must be 1..100")
+	}
+
+	// Workers: 0 means GOMAXPROCS.
+	if workers == 0 {
+		workers = runtime.NumCPU()
+	}
+
+	fac, err := codec.Lookup(codecName)
+	if err != nil {
+		return fmt.Errorf("--codec %q: %w", codecName, err)
+	}
+
+	src, err := source.Open(input)
+	if err != nil {
+		if errors.Is(err, source.ErrUnsupportedFormat) {
+			return fmt.Errorf("source format unsupported at v0.2.0: %w", err)
+		}
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer src.Close()
+
+	// container arg from --to; resolveContainer maps it to the canonical name.
+	resolvedContainer := resolveContainer(src.Format(), codecName, container)
+	bigtiffMode := resolveBigTIFFMode(cvBigTIFFFlag, src)
+
+	order, err := tileorder.ByName(cvTileOrder)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
+	knobs := map[string]string{"q": fmt.Sprintf("%d", qualityInt)}
+
+	md := src.Metadata()
+
+	// Build writer options.
+	opts := streamwriter.Options{
+		BigTIFF:        bigtiffMode,
+		ToolsVersion:   Version,
+		SourceFormat:   src.Format(),
+		FormatName:     resolvedContainer,
+		AcceptedOrders: acceptedOrdersForFormat(resolvedContainer),
+		DefaultOrder:   order,
+	}
+	if md.Make != "" {
+		opts.Make = md.Make
+	}
+	if md.Model != "" {
+		opts.Model = md.Model
+	}
+	if md.Software != "" {
+		opts.Software = md.Software
+	}
+	if !md.AcquisitionDateTime.IsZero() {
+		opts.DateTime = md.AcquisitionDateTime
+	}
+
+	// ImageDescription handling (same logic as runConvertTIFFTileCopy).
+	var srcImageDesc string
+	if resolvedContainer == "svs" && src.Format() == string(opentile.FormatSVS) {
+		srcImageDesc = src.SourceImageDescription()
+	} else {
+		opts.ImageDescription = buildProvenanceDesc(src, codecName, md)
+	}
+
+	w, err := streamwriter.Create(cvOutput, opts)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+
+	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc); err != nil {
+		w.Abort()
+		return err
+	}
+
+	if !cvNoAssociated {
+		if err := writeAssociatedImages(src, w, resolvedContainer); err != nil {
+			w.Abort()
+			return err
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close output: %w", err)
+	}
+
+	stat, _ := os.Stat(cvOutput)
+	if stat != nil {
+		slog.Info("convert complete",
+			"output", cvOutput,
+			"size", formatBytes(stat.Size()),
+			"elapsed", time.Since(start).Round(time.Millisecond),
+		)
+		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }
@@ -478,18 +585,6 @@ func newSubfileTypeForAssoc(container, kind string) uint32 {
 	_ = container
 	_ = kind
 	return 1
-}
-
-// acceptedOrdersForFormat returns the per-format whitelist of tile-order names.
-// nil = permissive (all registered strategies allowed).
-func acceptedOrdersForFormat(format string) []string {
-	switch format {
-	case "svs":
-		return []string{"row-major"}
-	case "tiff", "ome-tiff":
-		return nil // permissive
-	}
-	return nil
 }
 
 func buildProvenanceDesc(src source.Source, codecName string, md source.Metadata) string {

@@ -39,6 +39,13 @@ queued, deferred, or under consideration.
 ### v0.15
 - (no new utilities — source-format expansion: NDPI, OME-OneFrame, and Leica SCN (single-image) slides now work across all CLI subcommands. opentile-go synthesizes tile geometry for striped sources; wsitools' source layer trusts the synthesis. Bit-exact tile-copy promise for `convert` applies to natively-tiled sources only; striped sources produce reproducible but synthesized JPEG tiles in the output.)
 
+### v0.16
+- `convert --to dzi` — DeepZoom pyramid output (OpenSeadragon-compatible). Defaults: 256×256 tiles, 1px overlap, JPEG Q=85.
+- `convert --to szi` — Smart Zoom Image output: DZI pyramid wrapped in a store-method ZIP with optional `scan-properties.xml` populated from source metadata.
+- `convert --to {svs,tiff,ome-tiff}` — re-encode + tile-copy targets that subsume the removed `transcode` subcommand.
+- Tile-copy fast path generalised: applies to all TIFF-based targets when `--codec` is absent and the source is natively-tiled.
+- BREAKING: `transcode` subcommand removed. Migration is mechanical; see CHANGELOG.
+
 ## Planned
 
 ### Batch 2 — extends batch 1
@@ -53,7 +60,6 @@ queued, deferred, or under consideration.
 - **`diff`** — compare two slides (pixel diff, metadata diff, IFD ordering diff).
 
 ### Larger items
-- **`dzsave`** — DeepZoom pyramid generator; OpenSeadragon-compatible tile tree. Analog of libvips `dzsave` and openslide-python `deepzoom_tile.py`.
 - **`tile-server`** — HTTP DZI/IIIF tile server; analog of openslide-python `deepzoom_server.py`. Activates opentile-go v0.13's splice-prefix optimization (TilePrefix / TileBodyInto / SpliceJPEGTile).
 - **`dicom-wsi`** — convert WSI to DICOM-WSI format. Analog of `wsi2dcm` (highdicom) and `wsidicomizer`.
 
