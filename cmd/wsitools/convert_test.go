@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"os"
 	"os/exec"
@@ -128,6 +129,46 @@ func TestConvertToDZI(t *testing.T) {
 	// L0 tile (DZI level 0 = 1x1 image).
 	if _, err := os.Stat(filepath.Join(tileDir, "0", "0_0.jpeg")); err != nil {
 		t.Fatalf("L0 tile missing: %v", err)
+	}
+}
+
+func TestConvertToSZI(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		t.Skip("WSI_TOOLS_TESTDIR not set")
+	}
+	in := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip()
+	}
+	out := filepath.Join(t.TempDir(), "out.szi")
+	cmd := exec.Command(findBinary(t), "convert", "--to", "szi", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer zr.Close()
+	foundManifest := false
+	foundScanProps := false
+	for _, f := range zr.File {
+		if f.Method != zip.Store {
+			t.Errorf("%s uses method %d; want Store(0)", f.Name, f.Method)
+		}
+		if strings.HasSuffix(f.Name, ".dzi") {
+			foundManifest = true
+		}
+		if strings.HasSuffix(f.Name, "scan-properties.xml") {
+			foundScanProps = true
+		}
+	}
+	if !foundManifest {
+		t.Errorf("no .dzi manifest in SZI archive")
+	}
+	if !foundScanProps {
+		t.Errorf("no scan-properties.xml in SZI archive")
 	}
 }
 

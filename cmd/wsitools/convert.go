@@ -98,7 +98,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	case "dzi":
 		return runConvertDZI(cmd, input, start)
 	case "szi":
-		return fmt.Errorf("--to szi: not yet wired in this commit")
+		return runConvertSZI(cmd, input, start)
 	case "":
 		return fmt.Errorf("--to is required")
 	default:
