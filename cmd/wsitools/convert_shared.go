@@ -2,6 +2,18 @@ package main
 
 import "github.com/wsilabs/wsitools/internal/source"
 
+// acceptedOrdersForFormat returns the per-format whitelist of tile-order names.
+// nil = permissive (all registered strategies allowed).
+func acceptedOrdersForFormat(format string) []string {
+	switch format {
+	case "svs":
+		return []string{"row-major"}
+	case "tiff", "ome-tiff":
+		return nil // permissive
+	}
+	return nil
+}
+
 // nativelyTiled returns true if the source format is natively tile-based
 // (not strip-synthesized). Striped formats: NDPI, OME-OneFrame. opentile-go's
 // readers synthesize tile geometry for striped sources; tile-copy still

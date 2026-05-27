@@ -1,15 +1,22 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/opentile-go/decoder"
 	"github.com/spf13/cobra"
 
+	codec "github.com/wsilabs/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/pipeline"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
@@ -17,10 +24,9 @@ import (
 )
 
 // runConvertTIFF dispatches --to svs / tiff / ome-tiff. With --codec
-// specified, it invokes the existing transcode re-encode pipeline via
-// the helpers in transcode.go. Without --codec, tile-copy applies when
-// the source is natively tiled and the target container accepts the
-// source codec verbatim.
+// specified, it invokes the re-encode pipeline via runConvertTIFFReencode.
+// Without --codec, tile-copy applies when the source is natively tiled and
+// the target container accepts the source codec verbatim.
 func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) error {
 	src, err := source.Open(input)
 	if err != nil {
@@ -46,7 +52,7 @@ func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) e
 		return fmt.Errorf("--codec required for --to %s with source codec %s (no tile-copy path)",
 			target, srcCodec)
 	}
-	return runTranscodeAsConvert(cmd, input, target, cvCodec, cvQuality, cvWorkers, start)
+	return runConvertTIFFReencode(cmd, input, target, cvCodec, cvQuality, cvWorkers, start)
 }
 
 func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target string, start time.Time) error {
@@ -69,7 +75,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 
 	// Resolve the container name: --to svs|tiff|ome-tiff is the user's
 	// explicit target, but we pass it through resolveContainer to apply
-	// the same SVS-shape override logic that runTranscodeAsConvert uses.
+	// the same SVS-shape override logic that runConvertTIFFReencode uses.
 	container := resolveContainer(src.Format(), "", target)
 
 	bigtiffMode := resolveBigTIFFMode(cvBigTIFFFlag, src)
@@ -187,4 +193,414 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
+}
+
+// runConvertTIFFReencode is the convert-side entry into the transcode
+// re-encode pipeline. It accepts the convert command's flag values
+// directly (instead of reading the tc* globals) so convert can drive
+// the same code path without flag-name collisions.
+func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, quality string, workers int, start time.Time) error {
+	if _, err := os.Stat(input); err != nil {
+		return fmt.Errorf("input %s: %w", input, err)
+	}
+	if !cvForce {
+		if _, err := os.Stat(cvOutput); err == nil {
+			return fmt.Errorf("output %s already exists (use --force)", cvOutput)
+		}
+	}
+
+	// Parse quality: default 85 when absent.
+	qualityInt := 85
+	if quality != "" {
+		if _, err := fmt.Sscanf(quality, "%d", &qualityInt); err != nil {
+			return fmt.Errorf("--quality %q: must be an integer 1..100", quality)
+		}
+	}
+	if qualityInt < 1 || qualityInt > 100 {
+		return fmt.Errorf("--quality must be 1..100")
+	}
+
+	// Workers: 0 means GOMAXPROCS.
+	if workers == 0 {
+		workers = runtime.NumCPU()
+	}
+
+	fac, err := codec.Lookup(codecName)
+	if err != nil {
+		return fmt.Errorf("--codec %q: %w", codecName, err)
+	}
+
+	src, err := source.Open(input)
+	if err != nil {
+		if errors.Is(err, source.ErrUnsupportedFormat) {
+			return fmt.Errorf("source format unsupported at v0.2.0: %w", err)
+		}
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer src.Close()
+
+	// container arg from --to; resolveContainer maps it to the canonical name.
+	resolvedContainer := resolveContainer(src.Format(), codecName, container)
+	bigtiffMode := resolveBigTIFFMode(cvBigTIFFFlag, src)
+
+	order, err := tileorder.ByName(cvTileOrder)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
+	knobs := map[string]string{"q": fmt.Sprintf("%d", qualityInt)}
+
+	md := src.Metadata()
+
+	// Build writer options.
+	opts := streamwriter.Options{
+		BigTIFF:        bigtiffMode,
+		ToolsVersion:   Version,
+		SourceFormat:   src.Format(),
+		FormatName:     resolvedContainer,
+		AcceptedOrders: acceptedOrdersForFormat(resolvedContainer),
+		DefaultOrder:   order,
+	}
+	if md.Make != "" {
+		opts.Make = md.Make
+	}
+	if md.Model != "" {
+		opts.Model = md.Model
+	}
+	if md.Software != "" {
+		opts.Software = md.Software
+	}
+	if !md.AcquisitionDateTime.IsZero() {
+		opts.DateTime = md.AcquisitionDateTime
+	}
+
+	// ImageDescription handling (same logic as runConvertTIFFTileCopy).
+	var srcImageDesc string
+	if resolvedContainer == "svs" && src.Format() == string(opentile.FormatSVS) {
+		srcImageDesc = src.SourceImageDescription()
+	} else {
+		opts.ImageDescription = buildProvenanceDesc(src, codecName, md)
+	}
+
+	w, err := streamwriter.Create(cvOutput, opts)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+
+	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc); err != nil {
+		w.Abort()
+		return err
+	}
+
+	if !cvNoAssociated {
+		if err := writeAssociatedImages(src, w, resolvedContainer); err != nil {
+			w.Abort()
+			return err
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close output: %w", err)
+	}
+
+	stat, _ := os.Stat(cvOutput)
+	if stat != nil {
+		slog.Info("convert complete",
+			"output", cvOutput,
+			"size", formatBytes(stat.Size()),
+			"elapsed", time.Since(start).Round(time.Millisecond),
+		)
+		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+	}
+	return nil
+}
+
+func resolveContainer(srcFormat, codecName, override string) string {
+	if override != "" {
+		return override
+	}
+	if srcFormat == string(opentile.FormatSVS) && codecName == "jpeg" {
+		return "svs"
+	}
+	return "tiff"
+}
+
+// resolveBigTIFFMode maps the CLI --bigtiff flag to a tiff.BigTIFFMode.
+// "auto" promotes to BigTIFFOn when the source pixel count exceeds the
+// 2 GiB classic-TIFF safety threshold.
+func resolveBigTIFFMode(mode string, src source.Source) tiff.BigTIFFMode {
+	switch mode {
+	case "on":
+		return tiff.BigTIFFOn
+	case "off":
+		return tiff.BigTIFFOff
+	}
+	// auto: predict output size; promote when > 2 GiB.
+	// Estimate ~1 byte per pixel for lossy codecs.
+	var total int64
+	for _, lvl := range src.Levels() {
+		total += int64(lvl.Size().X) * int64(lvl.Size().Y)
+	}
+	if total > (2 << 30) {
+		return tiff.BigTIFFOn
+	}
+	return tiff.BigTIFFOff
+}
+
+func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {
+	for _, lvl := range src.Levels() {
+		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers, container, srcImageDesc); err != nil {
+			return fmt.Errorf("level %d: %w", lvl.Index(), err)
+		}
+	}
+	return nil
+}
+
+func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {
+	enc, err := fac.NewEncoder(codec.LevelGeometry{
+		TileWidth: lvl.TileSize().X, TileHeight: lvl.TileSize().Y,
+		PixelFormat: codec.PixelFormatRGB8,
+	}, codec.Quality{Knobs: knobs})
+	if err != nil {
+		return err
+	}
+	defer enc.Close()
+
+	spec := streamwriter.LevelSpec{
+		ImageWidth:      uint32(lvl.Size().X),
+		ImageHeight:     uint32(lvl.Size().Y),
+		TileWidth:       uint32(lvl.TileSize().X),
+		TileHeight:      uint32(lvl.TileSize().Y),
+		Compression:     enc.TIFFCompressionTag(),
+		Photometric:     2, // RGB; codecs carry their own colour model
+		SamplesPerPixel: 3,
+		BitsPerSample:   []uint16{8, 8, 8},
+		JPEGTables:      enc.LevelHeader(),
+		NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),
+		WSIImageType:    tiff.WSIImageTypePyramid,
+	}
+	// SVS-shaped output: emit Aperio ImageDescription verbatim on L0.
+	if container == "svs" && lvl.Index() == 0 && srcImageDesc != "" {
+		spec.ExtraTags = buildSVSL0ExtraTags(srcImageDesc)
+	}
+	// NOTE: codec ExtraTIFFTags() currently returns nil for every
+	// registered codec and still uses the legacy TIFFTag type from the
+	// old writer package. Wiring the codec interface to tiff.RawTag is a
+	// future task; the loop is dropped here so this file has zero
+	// references to the legacy writer package.
+
+	lh, err := w.AddLevel(spec)
+	if err != nil {
+		return err
+	}
+
+	decFac := pickDecoder(lvl.Compression())
+	if decFac == nil {
+		return fmt.Errorf("no decoder for source compression %s", lvl.Compression())
+	}
+
+	grid := lvl.Grid()
+	tileW := lvl.TileSize().X
+	tileH := lvl.TileSize().Y
+	maxTileBytes := lvl.TileMaxSize()
+	pool := &sync.Pool{
+		New: func() any {
+			b := make([]byte, maxTileBytes)
+			return &b
+		},
+	}
+
+	sink := func(t pipeline.Tile) error {
+		return lh.WriteTile(t.X, t.Y, t.Bytes)
+	}
+
+	// Run the ordered drain concurrently with pipeline.Run.
+	drainErr := make(chan error, 1)
+	go func() {
+		for {
+			idx, bytes, ok, err := lh.NextReady()
+			if err != nil {
+				drainErr <- err
+				return
+			}
+			if !ok {
+				drainErr <- nil
+				return
+			}
+			if err := lh.WriteTileAtIndex(idx, bytes); err != nil {
+				lh.Abort(err)
+				drainErr <- err
+				return
+			}
+		}
+	}()
+
+	pipeErr := pipeline.Run(ctx, pipeline.Config{
+		Workers: workers,
+		Source: func(ctx context.Context, emit func(pipeline.Tile) error) error {
+			for ty := 0; ty < grid.Y; ty++ {
+				for tx := 0; tx < grid.X; tx++ {
+					bufp := pool.Get().(*[]byte)
+					n, err := lvl.TileInto(tx, ty, *bufp)
+					if err != nil {
+						pool.Put(bufp)
+						return err
+					}
+					t := pipeline.Tile{
+						Level:   lvl.Index(),
+						X:       uint32(tx),
+						Y:       uint32(ty),
+						Bytes:   (*bufp)[:n],
+						Release: func() { pool.Put(bufp) },
+					}
+					if err := emit(t); err != nil {
+						pool.Put(bufp)
+						return err
+					}
+				}
+			}
+			return nil
+		},
+		Process: func(t pipeline.Tile) (pipeline.Tile, error) {
+			dec := decFac.New()
+			defer dec.Close()
+			img, err := dec.Decode(t.Bytes, decoder.DecodeOptions{
+				Scale:  1,
+				Format: decoder.PixelFormatRGB,
+			})
+			if t.Release != nil {
+				t.Release()
+				t.Release = nil
+			}
+			if err != nil {
+				return pipeline.Tile{}, err
+			}
+			encoded, err := enc.EncodeTile(img.Pix, tileW, tileH, nil)
+			if err != nil {
+				return pipeline.Tile{}, err
+			}
+			t.Bytes = encoded
+			return t, nil
+		},
+		Sink: sink,
+	})
+
+	// Tell the buffer no more tiles will arrive.
+	lh.CloseInput()
+
+	// Propagate pipeline error (or wait for drain to finish).
+	if pipeErr != nil {
+		lh.Abort(pipeErr)
+		<-drainErr
+		return pipeErr
+	}
+	return <-drainErr
+}
+
+func pickDecoder(c source.Compression) decoder.Factory {
+	var name string
+	switch c {
+	case source.CompressionJPEG:
+		name = "jpeg"
+	case source.CompressionJPEG2000:
+		name = "jpeg2000"
+	default:
+		return nil
+	}
+	fac, ok := decoder.Get(name)
+	if !ok {
+		return nil
+	}
+	return fac
+}
+
+func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string) error {
+	for _, a := range src.Associated() {
+		bs, err := a.Bytes()
+		if err != nil {
+			return fmt.Errorf("associated %s: %w", a.Kind(), err)
+		}
+		spec := streamwriter.StrippedSpec{
+			Width:           uint32(a.Size().X),
+			Height:          uint32(a.Size().Y),
+			RowsPerStrip:    uint32(a.Size().Y),
+			BitsPerSample:   []uint16{8, 8, 8},
+			SamplesPerPixel: 3,
+			Photometric:     2,
+			Compression:     mapCompressionForOutput(a.Compression()),
+			StripBytes:      bs,
+			NewSubfileType:  newSubfileTypeForAssoc(container, a.Kind()),
+			WSIImageType:    a.Kind(),
+		}
+		// SVS-shaped output: emit Aperio-flavored NewSubfileType via
+		// ExtraTags (macro=9, label=1). Clear spec.NewSubfileType so the
+		// writer doesn't also emit a default value — EntryBuilder doesn't
+		// dedup, so a duplicate tag would corrupt the IFD.
+		if container == "svs" {
+			switch a.Kind() {
+			case "macro", "overview":
+				spec.NewSubfileType = 0
+				spec.ExtraTags = buildSVSMacroExtraTags()
+			case "label":
+				spec.NewSubfileType = 0
+				spec.ExtraTags = buildSVSLabelExtraTags()
+			}
+		}
+		if err := w.AddStripped(spec); err != nil {
+			return fmt.Errorf("write associated %s: %w", a.Kind(), err)
+		}
+	}
+	return nil
+}
+
+func mapCompressionForOutput(c source.Compression) uint16 {
+	switch c {
+	case source.CompressionJPEG:
+		return tiff.CompressionJPEG
+	case source.CompressionLZW:
+		return tiff.CompressionLZW
+	case source.CompressionJPEG2000:
+		return tiff.CompressionJPEG2000
+	}
+	return tiff.CompressionNone
+}
+
+// newSubfileTypeForLevel returns the NewSubfileType for a pyramid IFD.
+// L0 is non-reduced (0); all other levels are reduced-resolution (1).
+// The Aperio convention is the same for SVS-shaped output.
+func newSubfileTypeForLevel(idx int, container string) uint32 {
+	_ = container
+	if idx == 0 {
+		return 0
+	}
+	return 1
+}
+
+// newSubfileTypeForAssoc returns the default NewSubfileType for an
+// associated image. Any associated image is reduced-resolution (1).
+// SVS-shaped output adds the Aperio-private macro=9 marker via
+// ExtraTags in writeAssociatedImages — that path doesn't need special
+// handling here.
+func newSubfileTypeForAssoc(container, kind string) uint32 {
+	_ = container
+	_ = kind
+	return 1
+}
+
+func buildProvenanceDesc(src source.Source, codecName string, md source.Metadata) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "wsi-tools/%s transcode source=%s codec=%s", Version, src.Format(), codecName)
+	if md.MPP > 0 {
+		fmt.Fprintf(&b, " mpp=%v", md.MPP)
+	}
+	if md.Magnification > 0 {
+		fmt.Fprintf(&b, " mag=%vx", md.Magnification)
+	}
+	if md.Make != "" || md.Model != "" {
+		fmt.Fprintf(&b, " scanner=%q", strings.TrimSpace(md.Make+" "+md.Model))
+	}
+	if !md.AcquisitionDateTime.IsZero() {
+		fmt.Fprintf(&b, " date=%s", md.AcquisitionDateTime.Format("2006-01-02"))
+	}
+	return b.String()
 }
