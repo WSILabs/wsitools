@@ -172,6 +172,117 @@ func TestConvertToSZI(t *testing.T) {
 	}
 }
 
+func TestConvertNDPIToDZI(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "ndpi", "CMU-1.ndpi")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.dzi")
+	cmd := exec.Command(findBinary(t), "convert", "--to", "dzi", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	// L0 tile of NDPI's DZI pyramid (DZI level 0 = 1x1).
+	tileDir := strings.TrimSuffix(out, ".dzi") + "_files"
+	if _, err := os.Stat(filepath.Join(tileDir, "0", "0_0.jpeg")); err != nil {
+		t.Fatalf("L0 tile missing: %v", err)
+	}
+}
+
+func TestConvertNDPIToSZI(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "ndpi", "CMU-1.ndpi")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.szi")
+	cmd := exec.Command(findBinary(t), "convert", "--to", "szi", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer zr.Close()
+	haveManifest := false
+	for _, f := range zr.File {
+		if strings.HasSuffix(f.Name, ".dzi") {
+			haveManifest = true
+		}
+	}
+	if !haveManifest {
+		t.Errorf("no .dzi manifest in SZI archive")
+	}
+}
+
+func TestConvertNDPIToCOGWSIReencode(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "ndpi", "CMU-1.ndpi")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.tiff")
+	cmd := exec.Command(findBinary(t), "convert", "--to", "cog-wsi", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	fi, err := os.Stat(out)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("output missing or empty")
+	}
+}
+
+func TestConvertToTIFFTileCopy(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.tiff")
+	cmd := exec.Command(findBinary(t), "convert", "--to", "tiff", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	fi, err := os.Stat(out)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("output missing or empty")
+	}
+}
+
+func TestConvertToOMETIFFReencode(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.ome.tiff")
+	cmd := exec.Command(findBinary(t), "convert", "--to", "ome-tiff", "--codec", "jpeg", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	fi, err := os.Stat(out)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("output missing or empty")
+	}
+}
+
 func TestConvertHelpListsRequiredFlags(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rootCmd.SetOut(buf)
