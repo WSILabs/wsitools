@@ -103,6 +103,33 @@ func pixelHash(t *testing.T, path string) string {
 	return strings.TrimSpace(string(b))
 }
 
+func TestConvertToDZI(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		t.Skip("WSI_TOOLS_TESTDIR not set")
+	}
+	in := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing")
+	}
+	out := filepath.Join(t.TempDir(), "out.dzi")
+	cmd := exec.Command(findBinary(t), "convert", "--to", "dzi", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("manifest missing")
+	}
+	tileDir := strings.TrimSuffix(out, ".dzi") + "_files"
+	if _, err := os.Stat(tileDir); err != nil {
+		t.Fatalf("tile dir missing: %v", err)
+	}
+	// L0 tile (DZI level 0 = 1x1 image).
+	if _, err := os.Stat(filepath.Join(tileDir, "0", "0_0.jpeg")); err != nil {
+		t.Fatalf("L0 tile missing: %v", err)
+	}
+}
+
 func TestConvertHelpListsRequiredFlags(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rootCmd.SetOut(buf)

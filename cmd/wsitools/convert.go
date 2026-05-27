@@ -20,6 +20,10 @@ var (
 	cvCodec        string
 	cvQuality      string
 	cvWorkers      int
+
+	cvDZITileSize int
+	cvDZIOverlap  int
+	cvDZIFormat   string
 )
 
 var convertCmd = &cobra.Command{
@@ -66,6 +70,9 @@ func init() {
 	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpegxl|avif|webp|htj2k); absent = tile-copy when eligible")
 	convertCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs accepted)")
 	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
+	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
+	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
+	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
 	_ = convertCmd.MarkFlagRequired("output")
 	_ = convertCmd.MarkFlagRequired("to")
 	rootCmd.AddCommand(convertCmd)
@@ -76,13 +83,20 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	input := args[0]
 	start := time.Now()
 
+	if (cvTo == "dzi" || cvTo == "szi") && cvCodec != "" {
+		return fmt.Errorf("--codec is not valid with --to %s (use --dzi-format)", cvTo)
+	}
+	if (cvTo == "dzi" || cvTo == "szi") && cvDZIFormat != "jpeg" && cvDZIFormat != "png" {
+		return fmt.Errorf("--dzi-format must be jpeg or png, got %q", cvDZIFormat)
+	}
+
 	switch cvTo {
 	case "cog-wsi":
 		return runConvertCOGWSI(cmd, input, start)
 	case "svs", "tiff", "ome-tiff":
 		return runConvertTIFF(cmd, input, cvTo, start)
 	case "dzi":
-		return fmt.Errorf("--to dzi: not yet wired in this commit")
+		return runConvertDZI(cmd, input, start)
 	case "szi":
 		return fmt.Errorf("--to szi: not yet wired in this commit")
 	case "":
