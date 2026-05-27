@@ -117,3 +117,35 @@ func (d *AperioDescription) Encode() string {
 func formatAperioFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
 }
+
+// SyntheticAperioDescription builds an Aperio-shaped ImageDescription
+// for SVS output written by wsitools from a non-SVS source. Follows
+// the third-party-vendor convention (e.g. Grundium's "Aperio Image,
+// Grundium Ocus"): keep the literal "Aperio" prefix so opentile-go's
+// detection passes, append the wsitools provenance after a comma.
+//
+// MPP / AppMag are emitted only when src.Metadata() provides them
+// (non-zero); a missing key is preferable to a fake value.
+func SyntheticAperioDescription(l0W, l0H, tileW, tileH uint32, quality int, mpp, appMag float64, srcSoftware string) *AperioDescription {
+	soft := "Aperio Image, wsitools/" + Version
+	if srcSoftware != "" {
+		soft += " (from " + srcSoftware + ")"
+	}
+	geom := fmt.Sprintf("%dx%d (%dx%d) JPEG/RGB Q=%d", l0W, l0H, tileW, tileH, quality)
+	d := &AperioDescription{
+		SoftwareLine: soft,
+		GeometryLine: geom,
+		Properties:   map[string]string{},
+	}
+	if appMag != 0 {
+		d.AppMag = appMag
+		d.Properties["AppMag"] = formatAperioFloat(appMag)
+		d.PropertyOrder = append(d.PropertyOrder, "AppMag")
+	}
+	if mpp != 0 {
+		d.MPP = mpp
+		d.Properties["MPP"] = formatAperioFloat(mpp)
+		d.PropertyOrder = append(d.PropertyOrder, "MPP")
+	}
+	return d
+}

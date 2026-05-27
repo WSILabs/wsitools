@@ -108,12 +108,29 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		opts.DateTime = md.AcquisitionDateTime
 	}
 
-	// ImageDescription handling: for SVS → SVS tile-copy, preserve the
-	// source's Aperio ImageDescription verbatim on L0 via ExtraTags.
-	// For other containers, emit a wsitools provenance string.
+	// ImageDescription handling: for SVS output, the L0 ImageDescription
+	// must start with "Aperio" so opentile-go's detection identifies the
+	// result as SVS. For SVS→SVS tile-copy we preserve the source's
+	// description verbatim; for non-SVS→SVS we synthesize a Grundium-style
+	// "Aperio Image, wsitools/<ver>" header. Other containers emit a plain
+	// wsitools provenance string.
 	var srcImageDesc string
-	if container == "svs" && src.Format() == string(opentile.FormatSVS) {
-		srcImageDesc = src.SourceImageDescription()
+	if container == "svs" {
+		if src.Format() == string(opentile.FormatSVS) {
+			srcImageDesc = src.SourceImageDescription()
+		} else {
+			l0 := src.Levels()[0]
+			// Tile-copy preserves the source codec verbatim; tile-copy to SVS
+			// is only eligible for JPEG sources, so JPEG is correct for the
+			// geometry-line codec hint.
+			srcImageDesc = SyntheticAperioDescription(
+				uint32(l0.Size().X), uint32(l0.Size().Y),
+				uint32(l0.TileSize().X), uint32(l0.TileSize().Y),
+				0, // Q unknown on tile-copy
+				md.MPP, md.Magnification,
+				strings.TrimSpace(md.Make+" "+md.Model),
+			).Encode()
+		}
 	} else {
 		opts.ImageDescription = buildProvenanceDesc(src, "tile-copy", md)
 	}
@@ -276,8 +293,19 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 
 	// ImageDescription handling (same logic as runConvertTIFFTileCopy).
 	var srcImageDesc string
-	if resolvedContainer == "svs" && src.Format() == string(opentile.FormatSVS) {
-		srcImageDesc = src.SourceImageDescription()
+	if resolvedContainer == "svs" {
+		if src.Format() == string(opentile.FormatSVS) {
+			srcImageDesc = src.SourceImageDescription()
+		} else {
+			l0 := src.Levels()[0]
+			srcImageDesc = SyntheticAperioDescription(
+				uint32(l0.Size().X), uint32(l0.Size().Y),
+				uint32(l0.TileSize().X), uint32(l0.TileSize().Y),
+				qualityInt,
+				md.MPP, md.Magnification,
+				strings.TrimSpace(md.Make+" "+md.Model),
+			).Encode()
+		}
 	} else {
 		opts.ImageDescription = buildProvenanceDesc(src, codecName, md)
 	}
@@ -569,7 +597,14 @@ func mapCompressionForOutput(c source.Compression) uint16 {
 // L0 is non-reduced (0); all other levels are reduced-resolution (1).
 // The Aperio convention is the same for SVS-shaped output.
 func newSubfileTypeForLevel(idx int, container string) uint32 {
-	_ = container
+	// Aperio SVS convention: all pyramid IFDs use NewSubfileType=0.
+	// Setting the reduced-res bit on L1+ would make opentile-go's SVS
+	// reader (which follows tifffile's _series_svs algorithm) terminate
+	// the baseline walk at L1 and misclassify subsequent pyramid pages
+	// as Label/Macro.
+	if container == "svs" {
+		return 0
+	}
 	if idx == 0 {
 		return 0
 	}

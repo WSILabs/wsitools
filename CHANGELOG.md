@@ -2,6 +2,32 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] — 2026-05-26
+
+### Fixed
+
+- `convert --to svs` from a non-SVS source now produces output that
+  opentile-go's SVS reader (and tifffile, openslide) correctly
+  identifies as SVS. Two issues addressed:
+  - L0 ImageDescription is synthesized with an Aperio-shaped header
+    (`Aperio Image, wsitools/<ver> (from <source>)`) so the literal
+    `Aperio` prefix that drives SVS detection is present. MPP and
+    AppMag are surfaced from `source.Metadata` when available.
+    Matches the third-party-vendor convention used by Grundium and
+    others (`Aperio Image, <vendor>`).
+  - Pyramid IFDs now emit `NewSubfileType=0` on all levels (was `1`
+    on L1+). Aperio's SVS convention is no reduced-res bit on
+    pyramid pages; tifffile's `_series_svs` algorithm terminates the
+    baseline walk at the first reduced-res IFD, so the old layout
+    caused intermediate pyramid levels to be misclassified as
+    Label/Macro and the reader to error.
+
+### Known still-broken
+
+- `convert --to ome-tiff` from a non-OME source produces output that
+  opentile-go reads as generic-tiff (no OME-XML synthesis). Tracked
+  for v0.16.2.
+
 ## [0.16.0] — 2026-05-26
 
 ### BREAKING
