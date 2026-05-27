@@ -100,7 +100,8 @@ func pixelHash(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
-	return strings.TrimSpace(string(b))
+	// Output: "sha256-pixel:<hex> <path>"; strip the trailing path.
+	return strings.SplitN(strings.TrimSpace(string(b)), " ", 2)[0]
 }
 
 func TestConvertToDZI(t *testing.T) {
