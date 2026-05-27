@@ -9,7 +9,7 @@ import (
 func TestManifestBytes(t *testing.T) {
 	m := Manifest{Format: "jpeg", Overlap: 1, TileSize: 256, Width: 2220, Height: 2967}
 	var buf bytes.Buffer
-	if err := m.WriteTo(&buf); err != nil {
+	if err := m.Write(&buf); err != nil {
 		t.Fatal(err)
 	}
 	s := buf.String()
@@ -31,7 +31,7 @@ func TestManifestBytes(t *testing.T) {
 func TestManifestPNGFormat(t *testing.T) {
 	m := Manifest{Format: "png", Overlap: 0, TileSize: 512, Width: 1024, Height: 768}
 	var buf bytes.Buffer
-	if err := m.WriteTo(&buf); err != nil {
+	if err := m.Write(&buf); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), `Format="png"`) {

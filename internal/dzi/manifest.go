@@ -30,8 +30,9 @@ type sizeXML struct {
 	Height int `xml:"Height,attr"`
 }
 
-// WriteTo emits the manifest as a UTF-8 XML document.
-func (m Manifest) WriteTo(w io.Writer) error {
+// Write emits the manifest as a UTF-8 XML document. Named Write (not
+// WriteTo) to avoid clashing with io.WriterTo's (int64, error) shape.
+func (m Manifest) Write(w io.Writer) error {
 	if _, err := io.WriteString(w, xml.Header); err != nil {
 		return err
 	}

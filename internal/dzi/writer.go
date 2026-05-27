@@ -100,7 +100,7 @@ func (w *Writer) Close() error {
 		Width:    w.cfg.Width,
 		Height:   w.cfg.Height,
 	}
-	if err := m.WriteTo(f); err != nil {
+	if err := m.Write(f); err != nil {
 		f.Close()
 		return err
 	}
