@@ -67,6 +67,42 @@ func TestConvertToSVSReencode(t *testing.T) {
 	}
 }
 
+func TestConvertToSVSTileCopy(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.svs")
+	// No --codec → tile-copy path.
+	cmd := exec.Command(findBinary(t), "convert", "--to", "svs", "-o", out, in)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, b)
+	}
+	fi, err := os.Stat(out)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("output missing or empty")
+	}
+	// Pixel-hash equivalence: tile-copy preserves pixels.
+	inHash := pixelHash(t, in)
+	outHash := pixelHash(t, out)
+	if inHash != outHash {
+		t.Errorf("pixel hash mismatch: in=%s out=%s", inHash, outHash)
+	}
+}
+
+func pixelHash(t *testing.T, path string) string {
+	t.Helper()
+	b, err := exec.Command(findBinary(t), "hash", "--mode", "pixel", path).Output()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
 func TestConvertHelpListsRequiredFlags(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rootCmd.SetOut(buf)
