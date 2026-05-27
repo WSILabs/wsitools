@@ -83,6 +83,9 @@ queued, deferred, or under consideration.
 ### Deferred from v0.3
 - TilePrefix / TileBodyInto / SpliceJPEGTile adoption — only valuable if `tile-server` is built.
 
+### Deferred from v0.17 (added 2026-05-26)
+- **Parallel raw-tile fetch + decode for `convert --to svs|tiff|ome-tiff --codec X` on striped sources.** v0.17's ScaledStrips wiring speeds up DZI/SZI rendering but doesn't help TIFF-family re-encode because those targets keep L0 dimensions intact (no scaling). A separate parallel-decode path on the existing `internal/pipeline` worker pool would help striped→TIFF re-encode where opentile-go's per-tile synthesis is the bottleneck. Quantify the gap first — measure striped→TIFF re-encode runtime against a tiled source baseline.
+
 ## Quality gates
 
 ### Deferred from v0.2
