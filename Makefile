@@ -1,4 +1,4 @@
-.PHONY: test vet cover bench install clean goldens-byte-stable
+.PHONY: test vet cover bench install clean goldens-byte-stable bench-dzi
 
 GO ?= go
 BIN = bin/wsitools
@@ -52,3 +52,6 @@ goldens-byte-stable: build
 		}; \
 		echo "OK $$H1"; \
 	done
+
+bench-dzi: $(BIN)
+	@scripts/bench-dzi.sh
