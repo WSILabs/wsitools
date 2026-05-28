@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"image"
+	stdjpeg "image/jpeg"
+	"sync"
 	"testing"
 
+	"github.com/wsilabs/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/dzi"
 )
 
@@ -143,5 +149,58 @@ func TestLevelBuilderCascade(t *testing.T) {
 	}
 	if counts[0] != 1 {
 		t.Errorf("L0 tile count: %d, want 1", counts[0])
+	}
+}
+
+func TestEncoderPoolProducesDecodableJPEGs(t *testing.T) {
+	enc, err := jpeg.New(
+		codec.LevelGeometry{TileWidth: 64, TileHeight: 64},
+		codec.Quality{Knobs: map[string]string{"q": "85"}},
+	)
+	if err != nil {
+		t.Fatalf("New jpeg: %v", err)
+	}
+	defer enc.Close()
+
+	encodeJobs := make(chan encodeJob, 4)
+	writeJobs := make(chan writeJob, 4)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	cfg := dzi.Config{Format: "jpeg", TileSize: 64}
+	go func() {
+		defer wg.Done()
+		encoderWorker(context.Background(), encodeJobs, writeJobs, cfg, enc, 85)
+	}()
+	go func() {
+		defer wg.Done()
+		encoderWorker(context.Background(), encodeJobs, writeJobs, cfg, enc, 85)
+	}()
+
+	for i := 0; i < 4; i++ {
+		img := makeRGBA(64, 64, byte(i))
+		encodeJobs <- encodeJob{level: 1, col: i, row: 0, img: img}
+	}
+	close(encodeJobs)
+
+	go func() { wg.Wait(); close(writeJobs) }()
+
+	received := map[int]bool{}
+	for w := range writeJobs {
+		img, err := stdjpeg.Decode(bytes.NewReader(w.body))
+		if err != nil {
+			t.Errorf("col %d: decode: %v", w.col, err)
+			continue
+		}
+		if img.Bounds() != image.Rect(0, 0, 64, 64) {
+			t.Errorf("col %d: dims %v, want 64x64", w.col, img.Bounds())
+		}
+		received[w.col] = true
+	}
+
+	for i := 0; i < 4; i++ {
+		if !received[i] {
+			t.Errorf("col %d: no writeJob received", i)
+		}
 	}
 }

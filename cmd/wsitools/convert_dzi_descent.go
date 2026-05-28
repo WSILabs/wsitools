@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"image"
+	"image/png"
 
+	"github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/dzi"
 )
 
@@ -200,6 +205,74 @@ func copyRGBABand(dst *image.RGBA, dstY int, src *image.RGBA, srcY, srcX, w, h i
 			dst.Pix[di+1] = gg
 			dst.Pix[di+2] = bb
 			dst.Pix[di+3] = 0xFF
+		}
+	}
+}
+
+// encoderWorker pulls encodeJobs, encodes via enc, pushes writeJobs.
+// Selects on ctx.Done() for cancellation. Exits cleanly when jobs
+// is closed.
+func encoderWorker(ctx context.Context, jobs <-chan encodeJob, out chan<- writeJob,
+	cfg dzi.Config, enc *jpeg.Encoder, quality int) {
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job, ok := <-jobs:
+			if !ok {
+				return
+			}
+			body, err := encodeTile(job.img, cfg.Format, enc, quality)
+			if err != nil {
+				return
+			}
+			select {
+			case out <- writeJob{level: job.level, col: job.col, row: job.row, body: body}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// encodeTile dispatches per cfg.Format ("jpeg" or "png").
+func encodeTile(img *image.RGBA, format string, enc *jpeg.Encoder, quality int) ([]byte, error) {
+	switch format {
+	case "jpeg":
+		w := img.Bounds().Dx()
+		h := img.Bounds().Dy()
+		rgb := make([]byte, w*h*3)
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				si := y*img.Stride + x*4
+				di := y*w*3 + x*3
+				rgb[di+0] = img.Pix[si+0]
+				rgb[di+1] = img.Pix[si+1]
+				rgb[di+2] = img.Pix[si+2]
+			}
+		}
+		return enc.EncodeStandalone(rgb, w, h)
+	case "png":
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, img); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	default:
+		return nil, fmt.Errorf("unsupported dzi format %q", format)
+	}
+}
+
+// sinkDrainer pulls writeJobs and calls sink.WriteTile serially.
+// Stores the first error in *firstErr; subsequent errors are
+// dropped. Caller waits via a WaitGroup.
+func sinkDrainer(jobs <-chan writeJob, sink dziTileSink, firstErr *error) {
+	for job := range jobs {
+		if err := sink.WriteTile(job.level, job.col, job.row, job.body); err != nil {
+			if *firstErr == nil {
+				*firstErr = err
+			}
 		}
 	}
 }
