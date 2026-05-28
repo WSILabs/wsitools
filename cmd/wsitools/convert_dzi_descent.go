@@ -6,7 +6,15 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
+	"runtime"
+	"strconv"
+	"sync"
 
+	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/opentile-go/decoder"
+
+	"github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/dzi"
 )
@@ -277,21 +285,166 @@ func sinkDrainer(jobs <-chan writeJob, sink dziTileSink, firstErr *error) {
 	}
 }
 
+// runDescent drives the v0.17 pyramid-descent pipeline:
+// one ScaledStrips iterator → linked levelBuilders → encoder pool
+// → serialized sink drain. Returns the first error from any stage.
+func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cfg dzi.Config, workers, quality int) error {
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	encodeJobs := make(chan encodeJob, 2*workers)
+	writeJobs := make(chan writeJob, 2*workers)
+
+	// Build the level chain top-down: every loop iter builds a
+	// builder one level coarser to finer. After the loop, `top` is
+	// the L_max builder; each builder's `child` is the next coarser.
+	maxLevel := dzi.MaxLevel(cfg.Width, cfg.Height)
+	var coarsest *levelBuilder
+	var top *levelBuilder
+	for lvl := 0; lvl <= maxLevel; lvl++ {
+		lw, lh := dzi.LevelDims(cfg.Width, cfg.Height, lvl)
+		cols, rows := dzi.GridDims(lw, lh, cfg.TileSize)
+		lb := &levelBuilder{
+			level: lvl, width: lw, cfg: cfg,
+			cols: cols, rows: rows,
+			jobs: encodeJobs,
+		}
+		if coarsest == nil {
+			coarsest = lb
+		} else {
+			lb.child = top
+		}
+		top = lb
+		_ = lh
+	}
+	_ = coarsest // retained for clarity; the chain is reachable from top via .child
+
+	// Encoder shared across workers (the cgo call is concurrency-safe).
+	enc, err := jpeg.New(
+		codec.LevelGeometry{TileWidth: cfg.TileSize, TileHeight: cfg.TileSize},
+		codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}},
+	)
+	if err != nil {
+		return fmt.Errorf("jpeg.New: %w", err)
+	}
+	defer enc.Close()
+
+	var encWG sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		encWG.Add(1)
+		go func() {
+			defer encWG.Done()
+			encoderWorker(ctx, encodeJobs, writeJobs, cfg, enc, quality)
+		}()
+	}
+
+	var sinkWG sync.WaitGroup
+	var sinkErr error
+	sinkWG.Add(1)
+	go func() {
+		defer sinkWG.Done()
+		sinkDrainer(writeJobs, sink, &sinkErr)
+	}()
+
+	// Source iterator.
+	stripOpts := []opentile.StripOption{opentile.WithStripContext(ctx)}
+	if workers > 0 {
+		stripOpts = append(stripOpts, opentile.WithStripWorkers(workers))
+	}
+	it := slide.ScaledStrips(
+		image.Rect(0, 0, cfg.Width, cfg.Height),
+		image.Point{X: cfg.Width, Y: cfg.Height},
+		cfg.TileSize,
+		stripOpts...,
+	)
+	defer it.Close()
+
+	var srcErr error
+	for {
+		img, err := it.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			srcErr = err
+			cancel()
+			break
+		}
+		rgba := decoderImageToRGBA(img)
+		top.feed(rgba)
+	}
+	if srcErr == nil {
+		top.flush()
+	}
+
+	close(encodeJobs)
+	encWG.Wait()
+	close(writeJobs)
+	sinkWG.Wait()
+
+	if srcErr != nil {
+		return srcErr
+	}
+	return sinkErr
+}
+
+// decoderImageToRGBA converts a decoder.Image (RGB or RGBA) into
+// an *image.RGBA suitable for level builders.
+func decoderImageToRGBA(img *decoder.Image) *image.RGBA {
+	w, h := img.Width, img.Height
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	if img.Format == decoder.PixelFormatRGBA {
+		for y := 0; y < h; y++ {
+			copy(dst.Pix[y*dst.Stride:], img.Pix[y*img.Stride:y*img.Stride+w*4])
+		}
+		return dst
+	}
+	// RGB → RGBA.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			si := y*img.Stride + x*3
+			di := y*dst.Stride + x*4
+			dst.Pix[di+0] = img.Pix[si+0]
+			dst.Pix[di+1] = img.Pix[si+1]
+			dst.Pix[di+2] = img.Pix[si+2]
+			dst.Pix[di+3] = 0xFF
+		}
+	}
+	return dst
+}
+
 // boxDownsample2x reduces an RGBA by 2× in both dimensions via
-// 2×2 box averaging. Alpha is set to 0xFF.
+// 2×2 box averaging. Alpha is set to 0xFF. Odd-dimension sources
+// are handled by treating the last row/column as duplicated (so the
+// output is ceil(srcH/2) × ceil(srcW/2)).
 func boxDownsample2x(src *image.RGBA) *image.RGBA {
 	srcW := src.Bounds().Dx()
 	srcH := src.Bounds().Dy()
-	w := srcW / 2
-	h := srcH / 2
+	if srcW == 0 || srcH == 0 {
+		return image.NewRGBA(image.Rect(0, 0, 0, 0))
+	}
+	w := (srcW + 1) / 2
+	h := (srcH + 1) / 2
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			sx, sy := x*2, y*2
-			i0 := sy*src.Stride + sx*4
-			i1 := sy*src.Stride + (sx+1)*4
-			i2 := (sy+1)*src.Stride + sx*4
-			i3 := (sy+1)*src.Stride + (sx+1)*4
+			sx0, sy0 := x*2, y*2
+			sx1 := sx0 + 1
+			if sx1 >= srcW {
+				sx1 = srcW - 1
+			}
+			sy1 := sy0 + 1
+			if sy1 >= srcH {
+				sy1 = srcH - 1
+			}
+			i0 := sy0*src.Stride + sx0*4
+			i1 := sy0*src.Stride + sx1*4
+			i2 := sy1*src.Stride + sx0*4
+			i3 := sy1*src.Stride + sx1*4
 			r := (uint32(src.Pix[i0+0]) + uint32(src.Pix[i1+0]) + uint32(src.Pix[i2+0]) + uint32(src.Pix[i3+0])) / 4
 			g := (uint32(src.Pix[i0+1]) + uint32(src.Pix[i1+1]) + uint32(src.Pix[i2+1]) + uint32(src.Pix[i3+1])) / 4
 			b := (uint32(src.Pix[i0+2]) + uint32(src.Pix[i1+2]) + uint32(src.Pix[i2+2]) + uint32(src.Pix[i3+2])) / 4
