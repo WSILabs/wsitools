@@ -97,3 +97,51 @@ func TestLevelBuilderEmitsTilesForCompletedStrip(t *testing.T) {
 		t.Errorf("rows distribution: %v, want row 0×2 + row 1×2", rowsSeen)
 	}
 }
+
+func TestLevelBuilderCascade(t *testing.T) {
+	// L_max width 512, L_max-1 width 256, L_max-2 width 128.
+	// TileSize=256, Overlap=0 for simplicity.
+	cfg := dzi.Config{
+		Width: 512, Height: 512,
+		Format: "jpeg", TileSize: 256, Overlap: 0,
+	}
+	jobs := make(chan encodeJob, 32)
+
+	coarsest := &levelBuilder{
+		level: 0, width: 128, cfg: cfg,
+		cols: 1, rows: 1,
+		jobs: jobs,
+	}
+	mid := &levelBuilder{
+		level: 1, width: 256, cfg: cfg,
+		cols: 1, rows: 1,
+		child: coarsest,
+		jobs:  jobs,
+	}
+	top := &levelBuilder{
+		level: 2, width: 512, cfg: cfg,
+		cols: 2, rows: 2,
+		child: mid,
+		jobs:  jobs,
+	}
+
+	top.feed(makeRGBA(512, 256, 1))
+	top.feed(makeRGBA(512, 256, 2))
+	top.flush()
+	close(jobs)
+
+	counts := map[int]int{}
+	for j := range jobs {
+		counts[j.level]++
+	}
+
+	if counts[2] != 4 {
+		t.Errorf("L2 tile count: %d, want 4", counts[2])
+	}
+	if counts[1] != 1 {
+		t.Errorf("L1 tile count: %d, want 1", counts[1])
+	}
+	if counts[0] != 1 {
+		t.Errorf("L0 tile count: %d, want 1", counts[0])
+	}
+}
