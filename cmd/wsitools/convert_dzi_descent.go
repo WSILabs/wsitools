@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"io"
 	"runtime"
@@ -20,10 +21,52 @@ import (
 	"github.com/wsilabs/wsitools/internal/dzi"
 )
 
-// encodeJob hands a rendered tile RGBA to the encoder pool.
+// rgbImage is a 3-byte-per-pixel RGB image. Mirrors image.RGBA's
+// shape (Pix + Stride + bounds) but skips the alpha channel that
+// our pipeline doesn't use. Source pixels arrive from opentile-go
+// as RGB; libjpeg-turbo's EncodeStandalone accepts RGB; carrying
+// RGBA in between was pure overhead.
+type rgbImage struct {
+	Pix    []byte // length = h * Stride; pixel (x,y) at [y*Stride + x*3]
+	Stride int    // = w * 3
+	W, H   int
+}
+
+// rgbPixPool pools the backing []byte slice for rgbImage tile
+// destinations produced by assembleTile and consumed by the encoder.
+// Capacity grows on demand. Ownership: assembleTile borrows; encoder
+// releases after EncodeStandalone returns.
+var rgbPixPool = sync.Pool{
+	New: func() any { b := make([]byte, 0, 258*258*3); return &b },
+}
+
+// newPooledRGB returns an *rgbImage whose Pix slice is borrowed
+// from rgbPixPool. Callers must release via releaseRGB after the
+// last read of Pix. The borrowed slice is not zeroed — callers must
+// fully overwrite every byte (assembleTile + copyRGBBand do so by
+// covering content + topOv*outW + bottomOv*outW + side bands).
+func newPooledRGB(w, h int) *rgbImage {
+	need := w * h * 3
+	b := *(rgbPixPool.Get().(*[]byte))
+	if cap(b) < need {
+		b = make([]byte, need)
+	} else {
+		b = b[:need]
+	}
+	return &rgbImage{Pix: b, Stride: w * 3, W: w, H: h}
+}
+
+// releaseRGB returns img.Pix to the pool. Caller must not reference
+// img after calling.
+func releaseRGB(img *rgbImage) {
+	b := img.Pix[:0]
+	rgbPixPool.Put(&b)
+}
+
+// encodeJob hands a rendered tile to the encoder pool.
 type encodeJob struct {
 	level, col, row int
-	img             *image.RGBA
+	img             *rgbImage
 }
 
 // writeJob hands encoded bytes to the sink-drain goroutine.
@@ -45,12 +88,12 @@ type levelBuilder struct {
 	rows  int
 
 	// Rolling 3-strip overlap buffer.
-	prev, cur, next *image.RGBA
+	prev, cur, next *rgbImage
 
 	// Accumulator for the strip currently being filled from
 	// downsampled parent rows. nil for the L_max builder; the
 	// parent feeds full strips directly into feed().
-	accum     *image.RGBA
+	accum     *rgbImage
 	accumRows int
 
 	rowIndex int // next DZI row to emit
@@ -63,7 +106,7 @@ type levelBuilder struct {
 //  1. Rotate buffer: prev = cur; cur = next; next = strip.
 //  2. If cur != nil, emit DZI tiles for rowIndex.
 //  3. Downsample 2× and feed to child (if any).
-func (lb *levelBuilder) feed(strip *image.RGBA) {
+func (lb *levelBuilder) feed(strip *rgbImage) {
 	lb.prev = lb.cur
 	lb.cur = lb.next
 	lb.next = strip
@@ -81,19 +124,24 @@ func (lb *levelBuilder) feed(strip *image.RGBA) {
 // acceptDownsampled buffers a half-height parent strip until it
 // has accumulated enough rows to promote to a full strip at this
 // level's resolution.
-func (lb *levelBuilder) acceptDownsampled(half *image.RGBA) {
+func (lb *levelBuilder) acceptDownsampled(half *rgbImage) {
 	if lb.accum == nil {
-		lb.accum = image.NewRGBA(image.Rect(0, 0, lb.width, lb.cfg.TileSize))
+		lb.accum = &rgbImage{
+			Pix:    make([]byte, lb.width*lb.cfg.TileSize*3),
+			Stride: lb.width * 3,
+			W:      lb.width,
+			H:      lb.cfg.TileSize,
+		}
 	}
-	halfH := half.Bounds().Dy()
-	halfW := half.Bounds().Dx()
+	halfH := half.H
+	halfW := half.W
 
 	for y := 0; y < halfH; y++ {
 		if lb.accumRows+y >= lb.cfg.TileSize {
 			break
 		}
-		srcRow := half.Pix[y*half.Stride : y*half.Stride+halfW*4]
-		dstRow := lb.accum.Pix[(lb.accumRows+y)*lb.accum.Stride : (lb.accumRows+y)*lb.accum.Stride+halfW*4]
+		srcRow := half.Pix[y*half.Stride : y*half.Stride+halfW*3]
+		dstRow := lb.accum.Pix[(lb.accumRows+y)*lb.accum.Stride : (lb.accumRows+y)*lb.accum.Stride+halfW*3]
 		copy(dstRow, srcRow)
 	}
 	lb.accumRows += halfH
@@ -110,9 +158,14 @@ func (lb *levelBuilder) acceptDownsampled(half *image.RGBA) {
 func (lb *levelBuilder) flush() {
 	// Finalise any partial accumulator as a short strip.
 	if lb.accum != nil && lb.accumRows > 0 {
-		short := image.NewRGBA(image.Rect(0, 0, lb.width, lb.accumRows))
+		short := &rgbImage{
+			Pix:    make([]byte, lb.width*lb.accumRows*3),
+			Stride: lb.width * 3,
+			W:      lb.width,
+			H:      lb.accumRows,
+		}
 		for y := 0; y < lb.accumRows; y++ {
-			copy(short.Pix[y*short.Stride:], lb.accum.Pix[y*lb.accum.Stride:y*lb.accum.Stride+lb.width*4])
+			copy(short.Pix[y*short.Stride:], lb.accum.Pix[y*lb.accum.Stride:y*lb.accum.Stride+lb.width*3])
 		}
 		lb.feed(short)
 		lb.accum = nil
@@ -142,16 +195,16 @@ func (lb *levelBuilder) emitRow(row int) {
 	}
 }
 
-// assembleTile builds the RGBA for DZI tile (col, row) from the
+// assembleTile builds the RGB tile for DZI tile (col, row) from the
 // rolling buffer (prev/cur/next) with overlap rules.
-func (lb *levelBuilder) assembleTile(col, row int) *image.RGBA {
+func (lb *levelBuilder) assembleTile(col, row int) *rgbImage {
 	lw := lb.width
 	// Use level height = rows * TileSize for EdgeTileDims; the last
 	// row's content height comes from cur's actual height (which may
 	// be short on the last strip).
 	cw, ch := dzi.EdgeTileDims(lw, lb.rows*lb.cfg.TileSize, lb.cfg.TileSize, col, row)
-	if lb.cur != nil && lb.cur.Bounds().Dy() < lb.cfg.TileSize {
-		ch = lb.cur.Bounds().Dy()
+	if lb.cur != nil && lb.cur.H < lb.cfg.TileSize {
+		ch = lb.cur.H
 	}
 
 	leftOv := lb.cfg.Overlap
@@ -174,27 +227,27 @@ func (lb *levelBuilder) assembleTile(col, row int) *image.RGBA {
 	outW := cw + leftOv + rightOv
 	outH := ch + topOv + bottomOv
 
-	dst := image.NewRGBA(image.Rect(0, 0, outW, outH))
+	dst := newPooledRGB(outW, outH)
 	srcX0 := col*lb.cfg.TileSize - leftOv
 
 	if topOv > 0 && lb.prev != nil {
-		prevH := lb.prev.Bounds().Dy()
-		copyRGBABand(dst, 0, lb.prev, prevH-topOv, srcX0, outW, topOv)
+		prevH := lb.prev.H
+		copyRGBBand(dst, 0, lb.prev, prevH-topOv, srcX0, outW, topOv)
 	}
 	if lb.cur != nil {
-		copyRGBABand(dst, topOv, lb.cur, 0, srcX0, outW, ch)
+		copyRGBBand(dst, topOv, lb.cur, 0, srcX0, outW, ch)
 	}
 	if bottomOv > 0 && lb.next != nil {
-		copyRGBABand(dst, topOv+ch, lb.next, 0, srcX0, outW, bottomOv)
+		copyRGBBand(dst, topOv+ch, lb.next, 0, srcX0, outW, bottomOv)
 	}
 	return dst
 }
 
-// copyRGBABand copies a horizontal band between two RGBAs. Out-of-
+// copyRGBBand copies a horizontal band between two rgbImages. Out-of-
 // range source columns are white-filled (defensive against
 // overlap-rule programming errors).
-func copyRGBABand(dst *image.RGBA, dstY int, src *image.RGBA, srcY, srcX, w, h int) {
-	srcW := src.Bounds().Dx()
+func copyRGBBand(dst *rgbImage, dstY int, src *rgbImage, srcY, srcX, w, h int) {
+	srcW := src.W
 	for r := 0; r < h; r++ {
 		dstRowStart := (dstY + r) * dst.Stride
 		srcRowStart := (srcY + r) * src.Stride
@@ -202,18 +255,17 @@ func copyRGBABand(dst *image.RGBA, dstY int, src *image.RGBA, srcY, srcX, w, h i
 			sx := srcX + c
 			var rr, gg, bb byte
 			if sx >= 0 && sx < srcW {
-				si := srcRowStart + sx*4
+				si := srcRowStart + sx*3
 				rr = src.Pix[si+0]
 				gg = src.Pix[si+1]
 				bb = src.Pix[si+2]
 			} else {
 				rr, gg, bb = 0xFF, 0xFF, 0xFF
 			}
-			di := dstRowStart + c*4
+			di := dstRowStart + c*3
 			dst.Pix[di+0] = rr
 			dst.Pix[di+1] = gg
 			dst.Pix[di+2] = bb
-			dst.Pix[di+3] = 0xFF
 		}
 	}
 }
@@ -245,29 +297,37 @@ func encoderWorker(ctx context.Context, jobs <-chan encodeJob, out chan<- writeJ
 	}
 }
 
-// encodeTile dispatches per cfg.Format ("jpeg" or "png").
-func encodeTile(img *image.RGBA, format string, enc *jpeg.Encoder, quality int) ([]byte, error) {
+// rgbImageAsImage wraps rgbImage as image.Image for stdlib encoders.
+// Reports NRGBA color model with alpha hard-coded to 255 so PNG output
+// is logically equivalent to a fully-opaque RGB image (though PNG will
+// still write a 4-byte-per-pixel format; PNG output is rare for DZI so
+// this is OK).
+type rgbImageAsImage struct{ *rgbImage }
+
+func (r *rgbImageAsImage) ColorModel() color.Model { return color.NRGBAModel }
+func (r *rgbImageAsImage) Bounds() image.Rectangle { return image.Rect(0, 0, r.W, r.H) }
+func (r *rgbImageAsImage) At(x, y int) color.Color {
+	i := y*r.Stride + x*3
+	return color.NRGBA{R: r.Pix[i+0], G: r.Pix[i+1], B: r.Pix[i+2], A: 0xFF}
+}
+
+// encodeTile dispatches per cfg.Format ("jpeg" or "png"). For JPEG,
+// passes img.Pix directly to EncodeStandalone (no conversion needed
+// since the pipeline now carries RGB throughout). The encoded body
+// is a fresh allocation (caller owns).
+func encodeTile(img *rgbImage, format string, enc *jpeg.Encoder, quality int) ([]byte, error) {
 	switch format {
 	case "jpeg":
-		w := img.Bounds().Dx()
-		h := img.Bounds().Dy()
-		rgb := make([]byte, w*h*3)
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				si := y*img.Stride + x*4
-				di := y*w*3 + x*3
-				rgb[di+0] = img.Pix[si+0]
-				rgb[di+1] = img.Pix[si+1]
-				rgb[di+2] = img.Pix[si+2]
-			}
-		}
-		return enc.EncodeStandalone(rgb, w, h)
+		body, err := enc.EncodeStandalone(img.Pix, img.W, img.H)
+		releaseRGB(img)
+		return body, err
 	case "png":
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, img); err != nil {
+		var b bytes.Buffer
+		if err := png.Encode(&b, &rgbImageAsImage{img}); err != nil {
 			return nil, err
 		}
-		return buf.Bytes(), nil
+		releaseRGB(img)
+		return b.Bytes(), nil
 	default:
 		return nil, fmt.Errorf("unsupported dzi format %q", format)
 	}
@@ -384,8 +444,8 @@ func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cf
 			cancel()
 			break
 		}
-		rgba := decoderImageToRGBA(img)
-		top.feed(rgba)
+		rgb := decoderImageToRGB(img)
+		top.feed(rgb)
 	}
 	if srcErr == nil {
 		top.flush()
@@ -402,44 +462,46 @@ func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cf
 	return sinkErr
 }
 
-// decoderImageToRGBA converts a decoder.Image (RGB or RGBA) into
-// an *image.RGBA suitable for level builders.
-func decoderImageToRGBA(img *decoder.Image) *image.RGBA {
-	w, h := img.Width, img.Height
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	if img.Format == decoder.PixelFormatRGBA {
-		for y := 0; y < h; y++ {
-			copy(dst.Pix[y*dst.Stride:], img.Pix[y*img.Stride:y*img.Stride+w*4])
-		}
-		return dst
+// decoderImageToRGB returns an *rgbImage view or copy of a decoder.Image.
+// When src is already RGB, wraps src.Pix directly (zero-copy). This is
+// safe because ScaledStrips allocates a fresh *decoder.Image per Next()
+// call and top.feed() processes the strip synchronously before the next
+// it.Next() call, so the buffer won't be reused while still referenced.
+// When src is RGBA, strips the alpha channel into a fresh pooled buffer.
+func decoderImageToRGB(img *decoder.Image) *rgbImage {
+	if img.Format == decoder.PixelFormatRGB {
+		// Zero-copy view — buffer lifetime is bounded by the strip's
+		// synchronous processing before the next it.Next() call.
+		return &rgbImage{Pix: img.Pix, Stride: img.Stride, W: img.Width, H: img.Height}
 	}
-	// RGB → RGBA.
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			si := y*img.Stride + x*3
-			di := y*dst.Stride + x*4
+	// RGBA → RGB (rare path; would require ScaledStrips to be set to
+	// RGBA, which we don't do).
+	dst := newPooledRGB(img.Width, img.Height)
+	for y := 0; y < img.Height; y++ {
+		for x := 0; x < img.Width; x++ {
+			si := y*img.Stride + x*4
+			di := y*dst.Stride + x*3
 			dst.Pix[di+0] = img.Pix[si+0]
 			dst.Pix[di+1] = img.Pix[si+1]
 			dst.Pix[di+2] = img.Pix[si+2]
-			dst.Pix[di+3] = 0xFF
 		}
 	}
 	return dst
 }
 
-// boxDownsample2x reduces an RGBA by 2× in both dimensions via
-// 2×2 box averaging. Alpha is set to 0xFF. Odd-dimension sources
-// are handled by treating the last row/column as duplicated (so the
-// output is ceil(srcH/2) × ceil(srcW/2)).
-func boxDownsample2x(src *image.RGBA) *image.RGBA {
-	srcW := src.Bounds().Dx()
-	srcH := src.Bounds().Dy()
+// boxDownsample2x reduces an rgbImage by 2× in both dimensions via
+// 2×2 box averaging. Odd-dimension sources are handled by treating
+// the last row/column as duplicated (so the output is
+// ceil(srcH/2) × ceil(srcW/2)).
+func boxDownsample2x(src *rgbImage) *rgbImage {
+	srcW := src.W
+	srcH := src.H
 	if srcW == 0 || srcH == 0 {
-		return image.NewRGBA(image.Rect(0, 0, 0, 0))
+		return &rgbImage{Pix: []byte{}, Stride: 0, W: 0, H: 0}
 	}
 	w := (srcW + 1) / 2
 	h := (srcH + 1) / 2
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	dst := newPooledRGB(w, h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			sx0, sy0 := x*2, y*2
@@ -451,18 +513,17 @@ func boxDownsample2x(src *image.RGBA) *image.RGBA {
 			if sy1 >= srcH {
 				sy1 = srcH - 1
 			}
-			i0 := sy0*src.Stride + sx0*4
-			i1 := sy0*src.Stride + sx1*4
-			i2 := sy1*src.Stride + sx0*4
-			i3 := sy1*src.Stride + sx1*4
+			i0 := sy0*src.Stride + sx0*3
+			i1 := sy0*src.Stride + sx1*3
+			i2 := sy1*src.Stride + sx0*3
+			i3 := sy1*src.Stride + sx1*3
 			r := (uint32(src.Pix[i0+0]) + uint32(src.Pix[i1+0]) + uint32(src.Pix[i2+0]) + uint32(src.Pix[i3+0])) / 4
 			g := (uint32(src.Pix[i0+1]) + uint32(src.Pix[i1+1]) + uint32(src.Pix[i2+1]) + uint32(src.Pix[i3+1])) / 4
 			b := (uint32(src.Pix[i0+2]) + uint32(src.Pix[i1+2]) + uint32(src.Pix[i2+2]) + uint32(src.Pix[i3+2])) / 4
-			di := y*dst.Stride + x*4
+			di := y*dst.Stride + x*3
 			dst.Pix[di+0] = byte(r)
 			dst.Pix[di+1] = byte(g)
 			dst.Pix[di+2] = byte(b)
-			dst.Pix[di+3] = 0xFF
 		}
 	}
 	return dst

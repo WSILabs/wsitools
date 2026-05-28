@@ -13,54 +13,63 @@ import (
 	"github.com/wsilabs/wsitools/internal/dzi"
 )
 
-// makeRGBA returns an image.RGBA of size w×h where pixel (x,y) =
-// (id, byte(x), byte(y), 0xFF) — encodes id+col+row for traceable
+// makeRGB returns an *rgbImage of size w×h where pixel (x,y) =
+// (id, byte(x), byte(y)) — encodes id+col+row for traceable
 // assertions.
-func makeRGBA(w, h int, id byte) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
+func makeRGB(w, h int, id byte) *rgbImage {
+	img := &rgbImage{
+		Pix:    make([]byte, w*h*3),
+		Stride: w * 3,
+		W:      w,
+		H:      h,
+	}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			i := y*img.Stride + x*4
+			i := y*img.Stride + x*3
 			img.Pix[i+0] = id
 			img.Pix[i+1] = byte(x)
 			img.Pix[i+2] = byte(y)
-			img.Pix[i+3] = 0xFF
 		}
 	}
 	return img
 }
 
 func TestBoxDownsample2xHalvesDimensions(t *testing.T) {
-	src := makeRGBA(8, 8, 0xAA)
+	src := makeRGB(8, 8, 0xAA)
 	dst := boxDownsample2x(src)
-	if dst.Bounds().Dx() != 4 || dst.Bounds().Dy() != 4 {
-		t.Errorf("dst dims: %v, want 4x4", dst.Bounds().Size())
+	if dst.W != 4 || dst.H != 4 {
+		t.Errorf("dst dims: %dx%d, want 4x4", dst.W, dst.H)
 	}
 }
 
 func TestBoxDownsample2xAverages2x2(t *testing.T) {
-	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	src := &rgbImage{
+		Pix:    make([]byte, 4*4*3),
+		Stride: 4 * 3,
+		W:      4,
+		H:      4,
+	}
 	// Fill 4x4 with R=y*64, G=x*64, B=100.
 	for y := 0; y < 4; y++ {
 		for x := 0; x < 4; x++ {
-			i := y*src.Stride + x*4
+			i := y*src.Stride + x*3
 			src.Pix[i+0] = byte(y * 64)
 			src.Pix[i+1] = byte(x * 64)
 			src.Pix[i+2] = 100
-			src.Pix[i+3] = 0xFF
 		}
 	}
 	dst := boxDownsample2x(src)
-	if dst.Bounds().Dx() != 2 || dst.Bounds().Dy() != 2 {
-		t.Fatalf("dst dims: %v, want 2x2", dst.Bounds().Size())
+	if dst.W != 2 || dst.H != 2 {
+		t.Fatalf("dst dims: %dx%d, want 2x2", dst.W, dst.H)
 	}
 	// dst(0,0) = average of src{(0,0),(1,0),(0,1),(1,1)}
 	//   R: (0+0+64+64)/4 = 32
 	//   G: (0+64+0+64)/4 = 32
 	//   B: 100
-	p := dst.RGBAAt(0, 0)
-	if p.R != 32 || p.G != 32 || p.B != 100 {
-		t.Errorf("dst(0,0) = %v; want R=32 G=32 B=100", p)
+	i := 0*dst.Stride + 0*3
+	rr, gg, bb := dst.Pix[i+0], dst.Pix[i+1], dst.Pix[i+2]
+	if rr != 32 || gg != 32 || bb != 100 {
+		t.Errorf("dst(0,0) = R=%d G=%d B=%d; want R=32 G=32 B=100", rr, gg, bb)
 	}
 }
 
@@ -80,8 +89,8 @@ func TestLevelBuilderEmitsTilesForCompletedStrip(t *testing.T) {
 		jobs: jobs,
 	}
 
-	strip0 := makeRGBA(512, 256, 0)
-	strip1 := makeRGBA(512, 256, 1)
+	strip0 := makeRGB(512, 256, 0)
+	strip1 := makeRGB(512, 256, 1)
 
 	lb.feed(strip0)
 	lb.feed(strip1)
@@ -131,8 +140,8 @@ func TestLevelBuilderCascade(t *testing.T) {
 		jobs:  jobs,
 	}
 
-	top.feed(makeRGBA(512, 256, 1))
-	top.feed(makeRGBA(512, 256, 2))
+	top.feed(makeRGB(512, 256, 1))
+	top.feed(makeRGB(512, 256, 2))
 	top.flush()
 	close(jobs)
 
@@ -178,7 +187,7 @@ func TestEncoderPoolProducesDecodableJPEGs(t *testing.T) {
 	}()
 
 	for i := 0; i < 4; i++ {
-		img := makeRGBA(64, 64, byte(i))
+		img := makeRGB(64, 64, byte(i))
 		encodeJobs <- encodeJob{level: 1, col: i, row: 0, img: img}
 	}
 	close(encodeJobs)
