@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConvertFailsForMissingInput(t *testing.T) {
@@ -173,10 +175,6 @@ func TestConvertToSZI(t *testing.T) {
 }
 
 func TestConvertNDPIToDZI(t *testing.T) {
-	t.Skip("v0.17: NDPI→DZI exceeds 5min via per-tile ReadRegionScaled on " +
-		"striped sources; ScaledStrips iterator wiring (planned v0.17) is " +
-		"required for acceptable runtime. The code path is correct — verified " +
-		"by hand on Hamamatsu-1.ndpi — but too slow for CI.")
 	dir := os.Getenv("WSI_TOOLS_TESTDIR")
 	if dir == "" {
 		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
@@ -197,7 +195,6 @@ func TestConvertNDPIToDZI(t *testing.T) {
 }
 
 func TestConvertNDPIToSZI(t *testing.T) {
-	t.Skip("v0.17: same ScaledStrips perf issue as TestConvertNDPIToDZI")
 	dir := os.Getenv("WSI_TOOLS_TESTDIR")
 	if dir == "" {
 		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
@@ -301,5 +298,34 @@ func TestConvertHelpListsRequiredFlags(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("help output missing %q\n%s", want, out)
 		}
+	}
+}
+
+func TestConvertDZICtxCancel(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), "GitHub/opentile-go/sample_files")
+	}
+	in := filepath.Join(dir, "ndpi", "CMU-1.ndpi")
+	if _, err := os.Stat(in); err != nil {
+		t.Skip("fixture missing: " + in)
+	}
+	out := filepath.Join(t.TempDir(), "out.dzi")
+
+	pre := runtime.NumGoroutine()
+
+	cmd := exec.Command(findBinary(t), "convert", "--to", "dzi", "-o", out, in)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	time.AfterFunc(100*time.Millisecond, func() {
+		_ = cmd.Process.Signal(os.Interrupt)
+	})
+	_ = cmd.Wait()
+
+	time.Sleep(200 * time.Millisecond)
+	post := runtime.NumGoroutine()
+	if post > pre+5 {
+		t.Errorf("goroutine leak: pre=%d post=%d", pre, post)
 	}
 }
