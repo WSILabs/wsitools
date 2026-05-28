@@ -13,6 +13,7 @@ import (
 
 	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/opentile-go/decoder"
+	"github.com/wsilabs/opentile-go/resample"
 
 	"github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/codec/jpeg"
@@ -351,7 +352,16 @@ func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cf
 	}()
 
 	// Source iterator.
-	stripOpts := []opentile.StripOption{opentile.WithStripContext(ctx)}
+	//
+	// At the top of the cascade, outSize == sourceLevel.Size (we read
+	// the source at native resolution and downsample in process for
+	// every coarser DZI level). No scaling is needed at the top, so
+	// use Nearest — Lanczos otherwise dominates ~80% of CPU on the
+	// identity-scale read path (profiled May 2026).
+	stripOpts := []opentile.StripOption{
+		opentile.WithStripContext(ctx),
+		opentile.WithStripKernel(resample.Nearest),
+	}
 	if workers > 0 {
 		stripOpts = append(stripOpts, opentile.WithStripWorkers(workers))
 	}
