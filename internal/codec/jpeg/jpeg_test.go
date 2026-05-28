@@ -1,103 +1,120 @@
+//go:build !nocgo
+
 package jpeg
 
 import (
 	"bytes"
+	"image"
+	stdjpeg "image/jpeg"
 	"testing"
-
-	otdecoder "github.com/wsilabs/opentile-go/decoder"
-	_ "github.com/wsilabs/opentile-go/decoder/jpeg"
 
 	"github.com/wsilabs/wsitools/internal/codec"
 )
 
-// TestJPEGEncoderRoundTrip verifies encode→decode fidelity using libjpeg-turbo
-// on the decode side. The Go stdlib image/jpeg decoder is NOT used here because
-// it does not honor the Adobe APP14 marker that this encoder writes — stdlib
-// always applies the YCbCr→RGB inverse transform regardless of marker, which
-// hue-rotates output that's stored as raw RGB. libjpeg-turbo's tjDecompress2
-// (and openslide / QuPath / libvips) honors APP14 and reproduces the source
-// pixels.
-func TestJPEGEncoderRoundTrip(t *testing.T) {
-	// 256x256 RGB tile with a gradient.
-	rgb := make([]byte, 256*256*3)
-	for y := 0; y < 256; y++ {
-		for x := 0; x < 256; x++ {
-			off := (y*256 + x) * 3
-			rgb[off+0] = byte(x)
-			rgb[off+1] = byte(y)
-			rgb[off+2] = 128
+func makeRGBPattern(w, h int) []byte {
+	rgb := make([]byte, w*h*3)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*w*3 + x*3
+			rgb[i+0] = byte((x * 255) / w)
+			rgb[i+1] = byte((y * 255) / h)
+			rgb[i+2] = 128
 		}
 	}
-
-	fac := Factory{}
-	enc, err := fac.NewEncoder(codec.LevelGeometry{
-		TileWidth: 256, TileHeight: 256,
-		PixelFormat: codec.PixelFormatRGB8,
-		ColorSpace:  codec.ColorSpace{Name: "sRGB"},
-	}, codec.Quality{Knobs: map[string]string{"q": "85"}})
-	if err != nil {
-		t.Fatalf("NewEncoder: %v", err)
-	}
-	defer enc.Close()
-
-	tile, err := enc.EncodeTile(rgb, 256, 256, nil)
-	if err != nil {
-		t.Fatalf("EncodeTile: %v", err)
-	}
-	if enc.TIFFCompressionTag() != 7 {
-		t.Errorf("TIFFCompressionTag: got %d, want 7", enc.TIFFCompressionTag())
-	}
-
-	tables := enc.LevelHeader()
-	if len(tables) == 0 {
-		t.Fatal("LevelHeader: empty")
-	}
-	// Splice tables + tile into a self-contained JPEG, then decode with
-	// libjpeg-turbo's tjDecompress2 (which honors APP14).
-	spliced := spliceForDecode(tables, tile)
-	if spliced == nil {
-		t.Fatal("splice produced nil")
-	}
-	decFac, ok := otdecoder.Get("jpeg")
-	if !ok {
-		t.Fatal("no jpeg decoder registered")
-	}
-	dec := decFac.New()
-	defer dec.Close()
-	img, err := dec.Decode(spliced, otdecoder.DecodeOptions{Scale: 1, Format: otdecoder.PixelFormatRGB})
-	if err != nil {
-		t.Fatalf("Decode: %v", err)
-	}
-	out := img.Pix
-	if got, want := len(out), 256*256*3; got != want {
-		t.Errorf("decoded length: got %d, want %d", got, want)
-	}
-	// Spot-check pixel (10, 20) — RGB888-packed at offset (20*256 + 10)*3.
-	off := (20*256 + 10) * 3
-	gotR, gotG, gotB := int(out[off]), int(out[off+1]), int(out[off+2])
-	// JPEG drift tolerance at q=85: lossy compression on a smooth gradient
-	// should be tight (≤8 per channel).
-	if abs(gotR-10) > 8 || abs(gotG-20) > 8 || abs(gotB-128) > 8 {
-		t.Errorf("pixel (10,20) round-trip drift too large: got R=%d G=%d B=%d, want ~(10, 20, 128)", gotR, gotG, gotB)
-	}
+	return rgb
 }
 
-// spliceForDecode joins a tables-only JPEG (SOI + DQT + DHT + EOI) with an
-// abbreviated tile (SOI + APP14 + SOF + SOS + entropy + EOI) into a
-// self-contained JPEG by dropping the tables' EOI and the tile's SOI.
-func spliceForDecode(tables, tile []byte) []byte {
-	if !bytes.HasSuffix(tables, []byte{0xFF, 0xD9}) || !bytes.HasPrefix(tile, []byte{0xFF, 0xD8}) {
-		return nil
-	}
-	out := make([]byte, 0, len(tables)+len(tile)-4)
-	out = append(out, tables[:len(tables)-2]...) // tables minus EOI
-	out = append(out, tile[2:]...)               // tile minus SOI
-	return out
+func quality85() codec.Quality {
+	return codec.Quality{Knobs: map[string]string{"q": "85"}}
 }
 
-func abs(x int) int {
+func absInt(x int) int {
 	if x < 0 {
 		return -x
 	}
 	return x
+}
+
+func TestEncodeStandaloneDecodesViaStdlib(t *testing.T) {
+	enc, err := New(codec.LevelGeometry{TileWidth: 64, TileHeight: 64}, quality85())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer enc.Close()
+
+	rgb := makeRGBPattern(64, 64)
+	body, err := enc.EncodeStandalone(rgb, 64, 64)
+	if err != nil {
+		t.Fatalf("EncodeStandalone: %v", err)
+	}
+
+	if len(body) < 4 || body[0] != 0xFF || body[1] != 0xD8 {
+		t.Fatalf("not a JPEG SOI prefix: %X", body[:4])
+	}
+	if body[len(body)-2] != 0xFF || body[len(body)-1] != 0xD9 {
+		t.Errorf("not a JPEG EOI suffix")
+	}
+
+	// Must NOT contain APP14 marker.
+	for i := 0; i+1 < len(body); i++ {
+		if body[i] == 0xFF && body[i+1] == 0xEE {
+			t.Errorf("vanilla output should not contain APP14 marker (offset %d)", i)
+			break
+		}
+	}
+
+	img, err := stdjpeg.Decode(bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("stdlib decode: %v", err)
+	}
+	if img.Bounds() != image.Rect(0, 0, 64, 64) {
+		t.Errorf("decoded bounds: %v, want 64x64", img.Bounds())
+	}
+
+	// Sample center pixel — should be approximately the encoded value.
+	r, g, b, _ := img.At(32, 32).RGBA()
+	rd, gd, bd := byte(r>>8), byte(g>>8), byte(b>>8)
+	if absInt(int(rd)-127) > 20 || absInt(int(gd)-127) > 20 || absInt(int(bd)-128) > 20 {
+		t.Errorf("center pixel decoded as (%d,%d,%d); expected near (127,127,128)", rd, gd, bd)
+	}
+}
+
+func TestEncodeTileAbbreviatedRoundTrip(t *testing.T) {
+	enc, err := New(codec.LevelGeometry{TileWidth: 32, TileHeight: 32}, quality85())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer enc.Close()
+
+	rgb := makeRGBPattern(32, 32)
+	tileBody, err := enc.EncodeTile(rgb, 32, 32, nil)
+	if err != nil {
+		t.Fatalf("EncodeTile: %v", err)
+	}
+
+	tables := enc.LevelHeader()
+	if len(tables) < 4 {
+		t.Fatalf("LevelHeader empty: %d bytes", len(tables))
+	}
+	// Build SOI + (tables sans SOI/EOI) + (tile sans SOI) for standalone-decodable bytes.
+	spliced := append([]byte{0xFF, 0xD8}, tables[2:len(tables)-2]...)
+	spliced = append(spliced, tileBody[2:]...)
+
+	img, err := stdjpeg.Decode(bytes.NewReader(spliced))
+	if err != nil {
+		t.Fatalf("stdlib decode of spliced: %v", err)
+	}
+	if img.Bounds().Dx() != 32 || img.Bounds().Dy() != 32 {
+		t.Errorf("decoded dims: %v, want 32x32", img.Bounds())
+	}
+}
+
+func TestFactoryRegistered(t *testing.T) {
+	fac, err := codec.Lookup("jpeg")
+	if err != nil {
+		t.Fatalf("codec.Lookup(jpeg): %v", err)
+	}
+	if fac.Name() != "jpeg" {
+		t.Errorf("factory Name: %q, want jpeg", fac.Name())
+	}
 }

@@ -1,95 +1,83 @@
-// Package jpeg provides a libjpeg-turbo-backed JPEG encoder that produces
-// Aperio-compatible abbreviated tiles (TIFF tag 347 JPEGTables + per-tile
-// abbreviated JPEG streams with Adobe APP14 RGB colorspace marker).
+//go:build !nocgo
+
+// Package jpeg provides a vanilla libjpeg-turbo-backed JPEG encoder.
+// Output is YCbCr+4:2:0 chroma-subsampled JPEG with embedded
+// DQT/DHT tables when EncodeStandalone is used, or abbreviated
+// tiles (no tables; expected to be combined with LevelHeader via
+// TIFF tag 347) when EncodeTile is used.
+//
+// No Adobe APP14 marker; no raw-RGB storage. The Aperio APP14
+// variant lives in internal/codec/aperioapp14.
 package jpeg
 
 /*
-#cgo pkg-config: libjpeg
+#cgo pkg-config: libturbojpeg
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <jpeglib.h>
 
-// adobeAPP14Payload: 12-byte APP14 payload (no FF EE or length prefix —
-// jpeg_write_marker writes those itself).
-static const JOCTET wsi_app14_payload[] = {
-    0x41, 0x64, 0x6F, 0x62, 0x65, // "Adobe"
-    0x00, 0x64,                   // DCTEncodeVersion = 100
-    0x80, 0x00,                   // APP14Flags0 = 0x8000
-    0x00, 0x00,                   // APP14Flags1 = 0
-    0x00,                         // ColorTransform = 0 (RGB)
-};
+static int wsi_encode_vanilla(
+    const unsigned char *rgb, int w, int h, int quality, int abbreviated,
+    unsigned char **outBuf, unsigned long *outSize) {
 
-// wsi_encode encodes width*height 8-bit RGB pixels into a JPEG stream.
-//
-// abbreviated=0: full self-contained JPEG (SOI + DQT + DHT + SOF + SOS + scan + EOI).
-// abbreviated=1: abbreviated JPEG (SOI + APP14 + SOS + scan + EOI); tables omitted.
-//
-// On success, *outbuf points to a malloc'd buffer of *outsize bytes containing
-// the JPEG stream. The caller must free(*outbuf).
-// Returns 0 on success, -1 on error.
-//
-// KNOWN LIMITATION: jpeg_std_error's default error_exit calls exit(1) on any
-// libjpeg error; install a custom handler for production use (follow-up task).
-static int wsi_encode(
-    const unsigned char *rgb, int width, int height,
-    int quality, int abbreviated,
-    unsigned char **outbuf, unsigned long *outsize)
-{
     struct jpeg_compress_struct cinfo;
     struct jpeg_error_mgr jerr;
-
     cinfo.err = jpeg_std_error(&jerr);
     jpeg_create_compress(&cinfo);
 
-    *outbuf = NULL;
-    *outsize = 0;
-    jpeg_mem_dest(&cinfo, outbuf, outsize);
+    *outBuf = NULL;
+    *outSize = 0;
+    jpeg_mem_dest(&cinfo, outBuf, outSize);
 
-    cinfo.image_width = (JDIMENSION)width;
-    cinfo.image_height = (JDIMENSION)height;
+    cinfo.image_width = w;
+    cinfo.image_height = h;
     cinfo.input_components = 3;
     cinfo.in_color_space = JCS_RGB;
-    jpeg_set_defaults(&cinfo);
-    // Override the default JCS_YCbCr storage with JCS_RGB so pixels are
-    // encoded raw RGB without the YCbCr conversion. This matches what the
-    // Adobe APP14 marker (ColorTransform=0) declares to decoders, and is
-    // what real Aperio SVS files do. libjpeg's jpeg_set_colorspace updates
-    // component sampling factors, quant table targets, and Huffman tables
-    // for the new colorspace — must be called AFTER jpeg_set_defaults and
-    // BEFORE jpeg_set_quality.
-    //
-    // Decoders that honor APP14 (libjpeg-turbo, openslide, QuPath, libvips)
-    // skip the inverse YCbCr transform and produce the original RGB. The Go
-    // stdlib JPEG decoder does NOT honor APP14 and will produce hue-rotated
-    // output — which is why this codec's round-trip tests decode via
-    // libjpeg-turbo (tjDecompress2) rather than image/jpeg.
-    jpeg_set_colorspace(&cinfo, JCS_RGB);
+    jpeg_set_defaults(&cinfo);                // → YCbCr output, 4:2:0
     jpeg_set_quality(&cinfo, quality, TRUE);
 
     if (abbreviated) {
         jpeg_suppress_tables(&cinfo, TRUE);
-        jpeg_start_compress(&cinfo, FALSE); // write_all_tables = FALSE
-        // Write Adobe APP14 RGB marker (APP0+14 = 0xEE).
-        jpeg_write_marker(&cinfo, JPEG_APP0 + 14,
-            wsi_app14_payload, sizeof(wsi_app14_payload));
-    } else {
-        jpeg_start_compress(&cinfo, TRUE); // write_all_tables = TRUE
     }
+    jpeg_start_compress(&cinfo, !abbreviated);
 
-    // Feed scanlines one row at a time.
+    JSAMPROW row_pointer[1];
+    int row_stride = w * 3;
     while (cinfo.next_scanline < cinfo.image_height) {
-        const unsigned char *row = rgb + cinfo.next_scanline * width * 3;
-        JSAMPROW rowptr = (JSAMPROW)row;
-        jpeg_write_scanlines(&cinfo, &rowptr, 1);
+        row_pointer[0] = (JSAMPROW)(rgb + cinfo.next_scanline * row_stride);
+        jpeg_write_scanlines(&cinfo, row_pointer, 1);
     }
 
     jpeg_finish_compress(&cinfo);
     jpeg_destroy_compress(&cinfo);
     return 0;
 }
+
+static int wsi_compute_tables(int quality, unsigned char **outBuf, unsigned long *outSize) {
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+
+    *outBuf = NULL;
+    *outSize = 0;
+    jpeg_mem_dest(&cinfo, outBuf, outSize);
+
+    cinfo.image_width = 16;
+    cinfo.image_height = 16;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, quality, TRUE);
+
+    jpeg_write_tables(&cinfo);
+    jpeg_destroy_compress(&cinfo);
+    return 0;
+}
 */
 import "C"
+
 import (
 	"fmt"
 	"runtime"
@@ -104,58 +92,50 @@ func init() {
 	codec.Register(Factory{})
 }
 
-// Factory creates JPEG encoders and satisfies codec.EncoderFactory.
 type Factory struct{}
 
 func (Factory) Name() string { return "jpeg" }
 
 func (Factory) NewEncoder(g codec.LevelGeometry, q codec.Quality) (codec.Encoder, error) {
-	quality := 85
-	if v, ok := q.Knobs["q"]; ok {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
-			quality = n
-		}
-	}
-	enc := &Encoder{quality: quality, geom: g}
-	if err := enc.computeTables(); err != nil {
-		return nil, err
-	}
-	return enc, nil
+	return New(g, q)
 }
 
-// Encoder encodes JPEG tiles for one pyramid level.
-// tables holds the shared JPEGTables (SOI + DQT + DHT + EOI) computed once
-// from a probe tile; each subsequent EncodeTile call produces an abbreviated
-// stream (SOI + APP14 + SOS + scan data + EOI).
 type Encoder struct {
-	quality int
-	geom    codec.LevelGeometry
-	tables  []byte
+	geometry codec.LevelGeometry
+	quality  int
+	tables   []byte
+}
+
+func New(g codec.LevelGeometry, q codec.Quality) (*Encoder, error) {
+	e := &Encoder{geometry: g, quality: 85}
+	if v, ok := q.Knobs["q"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
+			e.quality = n
+		}
+	}
+	if err := e.computeTables(); err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 func (e *Encoder) LevelHeader() []byte        { return e.tables }
 func (e *Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEG }
 func (e *Encoder) Close() error               { return nil }
 
-// computeTables encodes a blank probe tile as a self-contained JPEG, then
-// extracts the DQT/DHT tables to form the shared JPEGTables for this level.
 func (e *Encoder) computeTables() error {
-	probe := make([]byte, e.geom.TileWidth*e.geom.TileHeight*3)
-	full, err := e.encodeRaw(probe, e.geom.TileWidth, e.geom.TileHeight, false)
-	if err != nil {
-		return fmt.Errorf("codec/jpeg: probe encode: %w", err)
+	var buf *C.uchar
+	var size C.ulong
+	if ret := C.wsi_compute_tables(C.int(e.quality), &buf, &size); ret != 0 {
+		return fmt.Errorf("codec/jpeg: compute_tables failed (ret=%d)", int(ret))
 	}
-	tables, err := tiff.ExtractJPEGTables(full)
-	if err != nil {
-		return fmt.Errorf("codec/jpeg: extract tables: %w", err)
-	}
-	e.tables = tables
+	defer C.free(unsafe.Pointer(buf))
+	e.tables = C.GoBytes(unsafe.Pointer(buf), C.int(size))
 	return nil
 }
 
-// EncodeTile encodes rgb as an abbreviated JPEG tile (no DQT/DHT tables).
-// The returned bytes are a valid JPEG when combined with LevelHeader via
-// TIFF tag 347 (JPEGTables) or by splicing the tables directly before SOS.
+// EncodeTile encodes rgb as an abbreviated JPEG tile (no DQT/DHT).
+// Combine with LevelHeader via TIFF tag 347 for decodable output.
 func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {
 	out, err := e.encodeRaw(rgb, w, h, true)
 	if err != nil {
@@ -169,20 +149,20 @@ func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {
 	return out, nil
 }
 
-// encodeRaw calls the C wsi_encode helper which drives the libjpeg compress loop.
-//
-// abbreviated=false: full self-contained JPEG for probe (used to extract tables).
-// abbreviated=true:  abbreviated JPEG tile with Adobe APP14 RGB marker.
-//
-// All libjpeg state (jpeg_compress_struct, jpeg_error_mgr) lives in C memory
-// inside wsi_encode; we only cross the cgo boundary with a plain data pointer
-// (rgb slice backing array) and output-buffer double-pointer (both C-allocated),
-// avoiding Go-pointer-to-Go-pointer violations.
-//
-// KNOWN LIMITATION: jpeg_std_error's default error_exit calls exit(1) on any
-// libjpeg error. For production use, install a custom C error handler that
-// longjmp()s out instead — flagged as a follow-up concern.
+// EncodeStandalone encodes rgb as a complete self-contained JPEG
+// (SOI + DQT + DHT + SOS + scan + EOI). Used for DZI/SZI per-tile.
+func (e *Encoder) EncodeStandalone(rgb []byte, w, h int) ([]byte, error) {
+	out, err := e.encodeRaw(rgb, w, h, false)
+	if err != nil {
+		return nil, fmt.Errorf("codec/jpeg: EncodeStandalone: %w", err)
+	}
+	return out, nil
+}
+
 func (e *Encoder) encodeRaw(rgb []byte, w, h int, abbreviated bool) ([]byte, error) {
+	if len(rgb) < w*h*3 {
+		return nil, fmt.Errorf("codec/jpeg: rgb buffer too small (have %d, need %d)", len(rgb), w*h*3)
+	}
 	var outBuf *C.uchar
 	var outSize C.ulong
 
@@ -190,27 +170,16 @@ func (e *Encoder) encodeRaw(rgb []byte, w, h int, abbreviated bool) ([]byte, err
 	if abbreviated {
 		abbr = 1
 	}
-
-	ret := C.wsi_encode(
+	ret := C.wsi_encode_vanilla(
 		(*C.uchar)(unsafe.Pointer(&rgb[0])),
 		C.int(w), C.int(h),
 		C.int(e.quality), abbr,
 		&outBuf, &outSize,
 	)
-
-	// Keep rgb alive until after the cgo call returns.
 	runtime.KeepAlive(rgb)
-
 	if ret != 0 {
-		return nil, fmt.Errorf("codec/jpeg: wsi_encode returned %d", ret)
+		return nil, fmt.Errorf("codec/jpeg: encode failed (ret=%d)", int(ret))
 	}
-	if outBuf == nil {
-		return nil, fmt.Errorf("codec/jpeg: wsi_encode produced nil output")
-	}
-
-	// Copy C-malloc'd buffer into Go memory, then free the C buffer.
-	result := C.GoBytes(unsafe.Pointer(outBuf), C.int(outSize))
-	C.free(unsafe.Pointer(outBuf))
-
-	return result, nil
+	defer C.free(unsafe.Pointer(outBuf))
+	return C.GoBytes(unsafe.Pointer(outBuf), C.int(outSize)), nil
 }
