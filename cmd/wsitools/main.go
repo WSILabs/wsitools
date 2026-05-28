@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"syscall"
 
 	_ "github.com/wsilabs/wsitools/internal/codec/all"
@@ -15,10 +16,13 @@ import (
 )
 
 var (
-	flagQuiet     bool
-	flagVerbose   bool
-	flagLogLevel  string
-	flagLogFormat string
+	flagQuiet      bool
+	flagVerbose    bool
+	flagLogLevel   string
+	flagLogFormat  string
+	flagCPUProfile string
+
+	cpuProfileFile *os.File
 )
 
 var rootCmd = &cobra.Command{
@@ -28,7 +32,28 @@ var rootCmd = &cobra.Command{
 
 Run 'wsitools <command> --help' for command-specific flags and examples.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return setupLogger()
+		if err := setupLogger(); err != nil {
+			return err
+		}
+		if flagCPUProfile != "" {
+			f, err := os.Create(flagCPUProfile)
+			if err != nil {
+				return fmt.Errorf("create cpu profile: %w", err)
+			}
+			cpuProfileFile = f
+			if err := pprof.StartCPUProfile(f); err != nil {
+				f.Close()
+				return fmt.Errorf("start cpu profile: %w", err)
+			}
+		}
+		return nil
+	},
+	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		if cpuProfileFile != nil {
+			pprof.StopCPUProfile()
+			cpuProfileFile.Close()
+		}
+		return nil
 	},
 }
 
@@ -37,6 +62,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "enable per-level summaries on stderr")
 	rootCmd.PersistentFlags().StringVar(&flagLogLevel, "log-level", "info", "debug|info|warn|error")
 	rootCmd.PersistentFlags().StringVar(&flagLogFormat, "log-format", "text", "text|json")
+	rootCmd.PersistentFlags().StringVar(&flagCPUProfile, "cpu-profile", "", "write CPU profile to <file> (debug)")
 }
 
 func setupLogger() error {
@@ -70,6 +96,14 @@ func setupLogger() error {
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	defer func() {
+		// Always finalise CPU profile on exit so SIGINT mid-run still writes data.
+		if cpuProfileFile != nil {
+			pprof.StopCPUProfile()
+			cpuProfileFile.Close()
+			cpuProfileFile = nil
+		}
+	}()
 	rootCmd.SetContext(ctx)
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {

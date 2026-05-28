@@ -46,6 +46,9 @@ queued, deferred, or under consideration.
 - Tile-copy fast path generalised: applies to all TIFF-based targets when `--codec` is absent and the source is natively-tiled.
 - BREAKING: `transcode` subcommand removed. Migration is mechanical; see CHANGELOG.
 
+### v0.17
+- (no new utilities — performance: `convert --to dzi|szi` rewritten as a pyramid-descent generator with parallel libjpeg-turbo encoder pool. CMU-1.ndpi DZI went from 35 minutes → 14 seconds (~150× faster); now faster than libvips `dzsave` on that fixture. JPEG codec reorganised: vanilla YCbCr default; Aperio APP14 quirk preserved in `internal/codec/aperioapp14`. New `make bench-dzi` target for ongoing libvips comparison.)
+
 ## Planned
 
 ### Batch 2 — extends batch 1
