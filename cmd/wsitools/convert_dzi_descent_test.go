@@ -1,0 +1,99 @@
+package main
+
+import (
+	"image"
+	"testing"
+
+	"github.com/wsilabs/wsitools/internal/dzi"
+)
+
+// makeRGBA returns an image.RGBA of size w×h where pixel (x,y) =
+// (id, byte(x), byte(y), 0xFF) — encodes id+col+row for traceable
+// assertions.
+func makeRGBA(w, h int, id byte) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := y*img.Stride + x*4
+			img.Pix[i+0] = id
+			img.Pix[i+1] = byte(x)
+			img.Pix[i+2] = byte(y)
+			img.Pix[i+3] = 0xFF
+		}
+	}
+	return img
+}
+
+func TestBoxDownsample2xHalvesDimensions(t *testing.T) {
+	src := makeRGBA(8, 8, 0xAA)
+	dst := boxDownsample2x(src)
+	if dst.Bounds().Dx() != 4 || dst.Bounds().Dy() != 4 {
+		t.Errorf("dst dims: %v, want 4x4", dst.Bounds().Size())
+	}
+}
+
+func TestBoxDownsample2xAverages2x2(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	// Fill 4x4 with R=y*64, G=x*64, B=100.
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			i := y*src.Stride + x*4
+			src.Pix[i+0] = byte(y * 64)
+			src.Pix[i+1] = byte(x * 64)
+			src.Pix[i+2] = 100
+			src.Pix[i+3] = 0xFF
+		}
+	}
+	dst := boxDownsample2x(src)
+	if dst.Bounds().Dx() != 2 || dst.Bounds().Dy() != 2 {
+		t.Fatalf("dst dims: %v, want 2x2", dst.Bounds().Size())
+	}
+	// dst(0,0) = average of src{(0,0),(1,0),(0,1),(1,1)}
+	//   R: (0+0+64+64)/4 = 32
+	//   G: (0+64+0+64)/4 = 32
+	//   B: 100
+	p := dst.RGBAAt(0, 0)
+	if p.R != 32 || p.G != 32 || p.B != 100 {
+		t.Errorf("dst(0,0) = %v; want R=32 G=32 B=100", p)
+	}
+}
+
+func TestLevelBuilderEmitsTilesForCompletedStrip(t *testing.T) {
+	// Configure a 512×512 level at TileSize=256, Overlap=1.
+	// cols=2 rows=2. We test the L_max builder with no child;
+	// just verify it emits the right number of tiles after feed+flush.
+	cfg := dzi.Config{
+		Width: 512, Height: 512,
+		Format: "jpeg", TileSize: 256, Overlap: 1,
+	}
+	jobs := make(chan encodeJob, 16)
+
+	lb := &levelBuilder{
+		level: 1, width: 512, cfg: cfg,
+		cols: 2, rows: 2,
+		jobs: jobs,
+	}
+
+	strip0 := makeRGBA(512, 256, 0)
+	strip1 := makeRGBA(512, 256, 1)
+
+	lb.feed(strip0)
+	lb.feed(strip1)
+	lb.flush()
+	close(jobs)
+
+	var emitted []encodeJob
+	for j := range jobs {
+		emitted = append(emitted, j)
+	}
+	if len(emitted) != 4 {
+		t.Errorf("emitted %d tiles, want 4 (2 cols × 2 rows)", len(emitted))
+	}
+	rowsSeen := map[int]int{}
+	for _, j := range emitted {
+		rowsSeen[j.row]++
+	}
+	if rowsSeen[0] != 2 || rowsSeen[1] != 2 {
+		t.Errorf("rows distribution: %v, want row 0×2 + row 1×2", rowsSeen)
+	}
+}
