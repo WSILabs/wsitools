@@ -2,6 +2,95 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] — 2026-05-28
+
+### Performance
+
+`convert --to dzi|szi` rewritten from scratch as a pyramid-descent
+generator. The v0.16 path was unusable on real WSI sources (NDPI
+sources timed out at 5 minutes in CI, took 35 minutes for a full
+run). v0.17 is competitive with libvips `dzsave`:
+
+```
+fixture                          wsitools(s)   libvips(s)   ratio
+------------------------------------------------------------------
+CMU-1-Small-Region.svs                  0.06         0.14   0.43x
+CMU-1.ndpi   (51200×38144)             14.25        17.23   0.83x
+OS-2.ndpi    (126976×73728)           164.23        84.11   1.95x
+```
+
+CMU-1.ndpi went from 35 minutes (v0.16) → 14 seconds (v0.17),
+~150× faster, and is now faster than libvips. The previously-skipped
+`TestConvertNDPIToDZI` / `TestConvertNDPIToSZI` integration tests
+re-enabled with 120s budgets and pass.
+
+### Architectural changes
+
+- **Single ScaledStrips iterator** at the largest DZI level reads
+  the source once. Previous v0.17 attempt opened one iterator per
+  DZI level, re-decoding the source for each — was scrapped (see
+  the failed-attempt memory note).
+- **Pyramid-descent cascade** with box-filter 2× downsample between
+  DZI levels. Each level holds a rolling 3-strip buffer for tile
+  overlap; tiles emit as the buffer rotates.
+- **Parallel JPEG encoder pool** (sized by `--workers`, default
+  GOMAXPROCS) calls libjpeg-turbo via the reorganized
+  `internal/codec/jpeg`. Single serialized sink-drain goroutine
+  satisfies SZI's `archive/zip.Writer` non-concurrent-safety.
+- **sync.Pool of RGB tile buffers** to reduce GC pressure on large
+  pyramids (~190K tile-buffers on OS-2.ndpi).
+- **3-byte RGB throughout** the cascade (no alpha). opentile-go
+  emits RGB; libjpeg-turbo takes RGB; the v0.17-first-attempt's
+  `*image.RGBA` was pure overhead.
+- **Top-of-cascade resample kernel = Nearest**. At the top, source
+  size equals output size — no scaling needed. The default Lanczos
+  was burning ~80% CPU on identity scale (found by profiling). Box
+  is used for the in-process downsample cascade.
+
+### Changed (BREAKING bytes; pixels equivalent)
+
+- All `--codec jpeg` outputs (DZI, SZI, TIFF, OME-TIFF, **and SVS**)
+  now emit vanilla YCbCr+4:2:0 JPEGs with embedded DQT/DHT tables.
+  Previously the codec emitted Aperio's APP14 + raw-RGB format on
+  every container — correct for SVS-shaped output read by
+  APP14-aware decoders (openslide, libjpeg-turbo); incorrect for
+  the rest, which silently produced hue-rotated images in stdlib
+  + browser decoders.
+- New wsitools-produced SVS output matches Grundium's
+  third-party-SVS convention (vanilla JPEG with "Aperio" prefix
+  in ImageDescription for detection). Every consumer reads both;
+  no functional regression.
+
+### Internal
+
+- `internal/codec/jpeg/` rewritten: Factory now produces vanilla
+  YCbCr JPEGs. New `EncodeStandalone` entry point used by the DZI
+  encoder pool.
+- `internal/codec/aperioapp14/` new package containing the
+  preserved Aperio APP14 encoder as a direct type (not
+  Factory-registered). Zero current callers; preserved for
+  forensic emulation.
+- New `--cpu-profile <file>` global flag for diagnostic profiling.
+- `scripts/bench-dzi.sh` + `make bench-dzi` target for ongoing
+  libvips comparison.
+
+### Test changes
+
+- `TestConvertNDPIToDZI` and `TestConvertNDPIToSZI` re-enabled
+  (were `t.Skip`'d in v0.16). Run in ~20s under the 120s budget.
+- `TestConvertDZICtxCancel` `t.Skip`'d for v0.17 — the pipeline
+  doesn't unwind cleanly on SIGINT mid-flight because emitRow's
+  channel send is not selectable on ctx.Done(). v0.18 will redesign.
+
+### Deferred to v0.18
+
+- **OS-2.ndpi residual ~2× gap to libvips.** Profile shows 41% of
+  CPU in `runtime.cgocall` — libjpeg-turbo per-tile encode overhead
+  dominates. Batched encoder API (`tjCompress2` accepting multiple
+  tiles per cgo call) can amortize the call overhead. Separate work.
+- **Cooperative shutdown on SIGINT** for in-progress conversions.
+  Requires `select`-on-`done` at every channel send in the descent.
+
 ## [0.16.2] — 2026-05-26
 
 ### Fixed
