@@ -2,6 +2,22 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] — 2026-05-28
+
+### Fixed
+
+- `convert --to dzi|szi` now exits cleanly on SIGINT (Ctrl-C).
+  Previously the descent stage's channel send blocked indefinitely
+  once encoder workers cancelled on `ctx.Done()` — the test
+  `TestConvertDZICtxCancel` had to be `t.Skip`'d in v0.17 because
+  of this. Fixed by adding a `ctx` field to the level builders and
+  making `emitRow`'s channel send selectable on `ctx.Done()`.
+  Process exit after SIGINT now happens in ~100-500 ms, bounded
+  only by the slowest encoder worker finishing its current cgo
+  encode call.
+
+- `TestConvertDZICtxCancel` re-enabled.
+
 ## [0.17.0] — 2026-05-28
 
 ### Performance
