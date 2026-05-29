@@ -77,6 +77,74 @@ func TestDecodeValueBytePassthrough(t *testing.T) {
 	}
 }
 
+func TestTruncateValueLongArray(t *testing.T) {
+	in := make([]uint64, 100)
+	for i := range in {
+		in[i] = uint64(i)
+	}
+	got, truncated := truncateValue(in, false)
+	gotSlice, ok := got.([]uint64)
+	if !ok {
+		t.Fatalf("expected []uint64, got %T", got)
+	}
+	if len(gotSlice) != 8 {
+		t.Errorf("got len %d, want 8", len(gotSlice))
+	}
+	if !truncated {
+		t.Errorf("expected truncated=true")
+	}
+}
+
+func TestTruncateValueShortArray(t *testing.T) {
+	in := []uint64{1, 2, 3, 4, 5}
+	got, truncated := truncateValue(in, false)
+	if truncated {
+		t.Errorf("expected truncated=false")
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Errorf("got %v, want %v", got, in)
+	}
+}
+
+func TestTruncateValueLongAscii(t *testing.T) {
+	in := ""
+	for i := 0; i < 500; i++ {
+		in += "a"
+	}
+	got, truncated := truncateValue(in, false)
+	gotStr := got.(string)
+	if len(gotStr) != 200 {
+		t.Errorf("got len %d, want 200", len(gotStr))
+	}
+	if !truncated {
+		t.Errorf("expected truncated=true")
+	}
+}
+
+func TestTruncateValueLongBytes(t *testing.T) {
+	in := make([]byte, 1000)
+	got, truncated := truncateValue(in, false)
+	gotBytes := got.([]byte)
+	if len(gotBytes) != 64 {
+		t.Errorf("got len %d, want 64", len(gotBytes))
+	}
+	if !truncated {
+		t.Errorf("expected truncated=true")
+	}
+}
+
+func TestTruncateValueFullDisablesTruncation(t *testing.T) {
+	in := make([]byte, 1000)
+	got, truncated := truncateValue(in, true)
+	gotBytes := got.([]byte)
+	if len(gotBytes) != 1000 {
+		t.Errorf("got len %d, want 1000", len(gotBytes))
+	}
+	if truncated {
+		t.Errorf("expected truncated=false")
+	}
+}
+
 func TestDecodeValueFloat(t *testing.T) {
 	raw := []byte{0x00, 0x00, 0x80, 0x3f}
 	got, err := decodeValue(11, 1, raw, binary.LittleEndian)

@@ -115,6 +115,52 @@ func decodeIntArray(raw []byte, count uint64, elem int, bo binary.ByteOrder) (an
 	return out, nil
 }
 
+// Truncation caps used by truncateValue when fullValues==false.
+const (
+	maxArrayEntries = 8
+	maxAsciiChars   = 200
+	maxBlobBytes    = 64
+)
+
+// truncateValue applies smart-truncation rules to a decoded value. When
+// fullValues is true, returns the value unchanged with truncated=false.
+func truncateValue(v any, fullValues bool) (any, bool) {
+	if fullValues {
+		return v, false
+	}
+	switch x := v.(type) {
+	case []uint64:
+		if len(x) > maxArrayEntries {
+			return x[:maxArrayEntries], true
+		}
+	case []int64:
+		if len(x) > maxArrayEntries {
+			return x[:maxArrayEntries], true
+		}
+	case []float64:
+		if len(x) > maxArrayEntries {
+			return x[:maxArrayEntries], true
+		}
+	case []string:
+		if len(x) > maxArrayEntries {
+			return x[:maxArrayEntries], true
+		}
+	case []byte:
+		if len(x) > maxBlobBytes {
+			return x[:maxBlobBytes], true
+		}
+	case []int8:
+		if len(x) > maxBlobBytes {
+			return x[:maxBlobBytes], true
+		}
+	case string:
+		if len(x) > maxAsciiChars {
+			return x[:maxAsciiChars], true
+		}
+	}
+	return v, false
+}
+
 func decodeRationalArray(raw []byte, count uint64, bo binary.ByteOrder, signed bool) (any, error) {
 	render := func(off int) string {
 		if signed {
