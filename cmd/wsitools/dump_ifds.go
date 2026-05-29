@@ -10,7 +10,11 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
-var dumpIFDsJSON *bool
+var (
+	dumpIFDsJSON    *bool
+	dumpIFDsRaw     bool
+	dumpIFDsRawFull bool
+)
 
 var dumpIFDsCmd = &cobra.Command{
 	Use:   "dump-ifds <file>",
@@ -21,16 +25,22 @@ macro/thumbnail/overview/probability/map). For each IFD: dimensions,
 tile size (if tiled), compression, and SubfileType. Plus a separate
 WSI-tags section listing wsitools' private tags 65080–65084 if present.
 
-Not a full tiffinfo replacement — does not dump every TIFF tag. A future
---raw flag will expand this.
+Use --raw for a full per-tag dump (tiffinfo analog): every tag with
+name, type, count, value, and enum interpretation. Long arrays and
+binary blobs are summarised; use --raw-full to disable that truncation.
 
-Use --json to emit machine-readable JSON instead of human-readable text.`,
+Use --json to emit machine-readable JSON instead of human-readable text.
+--json composes with --raw.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDumpIFDs,
 }
 
 func init() {
 	dumpIFDsJSON = cliout.RegisterJSONFlag(dumpIFDsCmd)
+	dumpIFDsCmd.Flags().BoolVar(&dumpIFDsRaw, "raw", false,
+		"emit every TIFF tag per IFD (tiffinfo-style)")
+	dumpIFDsCmd.Flags().BoolVar(&dumpIFDsRawFull, "raw-full", false,
+		"disable smart truncation of long arrays/strings/blobs (requires --raw)")
 	rootCmd.AddCommand(dumpIFDsCmd)
 }
 
@@ -66,6 +76,10 @@ type dumpIFDsResult struct {
 func runDumpIFDs(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	path := args[0]
+
+	if dumpIFDsRaw {
+		return runDumpIFDsRaw(cmd, path)
+	}
 
 	ifds, err := source.WalkIFDs(path)
 	if err != nil {
@@ -112,6 +126,17 @@ func runDumpIFDs(cmd *cobra.Command, args []string) error {
 	return cliout.Render(*dumpIFDsJSON, cmd.OutOrStdout(),
 		func(w io.Writer) error { return renderDumpIFDsText(w, &result) },
 		result)
+}
+
+func runDumpIFDsRaw(cmd *cobra.Command, path string) error {
+	ifds, err := source.WalkIFDsRaw(path)
+	if err != nil {
+		return fmt.Errorf("walk IFDs (raw): %w", err)
+	}
+	if *dumpIFDsJSON {
+		return renderRawJSON(cmd.OutOrStdout(), ifds, dumpIFDsRawFull)
+	}
+	return renderRawText(cmd.OutOrStdout(), ifds, dumpIFDsRawFull)
 }
 
 // buildIFDClassifier returns a function that, given an IFDRecord, returns
