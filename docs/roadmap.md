@@ -65,6 +65,7 @@ queued, deferred, or under consideration.
 ### Larger items
 - **`tile-server`** — HTTP DZI/IIIF tile server; analog of openslide-python `deepzoom_server.py`. Activates opentile-go v0.13's splice-prefix optimization (TilePrefix / TileBodyInto / SpliceJPEGTile).
 - **`dicom-wsi`** — convert WSI to DICOM-WSI format. Analog of `wsi2dcm` (highdicom) and `wsidicomizer`.
+- **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
 
 ## Codecs (write-side, separate from utilities)
 
