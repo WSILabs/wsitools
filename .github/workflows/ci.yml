@@ -33,17 +33,42 @@ jobs:
           # webp, openjph (OpenJPH for HTJ2K).
           brew install jpeg-turbo openjpeg pkg-config libtiff jpeg-xl libavif webp openjph
 
+      - name: Cache fixtures
+        id: fixtures-cache
+        uses: actions/cache@v4
+        with:
+          path: sample_files
+          key: wsi-fixtures-v1-${{ hashFiles('.github/fixtures.sha256') }}
+
+      - name: Download fixtures
+        if: steps.fixtures-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p sample_files
+          cd sample_files
+          gh release download v1 \
+            --repo wsilabs/wsi-fixtures \
+            --pattern '*.tar'
+          for t in *.tar; do
+            tar xf "$t" && rm "$t"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify fixture SHA-256
+        run: |
+          cd sample_files
+          shasum -a 256 -c ../.github/fixtures.sha256
+
       - name: go build
         run: go build ./...
 
       - name: go vet
         run: go vet ./...
 
-      - name: go test (unit)
-        # Integration tests (`-tags integration`) require real SVS fixtures
-        # via WSI_TOOLS_TESTDIR; we don't ship those in CI. Unit tests cover
-        # all packages independently.
-        run: go test ./... -race -count=1
+      - name: go test
+        env:
+          WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
+        run: go test ./... -race -count=1 -timeout 5m
 
   build-windows:
     name: build (Windows)

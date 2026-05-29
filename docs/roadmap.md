@@ -52,6 +52,9 @@ queued, deferred, or under consideration.
 ### v0.18
 - (no new utilities — cooperative SIGINT shutdown for `convert --to dzi|szi`. Ctrl-C now produces a clean process exit in ~100-500 ms instead of requiring SIGKILL. v0.17's deferred `TestConvertDZICtxCancel` re-enabled.)
 
+### v0.19
+- (no new utilities — CI fixture pipeline. CI downloads CMU-1-Small-Region.svs + CMU-1.ndpi from `wsilabs/wsi-fixtures` v1 and runs the previously-skipped integration tests on every push + PR. Per-platform regressions visible in CI before tagging.)
+
 ## Planned
 
 ### Batch 2 — extends batch 1
