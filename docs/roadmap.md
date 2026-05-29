@@ -100,6 +100,9 @@ queued, deferred, or under consideration.
 ### Deferred from v0.17 (added 2026-05-26)
 - **Parallel raw-tile fetch + decode for `convert --to svs|tiff|ome-tiff --codec X` on striped sources.** v0.17's ScaledStrips wiring speeds up DZI/SZI rendering but doesn't help TIFF-family re-encode because those targets keep L0 dimensions intact (no scaling). A separate parallel-decode path on the existing `internal/pipeline` worker pool would help striped→TIFF re-encode where opentile-go's per-tile synthesis is the bottleneck. Quantify the gap first — measure striped→TIFF re-encode runtime against a tiled source baseline.
 
+### Deferred from v0.20 (added 2026-05-29)
+- **Revisit downsample algorithm choice for DZI creation.** v0.17's pyramid-descent generator uses `resample.Nearest` at the identity step (outSize == sourceLevel.Size, so kernel doesn't apply) and box-averaging in the inter-level cascade (3-byte RGB). The box choice was perf-motivated — Lanczos was 80% of CPU in the original implementation. Now that the perf headroom is real (14 s for CMU-1.ndpi, libvips-competitive), audit whether box is the right quality default at every cascade step, or whether Lanczos / Mitchell-Netravali at selected levels would noticeably improve perceptual quality at L_max viewing zoom. Compare against libvips' default (Lanczos3) on tissue slides; if quality lift is visible, consider exposing `--dzi-kernel` flag.
+
 ## Quality gates
 
 ### Deferred from v0.2
