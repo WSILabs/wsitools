@@ -83,11 +83,13 @@ func TestLevelBuilderEmitsTilesForCompletedStrip(t *testing.T) {
 		Format: "jpeg", TileSize: 256, Overlap: 1,
 	}
 	jobs := make(chan encodeJob, 16)
+	ctx := context.Background()
 
 	lb := &levelBuilder{
 		level: 1, width: 512, cfg: cfg,
 		cols: 2, rows: 2,
 		jobs: jobs,
+		ctx:  ctx,
 	}
 
 	strip0 := makeRGB(512, 256, 0)
@@ -122,23 +124,27 @@ func TestLevelBuilderCascade(t *testing.T) {
 		Format: "jpeg", TileSize: 256, Overlap: 0,
 	}
 	jobs := make(chan encodeJob, 32)
+	ctx := context.Background()
 
 	coarsest := &levelBuilder{
 		level: 0, width: 128, cfg: cfg,
 		cols: 1, rows: 1,
 		jobs: jobs,
+		ctx:  ctx,
 	}
 	mid := &levelBuilder{
 		level: 1, width: 256, cfg: cfg,
 		cols: 1, rows: 1,
 		child: coarsest,
 		jobs:  jobs,
+		ctx:   ctx,
 	}
 	top := &levelBuilder{
 		level: 2, width: 512, cfg: cfg,
 		cols: 2, rows: 2,
 		child: mid,
 		jobs:  jobs,
+		ctx:   ctx,
 	}
 
 	top.feed(makeRGB(512, 256, 1))
