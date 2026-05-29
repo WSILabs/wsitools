@@ -43,6 +43,23 @@ type IFDRecord struct {
 	WSILevelCount   *uint64 // 65082
 	WSISourceFormat string  // 65083
 	WSIToolsVersion string  // 65084
+
+	// ByteOrder is the file's byte order. Set by both WalkIFDs and
+	// WalkIFDsRaw so consumers can decode RawEntry.Raw bytes correctly.
+	ByteOrder binary.ByteOrder
+
+	// Entries is populated only by WalkIFDsRaw — one entry per directory
+	// entry, in directory order. nil from WalkIFDs.
+	Entries []RawEntry
+}
+
+// RawEntry is one TIFF directory entry, captured verbatim by WalkIFDsRaw.
+type RawEntry struct {
+	Tag         uint16
+	Type        uint16 // 1..18; values outside are preserved as-is
+	Count       uint64
+	ValueOffset uint64 // raw offset/inline-value field, native-decoded
+	Raw         []byte // bytes pointed to (or inline bytes); nil if unreadable
 }
 
 // HasWSITags reports whether any of the wsitools private tags are present.
@@ -56,6 +73,17 @@ func (r *IFDRecord) HasWSITags() bool {
 // order: top-level chain first, with each IFD's SubIFDs (tag 330) appended
 // immediately after the parent.
 func WalkIFDs(path string) ([]IFDRecord, error) {
+	return walkIFDs(path, false)
+}
+
+// WalkIFDsRaw is like WalkIFDs but additionally captures every directory
+// entry into IFDRecord.Entries. Use this for full tag dumps; use WalkIFDs
+// for the slim format-aware walk that only extracts a fixed tag whitelist.
+func WalkIFDsRaw(path string) ([]IFDRecord, error) {
+	return walkIFDs(path, true)
+}
+
+func walkIFDs(path string, captureAll bool) ([]IFDRecord, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("ifdwalk: open %s: %w", path, err)
@@ -108,12 +136,13 @@ func WalkIFDs(path string) ([]IFDRecord, error) {
 
 	off := firstIFDOff
 	for off != 0 {
-		rec, nextOff, subs, err := readIFD(f, bo, bigTIFF, off)
+		rec, nextOff, subs, err := readIFDFull(f, bo, bigTIFF, off, captureAll)
 		if err != nil {
 			return nil, err
 		}
 		rec.Index = len(out)
 		rec.IsBigTIFF = bigTIFF
+		rec.ByteOrder = bo
 		out = append(out, rec)
 		if len(subs) > 0 {
 			pending = append(pending, subPending{
@@ -131,12 +160,13 @@ func WalkIFDs(path string) ([]IFDRecord, error) {
 			// IFD chain (rare to have a chain, but follow it).
 			cur := subOff
 			for cur != 0 {
-				rec, nextOff, _, err := readIFD(f, bo, bigTIFF, cur)
+				rec, nextOff, _, err := readIFDFull(f, bo, bigTIFF, cur, captureAll)
 				if err != nil {
 					return nil, err
 				}
 				rec.Index = len(out)
 				rec.IsBigTIFF = bigTIFF
+				rec.ByteOrder = bo
 				rec.IsSubIFD = true
 				rec.ParentIndex = p.parentIndex
 				out = append(out, rec)
@@ -148,9 +178,10 @@ func WalkIFDs(path string) ([]IFDRecord, error) {
 	return out, nil
 }
 
-// readIFD reads one IFD at offset off, populates an IFDRecord, and returns
-// (record, nextIFDOffset, subIFDOffsets, err).
-func readIFD(f *os.File, bo binary.ByteOrder, bigTIFF bool, off int64) (IFDRecord, int64, []int64, error) {
+// readIFDFull reads one IFD at offset off, populates an IFDRecord, and
+// returns (record, nextIFDOffset, subIFDOffsets, err). When captureAll is
+// true, every directory entry is also appended to rec.Entries.
+func readIFDFull(f *os.File, bo binary.ByteOrder, bigTIFF bool, off int64, captureAll bool) (IFDRecord, int64, []int64, error) {
 	var rec IFDRecord
 	rec.Offset = off
 
@@ -299,6 +330,23 @@ func readIFD(f *os.File, bo binary.ByteOrder, bigTIFF bool, off int64) (IFDRecor
 				}
 				rec.WSIToolsVersion = s
 			}
+		}
+
+		if captureAll {
+			raw, _ := readTagValue(f, bo, bigTIFF, typ, count, valueField)
+			var voff uint64
+			if bigTIFF {
+				voff = bo.Uint64(valueField[:8])
+			} else {
+				voff = uint64(bo.Uint32(valueField[:4]))
+			}
+			rec.Entries = append(rec.Entries, RawEntry{
+				Tag:         tag,
+				Type:        typ,
+				Count:       count,
+				ValueOffset: voff,
+				Raw:         raw,
+			})
 		}
 	}
 
