@@ -2,6 +2,34 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] — 2026-05-29
+
+### Changed (infrastructure)
+
+- CI now downloads test fixtures from `wsilabs/wsi-fixtures` and
+  runs the previously-`t.Skip`'d integration tests on every push
+  and PR. Catches per-platform regressions (e.g. the v0.17 Windows
+  linkage issue) before tagging.
+
+### Internal
+
+- New `.github/workflows/ci.yml` step downloads + verifies fixture
+  SHA-256.
+- New `.github/fixtures.sha256` pins expected hashes.
+- New sibling repo `wsilabs/wsi-fixtures` hosts the initial corpus:
+  CMU-1-Small-Region.svs (Aperio SVS) and CMU-1.ndpi (Hamamatsu
+  NDPI). Both CC0; license + provenance artifacts alongside each
+  binary; release tagged v1 with per-format tarballs.
+
+### Deferred
+
+- Per-format CI coverage beyond NDPI + SVS (Philips, OME-TIFF, BIF,
+  IFE, SCN, MRXS, DICOM, SZI, generic-TIFF, COG-WSI). Audit + add
+  incrementally.
+- Hamamatsu-1.ndpi (6.43 GB) exceeds GitHub's 2 GB per-file release
+  asset limit; chunked-upload or external-host scheme deferred.
+- `make bench-dzi` as a CI gate (needs libvips in runner image).
+
 ## [0.18.0] — 2026-05-28
 
 ### Fixed
