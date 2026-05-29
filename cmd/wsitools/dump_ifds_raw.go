@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -10,6 +11,104 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 )
+
+type rawIFDJSON struct {
+	Index       int            `json:"index"`
+	Offset      int64          `json:"offset"`
+	IsBigTIFF   bool           `json:"is_bigtiff"`
+	IsSubIFD    bool           `json:"is_subifd"`
+	ParentIndex int            `json:"parent_index"`
+	ByteOrder   string         `json:"byte_order"`
+	Entries     []rawEntryJSON `json:"entries"`
+}
+
+type rawEntryJSON struct {
+	Tag         uint16 `json:"tag"`
+	Name        string `json:"name"`
+	Type        uint16 `json:"type"`
+	TypeName    string `json:"type_name"`
+	Count       uint64 `json:"count"`
+	Value       any    `json:"value"`
+	Interpreted string `json:"interpreted,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+func renderRawJSON(w io.Writer, ifds []source.IFDRecord, fullValues bool) error {
+	out := make([]rawIFDJSON, 0, len(ifds))
+	for _, ifd := range ifds {
+		obj := rawIFDJSON{
+			Index:       ifd.Index,
+			Offset:      ifd.Offset,
+			IsBigTIFF:   ifd.IsBigTIFF,
+			IsSubIFD:    ifd.IsSubIFD,
+			ParentIndex: -1,
+			ByteOrder:   "little",
+		}
+		if ifd.IsSubIFD {
+			obj.ParentIndex = ifd.ParentIndex
+		}
+		if ifd.ByteOrder == binary.BigEndian {
+			obj.ByteOrder = "big"
+		}
+		for _, e := range ifd.Entries {
+			obj.Entries = append(obj.Entries, encodeRawEntryJSON(e, ifd.ByteOrder, fullValues))
+		}
+		out = append(out, obj)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func encodeRawEntryJSON(e source.RawEntry, bo binary.ByteOrder, fullValues bool) rawEntryJSON {
+	je := rawEntryJSON{
+		Tag:      e.Tag,
+		Name:     tiff.TagName(e.Tag),
+		Type:     e.Type,
+		TypeName: tiff.TypeName(e.Type),
+		Count:    e.Count,
+	}
+	if e.Raw == nil {
+		je.Error = "unreadable"
+		return je
+	}
+	v, err := decodeValue(e.Type, e.Count, e.Raw, bo)
+	if err != nil {
+		je.Error = err.Error()
+		return je
+	}
+	var truncated bool
+	v, truncated = truncateValue(v, fullValues)
+	je.Truncated = truncated
+
+	if e.Type == 1 || e.Type == 7 {
+		je.Value = bytesToHex(v.([]byte))
+	} else {
+		je.Value = v
+	}
+
+	if s := interpretScalarJSON(e.Tag, v); s != "" {
+		je.Interpreted = s
+	}
+	return je
+}
+
+func interpretScalarJSON(tag uint16, v any) string {
+	var n uint64
+	switch x := v.(type) {
+	case uint64:
+		n = x
+	case int64:
+		if x < 0 {
+			return ""
+		}
+		n = uint64(x)
+	default:
+		return ""
+	}
+	return tiff.InterpretEnum(tag, n)
+}
 
 // renderRawText prints a tiffinfo-style dump of every IFD.
 func renderRawText(w io.Writer, ifds []source.IFDRecord, fullValues bool) error {

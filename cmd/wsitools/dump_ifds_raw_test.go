@@ -1,10 +1,49 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/wsilabs/wsitools/internal/source"
 )
+
+func TestRenderRawJSONRoundTrip(t *testing.T) {
+	ifds := []source.IFDRecord{{
+		Index:     0,
+		Offset:    16,
+		IsBigTIFF: false,
+		IsSubIFD:  false,
+		ByteOrder: binary.LittleEndian,
+		Entries: []source.RawEntry{{
+			Tag:   259,
+			Type:  3,
+			Count: 1,
+			Raw:   []byte{7, 0},
+		}},
+	}}
+	var buf bytes.Buffer
+	if err := renderRawJSON(&buf, ifds, false); err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput:\n%s", err, buf.String())
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d IFDs, want 1", len(got))
+	}
+	entries := got[0]["entries"].([]any)
+	first := entries[0].(map[string]any)
+	if first["name"] != "Compression" {
+		t.Errorf("name = %v, want Compression", first["name"])
+	}
+	if first["interpreted"] != "JPEG" {
+		t.Errorf("interpreted = %v, want JPEG", first["interpreted"])
+	}
+}
 
 func TestDecodeValueShortScalar(t *testing.T) {
 	raw := []byte{0x64, 0x00}
