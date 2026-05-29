@@ -3,8 +3,192 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
+	"strings"
+
+	"github.com/wsilabs/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff"
 )
+
+// renderRawText prints a tiffinfo-style dump of every IFD.
+func renderRawText(w io.Writer, ifds []source.IFDRecord, fullValues bool) error {
+	for i, ifd := range ifds {
+		writeIFDHeader(w, ifd)
+		var nameColW, typeColW int
+		for _, e := range ifd.Entries {
+			name := tiff.TagName(e.Tag)
+			if l := len(tagLabel(e.Tag, name)); l > nameColW {
+				nameColW = l
+			}
+			if tn := tiff.TypeName(e.Type); len(tn) > typeColW {
+				typeColW = len(tn)
+			}
+		}
+		for _, e := range ifd.Entries {
+			renderRawEntryText(w, e, ifd.ByteOrder, nameColW, typeColW, fullValues)
+		}
+		if i < len(ifds)-1 {
+			fmt.Fprintln(w)
+		}
+	}
+	return nil
+}
+
+func writeIFDHeader(w io.Writer, ifd source.IFDRecord) {
+	kind := "top-level"
+	if ifd.IsSubIFD {
+		kind = fmt.Sprintf("subIFD of IFD %d", ifd.ParentIndex)
+	}
+	bigOrClassic := "classic TIFF"
+	if ifd.IsBigTIFF {
+		bigOrClassic = "BigTIFF"
+	}
+	bo := "little-endian"
+	if ifd.ByteOrder == binary.BigEndian {
+		bo = "big-endian"
+	}
+	fmt.Fprintf(w, "IFD %d @ offset 0x%x (%s, %s, byte-order=%s)\n",
+		ifd.Index, ifd.Offset, kind, bigOrClassic, bo)
+}
+
+func tagLabel(tag uint16, name string) string {
+	if name == "" {
+		return fmt.Sprintf("%d (unknown)", tag)
+	}
+	return fmt.Sprintf("%d (%s)", tag, name)
+}
+
+func renderRawEntryText(w io.Writer, e source.RawEntry, bo binary.ByteOrder, nameColW, typeColW int, fullValues bool) {
+	name := tiff.TagName(e.Tag)
+	label := tagLabel(e.Tag, name)
+	typeName := tiff.TypeName(e.Type)
+	valStr := formatValueText(e, bo, fullValues)
+	fmt.Fprintf(w, "  %-*s  %-*s  count=%-6d value=%s\n",
+		nameColW, label, typeColW, typeName, e.Count, valStr)
+}
+
+func formatValueText(e source.RawEntry, bo binary.ByteOrder, fullValues bool) string {
+	if e.Raw == nil {
+		return "<unreadable>"
+	}
+	v, err := decodeValue(e.Type, e.Count, e.Raw, bo)
+	if err != nil {
+		return "<unreadable>"
+	}
+	var truncated bool
+	v, truncated = truncateValue(v, fullValues)
+
+	if e.Type == 1 || e.Type == 7 {
+		b := v.([]byte)
+		hex := bytesToHex(b)
+		more := ""
+		if truncated {
+			more = " ..."
+		}
+		return fmt.Sprintf("<%d bytes: %s%s>", e.Count, hex, more)
+	}
+
+	if s := interpretScalar(e.Tag, v); s != "" {
+		return s
+	}
+
+	if e.Type == 2 {
+		s := v.(string)
+		suffix := ""
+		if truncated {
+			suffix = "…"
+		}
+		return fmt.Sprintf("%q%s", s, suffix)
+	}
+
+	switch x := v.(type) {
+	case []uint64:
+		s := joinUints(x)
+		if truncated {
+			s += fmt.Sprintf(" (... %d more)", int(e.Count)-len(x))
+		}
+		return "[" + s + "]"
+	case []int64:
+		s := joinInts(x)
+		if truncated {
+			s += fmt.Sprintf(" (... %d more)", int(e.Count)-len(x))
+		}
+		return "[" + s + "]"
+	case []float64:
+		s := joinFloats(x)
+		if truncated {
+			s += fmt.Sprintf(" (... %d more)", int(e.Count)-len(x))
+		}
+		return "[" + s + "]"
+	case []string:
+		s := strings.Join(x, ", ")
+		if truncated {
+			s += fmt.Sprintf(" (... %d more)", int(e.Count)-len(x))
+		}
+		return "[" + s + "]"
+	}
+
+	return fmt.Sprintf("%v", v)
+}
+
+// interpretScalar returns "<name> (<num>)" for enum-recognised scalar
+// integer values, or "" otherwise.
+func interpretScalar(tag uint16, v any) string {
+	var n uint64
+	switch x := v.(type) {
+	case uint64:
+		n = x
+	case int64:
+		if x < 0 {
+			return ""
+		}
+		n = uint64(x)
+	default:
+		return ""
+	}
+	name := tiff.InterpretEnum(tag, n)
+	if name == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s (%d)", name, n)
+}
+
+func bytesToHex(b []byte) string {
+	const hexChars = "0123456789abcdef"
+	out := make([]byte, 0, len(b)*3)
+	for i, c := range b {
+		if i > 0 {
+			out = append(out, ' ')
+		}
+		out = append(out, hexChars[c>>4], hexChars[c&0x0f])
+	}
+	return string(out)
+}
+
+func joinUints(xs []uint64) string {
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = fmt.Sprintf("%d", x)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func joinInts(xs []int64) string {
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = fmt.Sprintf("%d", x)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func joinFloats(xs []float64) string {
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = fmt.Sprintf("%g", x)
+	}
+	return strings.Join(parts, ", ")
+}
 
 // decodeValue turns a raw TIFF entry byte slice into a native Go value.
 // For count==1 returns a scalar; for count>1 returns a slice (except
