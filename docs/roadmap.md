@@ -49,6 +49,9 @@ queued, deferred, or under consideration.
 ### v0.17
 - (no new utilities — performance: `convert --to dzi|szi` rewritten as a pyramid-descent generator with parallel libjpeg-turbo encoder pool. CMU-1.ndpi DZI went from 35 minutes → 14 seconds (~150× faster); now faster than libvips `dzsave` on that fixture. JPEG codec reorganised: vanilla YCbCr default; Aperio APP14 quirk preserved in `internal/codec/aperioapp14`. New `make bench-dzi` target for ongoing libvips comparison.)
 
+### v0.18
+- (no new utilities — cooperative SIGINT shutdown for `convert --to dzi|szi`. Ctrl-C now produces a clean process exit in ~100-500 ms instead of requiring SIGKILL. v0.17's deferred `TestConvertDZICtxCancel` re-enabled.)
+
 ## Planned
 
 ### Batch 2 — extends batch 1

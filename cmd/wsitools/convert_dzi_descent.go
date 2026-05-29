@@ -100,6 +100,7 @@ type levelBuilder struct {
 
 	child *levelBuilder
 	jobs  chan<- encodeJob
+	ctx   context.Context // cancellation signal for emitRow's send
 }
 
 // feed accepts one strip at this level's resolution.
@@ -191,7 +192,12 @@ func (lb *levelBuilder) flush() {
 func (lb *levelBuilder) emitRow(row int) {
 	for col := 0; col < lb.cols; col++ {
 		tile := lb.assembleTile(col, row)
-		lb.jobs <- encodeJob{level: lb.level, col: col, row: row, img: tile}
+		select {
+		case lb.jobs <- encodeJob{level: lb.level, col: col, row: row, img: tile}:
+		case <-lb.ctx.Done():
+			releaseRGB(tile)
+			return
+		}
 	}
 }
 
@@ -373,6 +379,7 @@ func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cf
 			level: lvl, width: lw, cfg: cfg,
 			cols: cols, rows: rows,
 			jobs: encodeJobs,
+			ctx:  ctx,
 		}
 		if coarsest == nil {
 			coarsest = lb

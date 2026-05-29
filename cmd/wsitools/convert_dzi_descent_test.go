@@ -7,6 +7,7 @@ import (
 	stdjpeg "image/jpeg"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/codec/jpeg"
@@ -82,11 +83,13 @@ func TestLevelBuilderEmitsTilesForCompletedStrip(t *testing.T) {
 		Format: "jpeg", TileSize: 256, Overlap: 1,
 	}
 	jobs := make(chan encodeJob, 16)
+	ctx := context.Background()
 
 	lb := &levelBuilder{
 		level: 1, width: 512, cfg: cfg,
 		cols: 2, rows: 2,
 		jobs: jobs,
+		ctx:  ctx,
 	}
 
 	strip0 := makeRGB(512, 256, 0)
@@ -121,23 +124,27 @@ func TestLevelBuilderCascade(t *testing.T) {
 		Format: "jpeg", TileSize: 256, Overlap: 0,
 	}
 	jobs := make(chan encodeJob, 32)
+	ctx := context.Background()
 
 	coarsest := &levelBuilder{
 		level: 0, width: 128, cfg: cfg,
 		cols: 1, rows: 1,
 		jobs: jobs,
+		ctx:  ctx,
 	}
 	mid := &levelBuilder{
 		level: 1, width: 256, cfg: cfg,
 		cols: 1, rows: 1,
 		child: coarsest,
 		jobs:  jobs,
+		ctx:   ctx,
 	}
 	top := &levelBuilder{
 		level: 2, width: 512, cfg: cfg,
 		cols: 2, rows: 2,
 		child: mid,
 		jobs:  jobs,
+		ctx:   ctx,
 	}
 
 	top.feed(makeRGB(512, 256, 1))
@@ -211,5 +218,46 @@ func TestEncoderPoolProducesDecodableJPEGs(t *testing.T) {
 		if !received[i] {
 			t.Errorf("col %d: no writeJob received", i)
 		}
+	}
+}
+
+func TestLevelBuilderEmitRowRespectsContext(t *testing.T) {
+	// Zero-buffer channel — any unconditional send blocks forever.
+	// With cancel-aware emitRow (Task 2), the test completes.
+	jobs := make(chan encodeJob)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before emitRow is called
+
+	cfg := dzi.Config{
+		Width: 512, Height: 256,
+		Format: "jpeg", TileSize: 256, Overlap: 0,
+	}
+	lb := &levelBuilder{
+		level: 1, width: 512, cfg: cfg,
+		cols: 2, rows: 1,
+		cur:  makeRGB(512, 256, 0),
+		jobs: jobs,
+		ctx:  ctx,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		lb.emitRow(0)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("emitRow blocked despite cancelled context")
+	}
+
+	select {
+	case j := <-jobs:
+		t.Errorf("unexpected encodeJob delivered: level=%d col=%d", j.level, j.col)
+	default:
+		// expected — no job
 	}
 }
