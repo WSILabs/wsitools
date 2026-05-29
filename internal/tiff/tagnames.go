@@ -1,6 +1,9 @@
 package tiff
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TagName returns the well-known name for a TIFF tag, or "" if unknown.
 func TagName(tag uint16) string {
@@ -18,6 +21,84 @@ func TypeName(typ uint16) string {
 // TypeSize returns the bytes-per-element for a TIFF type, or 0 if unknown.
 func TypeSize(typ uint16) int {
 	return typeSizes[typ]
+}
+
+// InterpretEnum returns a friendly name for well-known enum tags.
+// Returns "" when no interpreter exists for the given tag/value.
+func InterpretEnum(tag uint16, val uint64) string {
+	switch tag {
+	case 254: // NewSubfileType (bitfield)
+		var parts []string
+		if val&1 != 0 {
+			parts = append(parts, "reduced-resolution")
+		}
+		if val&2 != 0 {
+			parts = append(parts, "page-of-multi")
+		}
+		if val&4 != 0 {
+			parts = append(parts, "transparency-mask")
+		}
+		return strings.Join(parts, "|")
+	case 255: // SubfileType
+		return map[uint64]string{
+			1: "full-resolution",
+			2: "reduced-resolution",
+			3: "page-of-multi",
+		}[val]
+	case 259: // Compression
+		return map[uint64]string{
+			1:     "None",
+			2:     "CCITT-1D",
+			3:     "CCITTFax3",
+			4:     "CCITTFax4",
+			5:     "LZW",
+			6:     "OJPEG",
+			7:     "JPEG",
+			8:     "Deflate",
+			32773: "PackBits",
+			33003: "JPEG2000",
+			50001: "WebP",
+			50002: "JPEG-XL",
+			60001: "AVIF",
+			60003: "HTJ2K",
+		}[val]
+	case 262: // PhotometricInterpretation
+		return map[uint64]string{
+			0: "WhiteIsZero",
+			1: "BlackIsZero",
+			2: "RGB",
+			3: "Palette",
+			4: "Mask",
+			5: "Separated",
+			6: "YCbCr",
+			8: "CIELab",
+		}[val]
+	case 266: // FillOrder
+		return map[uint64]string{1: "msb2lsb", 2: "lsb2msb"}[val]
+	case 274: // Orientation
+		return map[uint64]string{
+			1: "top-left", 2: "top-right", 3: "bottom-right", 4: "bottom-left",
+			5: "left-top", 6: "right-top", 7: "right-bottom", 8: "left-bottom",
+		}[val]
+	case 284: // PlanarConfiguration
+		return map[uint64]string{1: "chunky", 2: "planar"}[val]
+	case 296: // ResolutionUnit
+		return map[uint64]string{1: "none", 2: "inch", 3: "cm"}[val]
+	case 317: // Predictor
+		return map[uint64]string{
+			1: "none", 2: "horizontal", 3: "floating-point",
+		}[val]
+	case 338: // ExtraSamples
+		return map[uint64]string{
+			0: "unspecified", 1: "associated-alpha", 2: "unassociated-alpha",
+		}[val]
+	case 339: // SampleFormat
+		return map[uint64]string{
+			1: "uint", 2: "int", 3: "float", 4: "undefined",
+			5: "complex-int", 6: "complex-float",
+		}[val]
+	}
+	return ""
 }
 
 var typeNames = map[uint16]string{

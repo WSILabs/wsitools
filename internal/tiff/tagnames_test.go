@@ -46,6 +46,50 @@ func TestTypeName(t *testing.T) {
 	}
 }
 
+func TestInterpretEnum(t *testing.T) {
+	cases := []struct {
+		tag  uint16
+		val  uint64
+		want string
+	}{
+		{259, 1, "None"},
+		{259, 5, "LZW"},
+		{259, 7, "JPEG"},
+		{259, 8, "Deflate"},
+		{259, 33003, "JPEG2000"},
+		{259, 50001, "WebP"},
+		{259, 50002, "JPEG-XL"},
+		{259, 99999, ""},
+		{262, 0, "WhiteIsZero"},
+		{262, 1, "BlackIsZero"},
+		{262, 2, "RGB"},
+		{262, 6, "YCbCr"},
+		{262, 8, "CIELab"},
+		{284, 1, "chunky"},
+		{284, 2, "planar"},
+		{296, 1, "none"}, {296, 2, "inch"}, {296, 3, "cm"},
+		{274, 1, "top-left"},
+		{274, 8, "left-bottom"},
+		{317, 1, "none"}, {317, 2, "horizontal"}, {317, 3, "floating-point"},
+		{266, 1, "msb2lsb"}, {266, 2, "lsb2msb"},
+		{339, 1, "uint"}, {339, 3, "float"},
+		{338, 0, "unspecified"}, {338, 1, "associated-alpha"}, {338, 2, "unassociated-alpha"},
+		{255, 1, "full-resolution"}, {255, 2, "reduced-resolution"}, {255, 3, "page-of-multi"},
+		{254, 0, ""},
+		{254, 1, "reduced-resolution"},
+		{254, 2, "page-of-multi"},
+		{254, 4, "transparency-mask"},
+		{254, 5, "reduced-resolution|transparency-mask"},
+		{254, 7, "reduced-resolution|page-of-multi|transparency-mask"},
+		{256, 1024, ""},
+	}
+	for _, c := range cases {
+		if got := InterpretEnum(c.tag, c.val); got != c.want {
+			t.Errorf("InterpretEnum(%d, %d) = %q, want %q", c.tag, c.val, got, c.want)
+		}
+	}
+}
+
 func TestTypeSize(t *testing.T) {
 	cases := []struct {
 		typ  uint16
