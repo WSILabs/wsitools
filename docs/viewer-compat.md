@@ -1,39 +1,59 @@
-# wsi-tools — viewer compatibility checklist
+# wsitools — viewer compatibility checklist
 
-Manual checklist of (output codec, viewer) pairs that have been verified to load.
-Not in CI; run by hand and update this file when you confirm a pair works.
+Manual checklist of (output codec/container, viewer) pairs that have been
+verified to load. Not in CI; run by hand and update this file when you
+confirm a pair works.
 
-## v0.1 — downsample tool
+Status legend: `✓` confirmed working, `✗` confirmed broken (add note),
+`—` not yet tested, `n/a` not applicable.
 
-| Codec | Viewer | Verified? | Notes |
-|---|---|---|---|
-| JPEG (Aperio SVS) | QuPath | — | |
-| JPEG (Aperio SVS) | openslide-bin | — | |
-| JPEG (Aperio SVS) | OpenSeadragon (via DZI) | — | |
+## Container compatibility (`convert --to`)
 
-## v0.2 — transcode tool
+Tile-copy fast path (no codec specified; source codec preserved):
 
-Manual checklist of (output codec, viewer) pairs that have been verified to load.
-Mark entries `✓` when confirmed by eye, `✗` if loading fails (with a note), `—`
-if not yet tested.
+| Target  | QuPath | openslide | OpenSeadragon | Notes |
+|---------|--------|-----------|---------------|-------|
+| svs     | —      | —         | n/a           | |
+| tiff    | —      | —         | n/a           | |
+| ome-tiff| —      | —         | n/a           | |
+| cog-wsi | —      | —         | n/a           | Needs opentile-go reader; openslide may not load. |
+| dzi     | n/a    | n/a       | —             | DZI is a folder/manifest, not a single-file slide. |
+| szi     | n/a    | n/a       | —             | DZI inside store-method ZIP. |
 
-The four v0.2 codecs (jpegxl, avif, webp, htj2k) write TIFF compression values
-that opentile-go v0.12 doesn't yet decode (50001/50002/60001/60003). They will
-need either an opentile-go release that adds these compression IDs OR a
-viewer that owns its own libjxl / libavif / libwebp / OpenJPH decode path.
+## Re-encode codec compatibility (`convert --to {svs,tiff,ome-tiff} --codec X`)
 
-| Codec   | QuPath | openslide | Custom Viewer | OpenSeadragon |
-|---------|--------|-----------|---------------|---------------|
-| jpeg    | —      | —         | —             | —             |
-| jpegxl  | —      | —         | —             | —             |
-| avif    | —      | —         | —             | —             |
-| webp    | —      | —         | —             | —             |
-| htj2k   | —      | —         | —             | —             |
+Non-jpeg codecs write TIFF compression values (50001/50002/60001/60003)
+that openslide does not decode. Viewers either need an opentile-go-backed
+read path or their own libjxl / libavif / libwebp / OpenJPH integration.
 
-## v0.2.x deferred
+| Codec   | QuPath | openslide | Custom Viewer | OpenSeadragon (via DZI) |
+|---------|--------|-----------|---------------|--------------------------|
+| jpeg    | —      | —         | —             | —                        |
+| jpegxl  | —      | —         | —             | —                        |
+| avif    | —      | —         | —             | —                        |
+| webp    | —      | —         | —             | —                        |
+| htj2k   | —      | —         | —             | —                        |
 
-- jpegli (Homebrew jpeg-xl bottle ships libjxl without libjpegli; defer until
-  upstream re-enables or we stand up a build-from-source path).
-- HEIF, JPEG-LS, JPEG-XR, Basis Universal: queued for follow-on releases.
+## DZI / SZI output (`convert --to dzi|szi`)
+
+DZI is JPEG-encoded by default, so all OpenSeadragon-compatible viewers
+should load it. SZI is the same content inside a store-method ZIP with
+optional `scan-properties.xml`.
+
+| Output  | OpenSeadragon | DeepZoomView | Pathomation | Notes |
+|---------|---------------|--------------|-------------|-------|
+| dzi     | —             | —            | n/a         | |
+| szi     | n/a           | n/a          | —           | Pathomation viewers consume SZI directly. |
+
+## Deferred test work
+
 - Visual-fidelity round-trip tests via mini decoders (read raw tile bytes
-  from opentile-go, decode via the matching codec library).
+  from opentile-go, decode via the matching codec library, pixel-compare
+  against the source) — would let CI catch silent codec regressions
+  without depending on third-party viewers.
+- Cross-version pixel parity check between v(N) and v(N-1) output for the
+  same input — would catch silent regressions in the decode-resample-
+  encode chain across release bumps.
+- jpegli (Homebrew jpeg-xl bottle ships libjxl without libjpegli; defer
+  until upstream re-enables or we stand up a build-from-source path).
+- HEIF, JPEG-LS, JPEG-XR, Basis Universal — queued for follow-on releases.

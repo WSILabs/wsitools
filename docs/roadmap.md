@@ -36,6 +36,9 @@ queued, deferred, or under consideration.
 ### v0.8
 - (no new utilities — repository relocation: module path moved from `github.com/cornish/wsitools` to `github.com/wsilabs/wsitools` under the new WSILabs GitHub organization. opentile-go also relocated to `github.com/wsilabs/opentile-go` at v0.21.0. No behavior change. v0.8.1 corrects the embedded `Version` constant that was missed when v0.8.0 was tagged).
 
+### v0.13
+- `region` — openslide-write-png analog: extract `--x --y --w --h --level` rectangle as PNG.
+
 ### v0.15
 - (no new utilities — source-format expansion: NDPI, OME-OneFrame, and Leica SCN (single-image) slides now work across all CLI subcommands. opentile-go synthesizes tile geometry for striped sources; wsitools' source layer trusts the synthesis. Bit-exact tile-copy promise for `convert` applies to natively-tiled sources only; striped sources produce reproducible but synthesized JPEG tiles in the output.)
 
@@ -60,11 +63,10 @@ queued, deferred, or under consideration.
 
 ## Planned
 
-### Batch 2 — extends batch 1
-- **`region`** — openslide-write-png analog: extract `--x --y --w --h --level` rectangle as PNG. Requires tile decode + stitching across boundaries.
+### Debug aids
 - **`dump-tile`** — single tile's compressed bytes to file or stdout. Pure debug aid.
 
-### Batch 3 — operations
+### Operations
 - **`tagset`** — in-place TIFF tag edit (e.g. ImageDescription, Software). Useful for fixing one bad slide in a pool without full re-encode.
 - **`inventory`** — walk a directory; dump CSV/JSON of slide metadata for pool-management UIs.
 - **`verify`** — open every IFD, decode every tile, report errors. "fsck for WSI."
@@ -103,7 +105,8 @@ queued, deferred, or under consideration.
 ### Deferred from v0.2
 - Visual-fidelity tests via mini decoders — decode v0.2 codec outputs through matching codec library; pixel-compare against source.
 
-### Test coverage (added 2026-05-26)
-- **CI fixture pipeline.** wsitools' GH Actions should pull sample slides from a release artifact / S3 / object-store before running fixture-gated tests. Today CI skips every fixture-gated test (samples are gitignored), so the bulk of integration coverage runs only on local pre-release sweeps.
-- **Cross-version pixel parity check.** Compare v(N) transcode/downsample output's decoded pixels to v(N-1) output's decoded pixels. File-SHA comparison won't work (embedded TagWSIToolsVersion changes with each release), but pixel-equality should hold if no decoder/encoder/resample logic changed. Would catch silent regressions in the decode-resample-encode chain across version bumps.
-- **`make ci-full` target.** A comprehensive per-release sweep that runs every fixture-gated test and refuses to pass on ENOSPC (instead of silently skipping). Today's pattern of "allow ENOSPC as environmental" is too forgiving — regressions hiding specifically in the largest-sample path can slip through.
+### Test coverage
+- ✅ **CI fixture pipeline** — shipped v0.19. CI downloads CMU-1-Small-Region.svs + CMU-1.ndpi from `wsilabs/wsi-fixtures` v1 and runs the integration suite on every push + PR.
+- ⏳ **Cross-version pixel parity check.** Compare v(N) convert/downsample output's decoded pixels to v(N-1) output's decoded pixels. File-SHA comparison won't work (embedded WSIToolsVersion tag changes with each release), but pixel-equality should hold if no decoder/encoder/resample logic changed. Would catch silent regressions in the decode-resample-encode chain across version bumps.
+- ⏳ **`make ci-full` target.** A comprehensive per-release sweep that runs every fixture-gated test and refuses to pass on ENOSPC (instead of silently skipping). Today's pattern of "allow ENOSPC as environmental" is too forgiving — regressions hiding specifically in the largest-sample path can slip through.
+- ⏳ **Expanded fixture coverage.** Per-format CI coverage beyond SVS + NDPI (Philips, OME-TIFF, BIF, IFE, SCN, MRXS, DICOM, SZI, generic-TIFF, COG-WSI). Audit + add incrementally.

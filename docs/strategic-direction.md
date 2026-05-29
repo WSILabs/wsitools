@@ -1,6 +1,6 @@
 # Strategic direction — opentile-go + wsitools
 
-**Date:** 2026-05-23
+**Date:** 2026-05-23 (last reviewed 2026-05-29)
 **Status:** Discussion notes, not a normative spec.
 
 This is the consolidated picture from recent design discussions. It covers
@@ -9,6 +9,25 @@ architecturally, how to dedupe the code currently split awkwardly between
 the two repos, how to add the openslide- and libvips-equivalent
 functionality the project still lacks, and how to relocate the
 repositories to a GitHub organization without breaking consumers.
+
+**Status snapshot (2026-05-29 — what's shipped vs still aspirational):**
+
+- ✅ Repo migration to WSILabs (Section 4) — done.
+- ✅ `convert` subsumes `transcode` — shipped v0.16; `transcode` removed.
+- ✅ DZI / SZI re-tiling (`convert --to dzi|szi`) — shipped v0.16, made
+  competitive with libvips in v0.17 via the pyramid-descent generator.
+- ✅ `wsitools region` — shipped (v0.5 era).
+- ✅ Convert target expansion (`--to svs|tiff|ome-tiff|cog-wsi|dzi|szi`) —
+  shipped v0.16.
+- ⏳ Codec lift (Section 2) — not started.
+- ⏳ opentile-go v1.0 `*Slide` API redesign (Section 1) — not started.
+- ⏳ `tile-server`, `dicom-wsi`, long-tail utilities — queued.
+
+The shipped DZI generator was built against the *current* opentile-go
+public surface (not the Section 1 `*Slide` redesign). The Section 1 +
+Section 2 work remains valuable for the next wave of utilities
+(`tile-server`, `dicom-wsi`, `extract`-to-container) but is not on the
+critical path for what's already shipped.
 
 The goal is a single Go-native pathway from "open a slide file" to "do
 anything with it" — no FFI to openslide, no two competing access paths in
@@ -433,24 +452,28 @@ over the library.
 
 ### Convert command expansions
 
-- `convert --to iris` — separate writer (`internal/iris` in wsitools, or
-  a sibling library). Iris isn't TIFF.
-- `convert --to svs` / `--to bif` — additional TIFF-based output targets,
-  naturally fit alongside `cog-wsi` once the streamwriter exists.
-- **Fold transcode into convert** (lossy paths). Eventually deprecate the
-  standalone transcode command; `convert --codec jpeg --quality 85`
-  covers the case.
-- **NDPI source support in convert** — requires JPEG restart-marker
-  reshuffling (near-lossless, not bit-copy). Documented limitation in
-  v0.6.
+- ⏳ `convert --to iris` — separate writer (`internal/iris` in wsitools, or
+  a sibling library). Iris isn't TIFF. Queued.
+- ✅ `convert --to svs` / `--to tiff` / `--to ome-tiff` — shipped v0.16,
+  alongside the existing `cog-wsi` target. `--to bif` still queued.
+- ✅ **Convert subsumes transcode** — shipped v0.16. The standalone
+  `transcode` command was removed; `convert --to <target> --codec <c>`
+  covers the lossy paths.
+- ✅ **NDPI source support** — shipped v0.15. Striped sources produce
+  reproducible but synthesized JPEG tiles (bit-exact tile-copy applies
+  only to natively-tiled sources).
 
 ### Read-side utilities (depend on `region`)
 
-- `wsitools region --x --y --w --h --level -o out.png` — extract an
-  arbitrary rectangle. First real consumer of `Slide.ReadRegion`.
-- `wsitools dump-tile` — single tile's compressed bytes to file/stdout.
-  Debug aid.
-- `wsitools dump-ifds --raw` — full tiffinfo-style dump per IFD.
+- ✅ `wsitools region --x --y --w --h --level -o out.png` — shipped.
+  Extracts an arbitrary rectangle to PNG. Currently built on opentile-go's
+  existing tile-decode surface (not the Section 1 `ReadRegion` method
+  that's still aspirational).
+- ⏳ `wsitools dump-tile` — single tile's compressed bytes to file/stdout.
+  Debug aid. Queued.
+- ✅ `wsitools dump-ifds --raw` — shipped v0.20. Full tiffinfo-style dump
+  per IFD with ~100-tag dictionary, 11 enum interpreters, JSON output,
+  smart truncation.
 
 ### Re-tiling pipeline + DZI / large-output utilities
 
@@ -486,14 +509,18 @@ of those codecs isn't great either.
 
 Build deliverables in order:
 
-1. `wsitools dzsave` — DeepZoom pyramid generator. The first real
-   consumer of `Slide.ScaledStrips`.
-2. `wsitools tile-server` — HTTP DZI/IIIF tile server. Shares a tile
+1. ✅ `wsitools convert --to dzi|szi` — DeepZoom pyramid generator,
+   shipped v0.16; rewritten in v0.17 as a single-pass pyramid-descent
+   generator with parallel libjpeg-turbo encoders. Faster than libvips
+   `dzsave` on CMU-1.ndpi (14 s vs ~20 s). Built against the current
+   opentile-go surface plus a wsitools-local strip iterator; will migrate
+   to `Slide.ScaledStrips` when Section 1 lands.
+2. ⏳ `wsitools tile-server` — HTTP DZI/IIIF tile server. Shares a tile
    cache across requests via `WithTileCache(c)` (Section 1 cache policy
-   gets resolved here).
-3. `wsitools dicom-wsi` — convert WSI to DICOM-WSI format. Biggest
+   gets resolved here). Queued.
+3. ⏳ `wsitools dicom-wsi` — convert WSI to DICOM-WSI format. Biggest
    single utility; depends on the strip iterator plus a new DICOM-WSI
-   writer in wsitools. Its own design cycle.
+   writer in wsitools. Its own design cycle. Queued.
 
 ### Read-side operations and pool-management
 
@@ -520,7 +547,12 @@ Build deliverables in order:
 
 ---
 
-## 4. Moving the repos to a GitHub organization
+## 4. Moving the repos to a GitHub organization (done 2026-05-23)
+
+**Status: completed.** Both repos are now `wsilabs/opentile-go` and
+`wsilabs/wsitools`. The migration mechanics below are preserved as a
+record. Skip to Section 5 unless you're researching how the move went.
+
 
 Both `cornish/opentile-go` and `wsilabs/wsitools` currently live under a
 personal account. Moving them to an organization (call the new owner
@@ -694,41 +726,47 @@ contributors; personal-shaped names are most honest about scope.
 
 ## 5. Recommended sequencing
 
-Roughly the order of leverage and risk:
+Roughly the order of leverage and risk. ✅ = shipped, ⏳ = queued.
 
-1. ~~**Move the GH repos to the new org**~~ — done (WSILabs/opentile-go
-   at v0.21.0, WSILabs/wsitools at v0.8.1).
-2. **Codec lift + resample lift** (Section 2) — opentile-go v0.22
+1. ✅ ~~**Move the GH repos to the new org**~~ — done. Both at
+   `github.com/wsilabs/{opentile-go, wsitools}`.
+2. ✅ ~~**`convert` subsumes `transcode`**~~ — shipped v0.16. Lossy paths
+   moved into `convert --to <target> --codec <c>`; standalone `transcode`
+   command removed.
+3. ✅ ~~**Convert extensions**~~ — `--to svs|tiff|ome-tiff|cog-wsi|dzi|szi`
+   shipped v0.16. `--to iris` and `--to bif` still queued.
+4. ✅ ~~**`wsitools region` CLI**~~ — shipped. Built on the current
+   opentile-go surface; will migrate to `ReadRegionScaled` once Section 1
+   lands.
+5. ✅ ~~**DZI generator**~~ — shipped as `convert --to dzi|szi` v0.16, made
+   libvips-competitive in v0.17 via the pyramid-descent rewrite. Built on
+   a wsitools-local strip iterator; will migrate to `ScaledStrips` once
+   Section 1 lands.
+6. ⏳ **Codec lift + resample lift** (Section 2) — opentile-go v0.22
    (additive: new `opentile/codec/*` and `opentile/resample` subpackages,
    no public API change yet). Pure refactor on the wsitools side; codec
    imports change but behavior stays. Includes the JPEG IDCT scale-factor
    parameter on the JPEG codec wrapper (high-leverage perf knob worth
    surfacing while you're already touching it). Unblocks everything
    downstream.
-3. **API redesign: `*Slide` struct + decoded operations + strip
+7. ⏳ **API redesign: `*Slide` struct + decoded operations + strip
    iterator** (Section 1) — opentile-go **v1.0**. Drops the public
    `Tiler` interface, replaces with `*Slide`; adds raw + decoded tile
    methods, `ReadRegion` / `ReadRegionScaled`, `ScaledStrips` iterator
    with parallel decode + cache + lookahead, openslide-equivalent surface
    (ICCProfile, Bounds, BackgroundColor, Thumbnail with two-axis box fit,
-   Level.Downsample, Metadata.Vendor). API stability marker; v1.x
-   onward is additive.
-4. **`wsitools region` CLI** — first real consumer of `ReadRegionScaled`.
-   Validates the region surface.
-5. **`wsitools dzsave`** — first real consumer of `ScaledStrips`.
-   Validates the strip iterator + benchmarks against libvips.
-6. **`wsitools extract`** — ImageScope-equivalent region-at-scale to
-   container output (SVS / TIFF / COG-WSI / JPEG / PNG). Reuses the
-   strip iterator + writer plumbing from #5.
-7. **`wsitools tile-server`** — needs the strip iterator's shared tile
+   Level.Downsample, Metadata.Vendor). API stability marker; v1.x onward
+   is additive.
+8. ⏳ **`wsitools extract`-to-container** — region-at-scale to a container
+   output (SVS / TIFF / COG-WSI / JPEG / PNG). Distinct from today's
+   shipped `extract --kind label|macro|...` which only saves associated
+   images. Reuses the strip iterator + writer plumbing from #5.
+9. ⏳ **`wsitools tile-server`** — needs the strip iterator's shared tile
    cache (`WithTileCache`) operational; everything else is HTTP plumbing.
-8. **Convert extensions** (`--to iris`, `--to svs`, `--to bif`).
-   Independent of Sections 1+2; can run in parallel.
-9. **`convert` subsumes `transcode`** — lossy paths land in convert;
-   transcode deprecated.
-10. **Long-tail utilities** (`tagset`, `inventory`, `verify`, `diff`).
-    Straightforward once region + pyramid layers exist.
-11. **`dicom-wsi`** — biggest single utility; depends on region +
+10. ⏳ **Long-tail utilities** (`dump-tile`, `tagset`, `inventory`,
+    `verify`, `diff`). `dump-ifds --raw` shipped v0.20. Straightforward
+    once region + pyramid layers exist (already done).
+11. ⏳ **`dicom-wsi`** — biggest single utility; depends on region +
     pyramid plus a DICOM-WSI writer. Its own design cycle.
 
 The whole arc puts wsitools in a position where it's a complete
@@ -747,9 +785,9 @@ on each other in lock-step — you can pick any path and move forward.
 - **Decoded-tile cache policy** (Section 1). Whether `Slide.ReadRegion` /
   `Slide.DecodedTile` cache decoded tiles between calls.
   Acceptable to defer until the tile-server consumer surfaces.
-- **DZI command name.** `dzsave` (matches libvips' name) or `dzi`
-  (matches the format name). Naming bikeshed worth one minute of
-  thought.
+- ~~**DZI command name.**~~ Settled: shipped as `convert --to dzi|szi`
+  (matches the format name and slots into the existing `convert` surface
+  alongside other output targets).
 - **DICOM-WSI scope** — pure writer, or both read + write? If both,
   reading needs DICOM-WSI integration into opentile-go's format
   dispatch, which is a fair chunk of work.
