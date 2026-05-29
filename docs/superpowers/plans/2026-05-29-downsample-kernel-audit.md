@@ -146,18 +146,55 @@ Three outcomes:
 
 The "use-case justifies it" call is a product decision, not a benchmark. Ask the user.
 
-- [ ] **Step B7: If we ship a kernel flag, plan the impl**
+### CLI flag design (for Step B7)
 
-Only proceed here if Step B6 lands on outcome 2. Skeleton:
+If the eye test lands on outcome 2, expose `--kernel`. Naming choice and value set below are pre-decided so the audit phase doesn't drift into bikeshedding.
 
-- Add `--kernel {box,lanczos3,bilinear}` to `cmd/wsitools/downsample.go` cobra flags.
-- Wire to the `otresample.ImageInto` call at line 488 and 680.
-- Map flag values to `otresample.Box / Lanczos / Bilinear`.
-- Add a TestDownsampleKernelFlag integration test that runs both kernels on a small fixture and asserts they produce different output (pixel sum check).
-- Update README's downsample examples to show `--kernel lanczos3`.
-- Update CHANGELOG.
+**Flag name:** `--kernel`. Matches libvips' `vips resize --kernel <name>` and is what users searching for "what kernel does libvips use" will already expect.
 
-Full implementation plan would get written as a separate plans/ doc at that point. Not pre-spelled out here because there's a real chance Steps B1-B6 conclude "no change needed."
+**Value set:** four kernels — exactly the set opentile-go currently exposes (`internal/decoder` + `opentile-go/resample` define `Nearest`, `Bilinear`, `Lanczos`, `Box`). opentile-go's `Lanczos` is 3-lobe (verified: `resample/lanczos.go:9` has `lanczosA = 3.0`), so it maps cleanly to libvips' `lanczos3`:
+
+| `--kernel` value | opentile-go enum | libvips name | Notes |
+|---|---|---|---|
+| `lanczos3` | `resample.Lanczos` | `lanczos3` | **Default for `downsample` CLI** — matches libvips general-resize default. |
+| `box` | `resample.Box` | (no direct equiv as resize kernel; `region-shrink=mean` for dzsave) | **Default for `convert --to dzi\|szi`** — matches libvips dzsave default; no change from today. |
+| `linear` | `resample.Bilinear` | `linear` | Alias accepted: `bilinear`. |
+| `nearest` | `resample.Nearest` | `nearest` | Fast but ugly; debug aid. |
+
+**Defaults differ by command, intentionally.** The flag itself is shared (same name, same value set, same mapping) but each subcommand picks its own default to match libvips' equivalent tool:
+
+- `downsample` defaults to `lanczos3` (libvips `vips resize` default).
+- `convert --to dzi|szi` defaults to `box` (libvips `vips dzsave --region-shrink=mean` default).
+- `convert --to svs|tiff|ome-tiff` — no scaling happens unless source pyramid level matches output dimensions, so the flag is a no-op. Skip wiring there.
+
+**Help text** must explain the per-command default so users aren't surprised by `downsample --kernel` and `convert --to dzi --kernel` having different defaults. Suggested phrasing for `downsample`:
+
+```
+--kernel string   Resample kernel for pyramid halving:
+                  lanczos3 (default; sharp, matches libvips)
+                  box      (fast, less sharp; matches libvips dzsave)
+                  linear   (intermediate; same as 'bilinear')
+                  nearest  (debug; visible aliasing)
+```
+
+**Unsupported libvips kernels (`cubic`, `mitchell`, `lanczos2`)**: not exposed. If a user asks for one, error with `unknown kernel "<name>" — accepted: lanczos3, box, linear, nearest`. Adding them is a separate opentile-go contribution (new kernel implementations in `opentile-go/resample/`), not in scope for this audit.
+
+**Alias handling:** `bilinear` is accepted as a synonym for `linear` (Go ecosystem convention). All other names match libvips exactly. Implement aliases in the flag parser, not via cobra (cobra doesn't have first-class alias support for enum values).
+
+### Step B7: Impl skeleton
+
+Only proceed here if Step B6 lands on outcome 2.
+
+- Add `--kernel string` flag to `cmd/wsitools/downsample.go` cobra flags. Default `"lanczos3"`.
+- (Optional, can defer) Add the same flag to `cmd/wsitools/convert.go` for the dzi/szi target. Default `"box"`.
+- Write a small `parseKernel(s string) (otresample.Kernel, error)` helper in `cmd/wsitools/kernel.go` (new file) that maps the flag value to the opentile-go enum, handles the `bilinear` alias, and errors on unknown values.
+- Wire `parseKernel(flagValue)` into the `otresample.ImageInto` calls at `downsample.go:488` and `downsample.go:680`.
+- Add `TestParseKernel` (table-driven unit test for the mapping) + `TestDownsampleKernelFlag` (integration test that runs `downsample --kernel lanczos3` and `downsample --kernel box` on CMU-1-Small-Region.svs and asserts the L0 raster bytes differ, proving the flag is wired through).
+- Update README's downsample examples to show `--kernel lanczos3` and the new default.
+- Update CHANGELOG with the new flag + the default-change for `downsample`. Note the default change is a behavior change for existing users who relied on box-averaged output bit-equivalence between releases — flag it prominently.
+- v0.21 (or whatever the next release is) is a minor bump because the default output changes.
+
+Full implementation plan to get written as a separate plans/ doc at that point if Step B6 escalates. Not pre-spelled out here because there's a real chance Steps B1-B6 conclude "no change needed."
 
 - [ ] **Step B8: Commit the Part B writeup**
 
