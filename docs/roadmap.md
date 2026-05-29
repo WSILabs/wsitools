@@ -55,12 +55,14 @@ queued, deferred, or under consideration.
 ### v0.19
 - (no new utilities — CI fixture pipeline. CI downloads CMU-1-Small-Region.svs + CMU-1.ndpi from `wsilabs/wsi-fixtures` v1 and runs the previously-skipped integration tests on every push + PR. Per-platform regressions visible in CI before tagging.)
 
+### v0.20
+- `dump-ifds --raw` — full tiffinfo-style tag dump per IFD with name + enum interpretation. Composes with `--json`. `--raw-full` disables smart truncation. ~100-tag dictionary + 11-enum interpreter in `internal/tiff/tagnames.go`; pure Go, no new deps.
+
 ## Planned
 
 ### Batch 2 — extends batch 1
 - **`region`** — openslide-write-png analog: extract `--x --y --w --h --level` rectangle as PNG. Requires tile decode + stitching across boundaries.
 - **`dump-tile`** — single tile's compressed bytes to file or stdout. Pure debug aid.
-- **`dump-ifds --raw`** — full tiffinfo-style tag dump per IFD; expansion of v0.4's slim dump-ifds.
 
 ### Batch 3 — operations
 - **`tagset`** — in-place TIFF tag edit (e.g. ImageDescription, Software). Useful for fixing one bad slide in a pool without full re-encode.

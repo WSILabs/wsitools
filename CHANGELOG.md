@@ -2,6 +2,27 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] — 2026-05-29
+
+### Added
+
+- `dump-ifds --raw` — full tiffinfo-style dump of every TIFF tag per
+  IFD, with well-known tag names, type names, counts, decoded values,
+  and enum interpretation for Compression, PhotometricInterpretation,
+  PlanarConfiguration, Predictor, Orientation, ResolutionUnit,
+  FillOrder, SampleFormat, ExtraSamples, SubfileType, NewSubfileType.
+- `dump-ifds --raw --json` — same content in machine-readable JSON.
+- `dump-ifds --raw-full` — disable smart truncation of long arrays,
+  ASCII strings, and BYTE/UNDEFINED blobs.
+
+### Changed (internal)
+
+- `internal/source.IFDRecord` gains `ByteOrder` and `Entries` fields.
+  The `Entries` slice is populated only by the new `WalkIFDsRaw`
+  function; existing `WalkIFDs` callers see no behavior change.
+- New `internal/tiff/tagnames.go` provides `TagName`, `TypeName`,
+  `TypeSize`, `InterpretEnum` for ~100 well-known TIFF tags.
+
 ## [0.19.0] — 2026-05-29
 
 ### Changed (infrastructure)
