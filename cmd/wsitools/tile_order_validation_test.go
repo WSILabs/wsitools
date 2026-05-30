@@ -32,8 +32,8 @@ func TestTileOrderFormatValidation(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.container+"/"+c.tileOrder, func(t *testing.T) {
 			args := []string{
-				"transcode", "--codec", "jpeg",
-				"--container", c.container,
+				"convert", "--codec", "jpeg",
+				"--to", c.container,
 				"--tile-order", c.tileOrder,
 				"-f", "-o", out, sample,
 			}
