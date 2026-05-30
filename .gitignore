@@ -6,6 +6,7 @@ sample_files/
 
 # Build outputs
 /bin/
+/wsitools
 *.test
 *.out
 coverage.txt
