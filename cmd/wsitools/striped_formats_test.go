@@ -64,9 +64,10 @@ func TestStripedFormatsInfo(t *testing.T) {
 	}
 }
 
-// TestStripedFormatsTranscode: `wsitools transcode --codec jpeg
-// --container svs` on each format produces a non-empty file.
-func TestStripedFormatsTranscode(t *testing.T) {
+// TestStripedFormatsConvertSVS: `wsitools convert --codec jpeg --to svs`
+// on each format produces a non-empty file. (Ported off the removed
+// `transcode` command; `--container svs` → `--to svs`.)
+func TestStripedFormatsConvertSVS(t *testing.T) {
 	bin := stripedBinary(t)
 	cases := []struct {
 		name string
@@ -81,21 +82,25 @@ func TestStripedFormatsTranscode(t *testing.T) {
 			sample := stripedSample(t, c.rel)
 			out := filepath.Join(t.TempDir(), "out.svs")
 			cmdOut, err := exec.Command(bin,
-				"transcode",
+				"convert",
 				"--codec", "jpeg",
-				"--container", "svs",
+				"--to", "svs",
 				"-f", "-o", out,
 				sample,
 			).CombinedOutput()
 			if err != nil {
-				t.Fatalf("transcode %s: %v\n%s", c.rel, err, cmdOut)
+				// ENOSPC is environmental, not a regression.
+				if strings.Contains(string(cmdOut), "no space left on device") {
+					t.Skipf("disk full: %s", cmdOut)
+				}
+				t.Fatalf("convert --to svs %s: %v\n%s", c.rel, err, cmdOut)
 			}
 			info, err := os.Stat(out)
 			if err != nil {
 				t.Fatalf("output not created: %v", err)
 			}
 			if info.Size() == 0 {
-				t.Errorf("transcode %s: output is empty", c.rel)
+				t.Errorf("convert --to svs %s: output is empty", c.rel)
 			}
 		})
 	}
