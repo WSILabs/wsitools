@@ -22,3 +22,6 @@ mem.prof
 
 # Local-only Claude state
 .claude/
+
+# Local direnv env (machine-specific paths)
+.envrc
