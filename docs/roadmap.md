@@ -61,6 +61,10 @@ queued, deferred, or under consideration.
 ### v0.20
 - `dump-ifds --raw` — full tiffinfo-style tag dump per IFD with name + enum interpretation. Composes with `--json`. `--raw-full` disables smart truncation. ~100-tag dictionary + 11-enum interpreter in `internal/tiff/tagnames.go`; pure Go, no new deps.
 
+### v0.21 (in progress)
+- (no new utilities) Default soft memory cap: wsitools sets `GOMEMLIMIT` to 75% of physical RAM at startup so memory-heavy conversions degrade under GC pressure instead of OOM-ing the host. Global `--max-memory` flag + `GOMEMLIMIT` override (precedence `--max-memory` > env > default); `doctor` reports the active limit. New `internal/memlimit` package.
+- opentile-go upgraded v0.26.0 → v0.30.0 (NDPI decode-perf + a per-Slide read-memory budget, `OPENTILE_READ_MEMORY_BUDGET`, that byte-bounds the strip/tile decode caches). No wsitools API changes.
+
 ## Planned
 
 ### Debug aids
@@ -93,6 +97,9 @@ queued, deferred, or under consideration.
 
 ### Deferred from v0.2
 - Streaming retrofit for `downsample` — currently materialises full L0 raster.
+
+### Deferred from v0.21 (added 2026-05-31)
+- **Constant-memory `convert --to dzi|szi` cascade.** The pyramid-descent generator holds full-width strip buffers across every level, so peak RSS scales with slide width (~3.5 GB on CMU-1.ndpi, ~5.4 GB on OS-2.ndpi). The v0.21 soft memory cap prevents host OOM but trades throughput under pressure; a true fix needs the cascade to process the source in column bands (or the opentile-go read path to bound its per-frame caches by bytes — partially addressed by v0.30's `OPENTILE_READ_MEMORY_BUDGET`). Tier 2 of the memory work; see `docs/superpowers/specs/2026-05-30-memory-safety-cap-design.md`.
 
 ### Deferred from v0.3
 - TilePrefix / TileBodyInto / SpliceJPEGTile adoption — only valuable if `tile-server` is built.

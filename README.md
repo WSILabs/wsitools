@@ -9,7 +9,7 @@ digital pathology.
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 
-## What's here (v0.20)
+## What's here (v0.21)
 
 **Inspection**
 
@@ -59,8 +59,12 @@ output (bit-exact tile-copy applies only to natively-tiled sources).
 
 **Diagnostics**
 
-- `wsitools doctor` — report installed codec libraries.
+- `wsitools doctor` — report installed codec libraries, physical RAM, and
+  the active soft memory limit (see [Memory](#memory)).
 - `wsitools version` — print version + Go runtime info.
+
+A global `--max-memory` flag caps the process's soft memory limit (default
+75% of RAM); see [Memory](#memory).
 
 ## Roadmap
 
