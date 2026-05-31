@@ -221,7 +221,7 @@ func ifdSizeForAssociated(a associatedLayoutInput, big bool) (uint64, uint64) {
 }
 
 // countTagsForLevel returns the count of TIFF directory entries we will emit
-// on a pyramid IFD. Must be kept in sync with ifd.go's WriteLevelIFD.
+// on a pyramid IFD. Must be kept in sync with populateLevelIFD in writer.go.
 func countTagsForLevel(lv levelLayoutInput) int {
 	// Always present: NewSubfileType, ImageWidth, ImageLength, BitsPerSample,
 	// Compression, PhotometricInterpretation, SamplesPerPixel, PlanarConfig,
@@ -233,9 +233,10 @@ func countTagsForLevel(lv levelLayoutInput) int {
 	}
 	if lv.IsL0 {
 		// ImageDescription, Make, Model, Software, DateTime, SourceFormat,
-		// ToolsVersion, WSIMPPX, WSIMPPY, WSIMagnification. (10; emitted only
+		// ToolsVersion, WSIMPPX, WSIMPPY, WSIMagnification,
+		// XResolution, YResolution, ResolutionUnit. (13; emitted only
 		// when set — but for size budgeting we assume all may appear.)
-		n += 10
+		n += 13
 	}
 	return n
 }
