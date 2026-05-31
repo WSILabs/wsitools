@@ -59,6 +59,8 @@ type infoMetadata struct {
 	Software      string  `json:"software"`
 	DateTime      string  `json:"datetime"`
 	MPP           float64 `json:"mpp"`
+	MPPX          float64 `json:"mpp_x"`
+	MPPY          float64 `json:"mpp_y"`
 	Magnification float64 `json:"magnification"`
 }
 
@@ -96,6 +98,8 @@ func runInfo(cmd *cobra.Command, args []string) error {
 			Model:         md.Model,
 			Software:      md.Software,
 			MPP:           md.MPP,
+			MPPX:          md.MPPX,
+			MPPY:          md.MPPY,
 			Magnification: md.Magnification,
 		},
 	}
@@ -144,8 +148,10 @@ func renderInfoText(w io.Writer, r *infoResult) error {
 	}
 	// MPP/Magnification == 0 means "unknown/unset" per source.Metadata; omit
 	// from human text. JSON always serializes the raw value for scripting.
-	if r.Metadata.MPP > 0 {
-		fmt.Fprintf(w, "MPP:     %g\n", r.Metadata.MPP)
+	if r.Metadata.MPPX > 0 && r.Metadata.MPPX == r.Metadata.MPPY {
+		fmt.Fprintf(w, "MPP:     %g\n", r.Metadata.MPPX)
+	} else if r.Metadata.MPPX > 0 || r.Metadata.MPPY > 0 {
+		fmt.Fprintf(w, "MPP:     %g × %g (x,y)\n", r.Metadata.MPPX, r.Metadata.MPPY)
 	}
 	if r.Metadata.Magnification > 0 {
 		fmt.Fprintf(w, "Magnification: %gx\n", r.Metadata.Magnification)
