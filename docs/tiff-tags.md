@@ -14,9 +14,9 @@ wsitools-assigned for codecs that lack a recognized tag value.
 | JPEG | 7 | TIFF 6.0 (Tech Note 2) | "New-style" JPEG-in-TIFF; not "OJPEG" (6). |
 | Deflate | 8 | TIFF 6.0 + community | Adobe-allocated. |
 | JPEG 2000 (Aperio) | 33003 / 33005 | Aperio | 33003 = YCbCr; 33005 = RGB. Aperio-private. |
-| JPEG-LS | 34712 | ISO/IEC 14495 | Standard. |
+| JPEG-LS | 34712 | ISO/IEC 14495 | Standard tag value; **encoder not yet shipped** (no `internal/codec/jpegls`). |
 | WebP | 50001 | Adobe | Adobe-allocated; libtiff supports. |
-| JPEG-XL | 50002 | Adobe (draft) | Allocated; spec finalising. |
+| JPEG-XL | 50002 | Adobe (draft) | Allocated; spec finalized (ISO/IEC 18181, 2022). |
 
 ## wsitools private (≥ 32768)
 
@@ -56,9 +56,14 @@ WSI image classification when present.
 | 65082 | WSILevelCount | LONG | pyramid IFDs only | Total pyramid levels in this file. |
 | 65083 | WSISourceFormat | ASCII | L0 only | The source format wsitools converted from (e.g. `svs`, `philips-tiff`, `ome-tiff`, `ndpi`). |
 | 65084 | WSIToolsVersion | ASCII | L0 only | The wsitools version that produced this file (e.g. `0.20.0`). |
+| 65085 | WSIMPPx | DOUBLE | L0 only | Microns per pixel, X axis. |
+| 65086 | WSIMPPy | DOUBLE | L0 only | Microns per pixel, Y axis. |
+| 65087 | WSIMagnification | DOUBLE | L0 only | Scanner objective magnification (e.g. `20`, `40`). |
 
 The constants live in `internal/tiff/tags.go`. The reserved namespace is
-65080–65087; tags 65085–65087 are unassigned and available for future use.
+65080–65087; all eight are assigned. (Note: 65085–65087 are not yet in
+the `internal/tiff/tagnames.go` name dictionary, so `dump-ifds --raw`
+currently shows them by number, not name.)
 
 ## Reading tags from a slide
 

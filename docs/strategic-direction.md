@@ -19,15 +19,27 @@ repositories to a GitHub organization without breaking consumers.
 - ✅ `wsitools region` — shipped (v0.5 era).
 - ✅ Convert target expansion (`--to svs|tiff|ome-tiff|cog-wsi|dzi|szi`) —
   shipped v0.16.
-- ⏳ Codec lift (Section 2) — not started.
-- ⏳ opentile-go v1.0 `*Slide` API redesign (Section 1) — not started.
+- ✅ Codec lift (Section 2) — shipped opentile-go v0.22 (`decoder/` +
+  codec subpackages + `resample/`).
+- ✅ opentile-go `*Slide` API redesign (Section 1) — shipped incrementally
+  v0.23–v0.26 (`*Slide` struct, `DecodedTile`, `ReadRegion`/
+  `ReadRegionScaled`, `ScaledStrips`); the public `Tiler` interface was
+  removed in v0.23. Consumed at v0.30.0. A few v1.0-marker items
+  (`Thumbnail`, `Bounds`, `BackgroundColor`, `Metadata.Vendor`) remain
+  unshipped and v1.0 is not yet tagged.
 - ⏳ `tile-server`, `dicom-wsi`, long-tail utilities — queued.
 
-The shipped DZI generator was built against the *current* opentile-go
-public surface (not the Section 1 `*Slide` redesign). The Section 1 +
-Section 2 work remains valuable for the next wave of utilities
-(`tile-server`, `dicom-wsi`, `extract`-to-container) but is not on the
-critical path for what's already shipped.
+The DZI generator now reads through `Slide.ScaledStrips` (migrated v0.26),
+and `wsitools region` uses `ImageReadRegion` (v0.25) — the Section 1
+redesign these were waiting on has landed.
+
+> **Note on the rest of this document:** Sections 1–5 below are the
+> original 2026-05-23 design discussion, written *before* the Section 1/2
+> work landed. They use future tense ("will migrate", "still
+> aspirational", "not started") for items that have since shipped (see
+> the snapshot above and `docs/roadmap.md` for authoritative current
+> status). The discussion is preserved as a design record; it has not
+> been rewritten to past tense.
 
 The goal is a single Go-native pathway from "open a slide file" to "do
 anything with it" — no FFI to openslide, no two competing access paths in

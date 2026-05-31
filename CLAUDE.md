@@ -2,8 +2,9 @@
 
 Go-based utilities for whole-slide imaging (WSI) files used in digital
 pathology. CLI bundles read-side inspection (`info`, `dump-ifds`, `extract`,
-`hash`, `region`) and write-side conversion (`convert --to {cog-wsi, dzi,
-szi, svs, tiff, ome-tiff}`, `downsample`).
+`hash`, `region`), write-side conversion (`convert --to {cog-wsi, dzi,
+szi, svs, tiff, ome-tiff}`, `downsample`), and diagnostics (`doctor`,
+`version`).
 
 ## Module path
 
@@ -22,6 +23,8 @@ szi, svs, tiff, ome-tiff}`, `downsample`).
   - `internal/tiff/cogwsiwriter` — spool-and-finalize COG-WSI writer;
     backs `convert --to cog-wsi`.
   Both are pure Go; cgo only inside codec wrappers.
+- Tile-ordering strategies (row-major / hilbert / morton) =
+  `internal/tiff/tileorder`, used by the COG-WSI writer's finalize pass.
 - DZI/SZI writers = `internal/dzi`, `internal/szi`. `convert --to dzi|szi`
   uses a single-pass pyramid-descent generator (see `cmd/wsitools/convert_dzi_descent.go`)
   with parallel libjpeg-turbo encoders; ~150× faster than the v0.16 naive path.
@@ -31,9 +34,13 @@ szi, svs, tiff, ome-tiff}`, `downsample`).
 - Source layer = `internal/source` (slide open + IFD walk). `WalkIFDs` is
   the slim format-aware walk; `WalkIFDsRaw` captures every directory entry
   for `dump-ifds --raw`.
-- WSI private TIFF tag namespace: 65080–65084 (see `internal/tiff/tags.go`).
+- WSI private TIFF tag namespace: 65080–65087 (see `internal/tiff/tags.go`).
 - Pipeline = `internal/pipeline` (worker-pool decode/process/encode), used
   by `convert --to svs|tiff|ome-tiff` and `downsample`.
+- Memory cap = `internal/memlimit`: sets `GOMEMLIMIT` to 75% of physical
+  RAM by default (so conversions degrade under GC instead of OOM-ing the
+  host); wired to the global `--max-memory` flag. CLI output helpers =
+  `internal/cliout`.
 - CLI = `cmd/wsitools/` using cobra.
 
 ## Test discipline
