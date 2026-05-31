@@ -1,8 +1,21 @@
 # wsitools — default memory safety cap (Tier 1)
 
-**Status:** APPROVED design (2026-05-30)
+**Status:** IMPLEMENTED (2026-05-31, branch `feat/memory-safety-cap`).
 **Scope:** Tier 1 of the memory-footprint work. Tier 2 (cascade
 streaming redesign) is out of scope.
+
+**Implementation deviations** (see the plan
+`docs/superpowers/plans/2026-05-30-memory-safety-cap.md` for rationale):
+- **No `Describe()` function.** `doctor` reads the `Result` already
+  computed by `Apply` in the root `PersistentPreRunE` (the package var
+  `memLimitResult`), which cobra always runs before any subcommand's
+  `RunE`. This is simpler (YAGNI) and guarantees `doctor` reports exactly
+  what was applied. The §3.1/§4.2 `Describe` references below are
+  superseded.
+- **Env path reports the raw `GOMEMLIMIT` string** rather than
+  re-parsing it (Go's size grammar differs from `--max-memory`'s), so
+  `Result.LimitBytes` is `Unlimited` on the env path and `RawEnv` carries
+  the display value.
 
 ---
 
