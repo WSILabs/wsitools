@@ -37,7 +37,7 @@ func TestScaleTagsEmitted(t *testing.T) {
 
 	out, _ := exec.Command("tiffinfo", path).CombinedOutput()
 	got := strings.ToLower(string(out))
-	for _, want := range []string{"resolution", "65085", "65087"} {
+	for _, want := range []string{"resolution", "65085", "65086", "65087"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("tiffinfo output missing %q:\n%s", want, out)
 		}
