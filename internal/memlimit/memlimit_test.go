@@ -97,8 +97,23 @@ func TestResolveUnset(t *testing.T) {
 }
 
 func TestResolveFlagBeatsEnv(t *testing.T) {
-	got, _ := Resolve("4GiB", "5GiB", 16*gib)
+	got, err := Resolve("4GiB", "5GiB", 16*gib)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got.Source != SourceFlag || got.LimitBytes != 4*gib {
 		t.Errorf("flag must win: got Source=%q Limit=%d", got.Source, got.LimitBytes)
+	}
+}
+
+// A whitespace-only flag value must be treated as unset and fall through
+// to the env path.
+func TestResolveBlankFlagFallsThrough(t *testing.T) {
+	got, err := Resolve("   ", "5GiB", 16*gib)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Source != SourceEnv {
+		t.Errorf("Source = %q, want %q (blank flag should fall through)", got.Source, SourceEnv)
 	}
 }

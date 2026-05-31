@@ -26,7 +26,7 @@ const (
 
 // Result describes the memory-limit decision for reporting.
 type Result struct {
-	LimitBytes int64  // value set (or that would be set); Unlimited == no cap
+	LimitBytes int64  // limit set or to be set; Unlimited when SourceEnv (see RawEnv) or no cap available
 	Source     string // one of the Source* constants
 	RAMBytes   uint64 // 0 when undetectable
 	Applied    bool   // false when we deliberately left the runtime's value alone
@@ -53,7 +53,13 @@ func Resolve(flagVal, envVal string, ramBytes uint64) (Result, error) {
 			Applied: false, RawEnv: envVal}, nil
 	}
 	if ramBytes > 0 {
-		// 75% of RAM; ram/4*3 avoids intermediate overflow.
+		// 75% of RAM. Integer-divide first to avoid overflow in the
+		// uint64→int64 product; clamp absurd values (impossible on real
+		// hardware) so the *3 cannot wrap int64 negative.
+		const maxSafeRAM = uint64(math.MaxInt64) / 3 * 4 // ~10.67 EiB
+		if ramBytes > maxSafeRAM {
+			ramBytes = maxSafeRAM
+		}
 		limit := int64(ramBytes/4) * 3
 		return Result{LimitBytes: limit, Source: SourceDefault, RAMBytes: ramBytes, Applied: true}, nil
 	}
