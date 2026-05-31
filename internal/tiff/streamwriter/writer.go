@@ -50,6 +50,9 @@ type Writer struct {
 	hasDateTime      bool
 	sourceFormat     string
 	toolsVersion     string
+	mppX             float64
+	mppY             float64
+	magnification    float64
 
 	// computed during Close.
 	pyramidLevelCount int
@@ -83,6 +86,9 @@ func Create(path string, opts Options) (*Writer, error) {
 		hasDateTime:      !opts.DateTime.IsZero(),
 		sourceFormat:     opts.SourceFormat,
 		toolsVersion:     opts.ToolsVersion,
+		mppX:             opts.MPPX,
+		mppY:             opts.MPPY,
+		magnification:    opts.Magnification,
 	}
 	// Write a placeholder header (firstIFD = 0). It gets patched in Close.
 	if err := tiff.WriteHeader(f, bigtiff, 0); err != nil {
@@ -289,6 +295,22 @@ func (w *Writer) addL0Metadata(b *tiff.EntryBuilder) {
 	}
 	if w.toolsVersion != "" {
 		b.AddASCII(tiff.TagWSIToolsVersion, w.toolsVersion)
+	}
+	if w.mppX > 0 {
+		n, d := tiff.MPPToResolution(w.mppX)
+		b.AddRational(tiff.TagXResolution, []uint32{n}, []uint32{d})
+		b.AddDouble(tiff.TagWSIMPPX, []float64{w.mppX})
+	}
+	if w.mppY > 0 {
+		n, d := tiff.MPPToResolution(w.mppY)
+		b.AddRational(tiff.TagYResolution, []uint32{n}, []uint32{d})
+		b.AddDouble(tiff.TagWSIMPPY, []float64{w.mppY})
+	}
+	if w.mppX > 0 || w.mppY > 0 {
+		b.AddShort(tiff.TagResolutionUnit, []uint16{tiff.ResolutionUnitCentimeter})
+	}
+	if w.magnification > 0 {
+		b.AddDouble(tiff.TagWSIMagnification, []float64{w.magnification})
 	}
 }
 

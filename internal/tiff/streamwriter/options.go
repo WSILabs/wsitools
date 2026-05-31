@@ -22,6 +22,13 @@ type Options struct {
 	SourceFormat string
 	ToolsVersion string
 
+	// Physical scale, emitted on L0 when > 0: XResolution/YResolution
+	// (derived from MPP, pixels-per-cm) + ResolutionUnit, and the WSI
+	// private tags WSIMPPx/WSIMPPy/WSIMagnification.
+	MPPX          float64
+	MPPY          float64
+	Magnification float64
+
 	// DefaultOrder is the tile emission strategy for levels that don't
 	// override via LevelSpec.Order. nil → RowMajor (which is the
 	// universal default for all writer variants).
