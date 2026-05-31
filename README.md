@@ -186,16 +186,39 @@ wrote CMU-1.dzi (47.3 MB, 14s)
 
 ## Memory
 
-`downsample` (v0.1) still holds the full L0 raster in memory during
-pyramid build:
+Conversion footprint scales with slide **width**, not a fixed ceiling.
+`convert --to dzi|szi` streams top-to-bottom but holds full-width strip
+buffers across every pyramid level plus the reader's per-tile decode
+caches, so peak resident memory grows with the widest level:
 
-- A 20x slide L0: ~50K × 30K × 3 ≈ 4.5 GB
-- A 40x slide L0: ~100K × 60K × 3 ≈ 18 GB
+- CMU-1.ndpi (L0 51200 × 38144): ~3.5 GB peak
+- OS-2.ndpi  (L0 126976 × 73728): ~5.4 GB peak
 
-This fits on most workstations but is tight on laptops. `convert` and
-`convert --to dzi|szi` stream per-tile with a constant-memory ceiling
-regardless of slide size. A streaming retrofit for `downsample` is queued
-— see [`docs/roadmap.md`](./docs/roadmap.md).
+`downsample` (v0.1) additionally materialises the full L0 raster (a 40x
+L0 ≈ 100K × 60K × 3 ≈ 18 GB); a streaming retrofit is queued — see
+[`docs/roadmap.md`](./docs/roadmap.md).
+
+To keep a runaway conversion from exhausting the machine, wsitools sets a
+**soft memory limit at 75% of physical RAM by default** (via Go's
+`GOMEMLIMIT`). Under pressure the garbage collector works harder —
+trading some speed — instead of letting the process OOM the host. Tune or
+disable it:
+
+```sh
+# Cap the soft limit at 4 GiB (slower, lower peak)
+wsitools --max-memory 4GiB convert --to dzi -o out.dzi in.ndpi
+
+# Disable the cap entirely
+wsitools --max-memory off convert --to dzi -o out.dzi in.ndpi
+
+# GOMEMLIMIT env is respected and takes precedence over the default
+GOMEMLIMIT=8GiB wsitools convert --to dzi -o out.dzi in.ndpi
+```
+
+Precedence: `--max-memory` > `GOMEMLIMIT` > 75% default. `wsitools doctor`
+reports the active limit and its source. The reader's own decode-cache
+budget is separately tunable via `OPENTILE_READ_MEMORY_BUDGET` (default
+1 GiB; opentile-go v0.30+).
 
 ## Testing
 

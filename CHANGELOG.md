@@ -2,6 +2,30 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Default soft memory limit: wsitools now sets `GOMEMLIMIT` to 75% of
+  physical RAM at startup so memory-heavy conversions degrade under GC
+  pressure instead of OOM-ing the host. Override with the global
+  `--max-memory` flag (e.g. `8000`, `12GiB`, `off`) or the `GOMEMLIMIT`
+  environment variable; precedence is `--max-memory` > `GOMEMLIMIT` >
+  default. `wsitools doctor` now reports physical RAM and the active soft
+  limit with its source.
+- `scripts/bench-dzi.sh` now reports peak resident memory (via
+  `/usr/bin/time -l`) alongside wall-clock time for both wsitools and
+  vips, with a memory ratio column.
+
+### Changed
+
+- opentile-go upgraded v0.26.0 → v0.30.0. v0.27–v0.29 are internal NDPI
+  decode-perf work (pixel-frame cache, cross-format decoder-handle pool,
+  ReadRegion allocation elimination); v0.30 adds a per-Slide read-memory
+  budget (`OPENTILE_READ_MEMORY_BUDGET`, default 1 GiB) that byte-bounds
+  the strip/tile decode caches, lowering peak RSS on wide NDPI slides. No
+  wsitools API changes.
+
 ## [0.20.0] — 2026-05-29
 
 ### Added
