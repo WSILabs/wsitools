@@ -24,6 +24,9 @@ const (
 	TagTileOffsets               uint16 = 324
 	TagTileByteCounts            uint16 = 325
 	TagJPEGTables                uint16 = 347
+	TagXResolution               uint16 = 282
+	TagYResolution               uint16 = 283
+	TagResolutionUnit            uint16 = 296
 )
 
 // TIFF Compression tag values we support. The Compression tag (259)
@@ -43,6 +46,10 @@ const (
 	CompressionAVIF  uint16 = 60001 // wsitools private/experimental range
 	CompressionHTJ2K uint16 = 60003 // wsitools private/experimental range
 )
+
+// ResolutionUnitCentimeter is the ResolutionUnit (296) value for
+// pixels-per-centimeter.
+const ResolutionUnitCentimeter uint16 = 3
 
 // WSI private tag IDs (range 65080–65087) reserved by wsitools.
 // See docs/superpowers/specs/2026-05-20-cog-wsi-format.md §5.2.
