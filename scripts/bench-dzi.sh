@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Compare wsitools convert --to dzi against vips dzsave on representative
-# fixtures. Manual / not in CI. Run via `make bench-dzi`.
+# fixtures, reporting BOTH wall-clock time and peak resident memory
+# (macOS /usr/bin/time -l "maximum resident set size"). Manual / not in
+# CI. Run via `make bench-dzi`.
 
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,29 +26,38 @@ FIXTURES=(
     "$SAMPLES/ndpi/OS-2.ndpi"
 )
 
-run_timed() {
-    local cmd="$1"
-    local start end
-    start=$(date +%s.%N)
-    eval "$cmd" >/dev/null 2>&1
-    end=$(date +%s.%N)
-    awk -v s="$start" -v e="$end" 'BEGIN{ printf "%.2f\n", e - s }'
+# run_bench <cmd> -> echoes "<seconds> <peak_mb>" parsed from
+# /usr/bin/time -l. Command stdout/stderr are discarded; only the
+# rusage report is captured.
+run_bench() {
+    local cmd="$1" tf secs rss_bytes
+    tf=$(mktemp)
+    /usr/bin/time -l sh -c "$cmd" >/dev/null 2>"$tf" || true
+    secs=$(grep -E ' real' "$tf" | tail -1 | awk '{print $1}')
+    rss_bytes=$(grep 'maximum resident set size' "$tf" | tail -1 | awk '{print $1}')
+    rm -f "$tf"
+    awk -v s="$secs" -v r="$rss_bytes" 'BEGIN{ printf "%s %.0f\n", s, r/1048576 }'
 }
 
-printf "%-44s %12s %12s %8s\n" "fixture" "wsitools(s)" "vips(s)" "ratio"
-printf -- "----------------------------------------------------------------------------\n"
+printf "%-32s %9s %8s %9s %8s %7s %7s\n" \
+    "fixture" "wsi(s)" "wsi(MB)" "vips(s)" "vips(MB)" "t-rat" "m-rat"
+printf -- "------------------------------------------------------------------------------------\n"
 for fx in "${FIXTURES[@]}"; do
-    if [ ! -f "$fx" ]; then
-        continue
-    fi
+    [ -f "$fx" ] || continue
     name=$(basename "$fx")
 
     rm -rf "$TMP/wsi-$name.dzi" "$TMP/wsi-${name}_files"
-    t1=$(run_timed "'$WSI' convert --to dzi -o '$TMP/wsi-$name.dzi' '$fx'")
+    read -r wt wm < <(run_bench "'$WSI' convert --to dzi -o '$TMP/wsi-$name.dzi' '$fx'")
 
     rm -rf "$TMP/vips-$name.dzi" "$TMP/vips-${name}_files"
-    t2=$(run_timed "vips dzsave '$fx' '$TMP/vips-$name' --suffix '.jpeg[Q=85]' --tile-size 256 --overlap 1")
+    read -r vt vm < <(run_bench "vips dzsave '$fx' '$TMP/vips-$name' --suffix '.jpeg[Q=85]' --tile-size 256 --overlap 1")
 
-    ratio=$(awk -v a="$t1" -v b="$t2" 'BEGIN{ if(b>0) printf "%.2fx", a/b; else print "n/a" }')
-    printf "%-44s %12s %12s %8s\n" "$name" "$t1" "$t2" "$ratio"
+    trat=$(awk -v a="$wt" -v b="$vt" 'BEGIN{ if(b>0) printf "%.2f", a/b; else print "n/a" }')
+    mrat=$(awk -v a="$wm" -v b="$vm" 'BEGIN{ if(b>0) printf "%.2f", a/b; else print "n/a" }')
+    printf "%-32s %9s %8s %9s %8s %7s %7s\n" "$name" "$wt" "$wm" "$vt" "$vm" "$trat" "$mrat"
 done
+
+echo
+echo "t-rat / m-rat = wsitools ÷ vips (lower is better for wsitools)."
+echo "Memory = peak RSS (maximum resident set size). Set"
+echo "OPENTILE_READ_MEMORY_BUDGET=<bytes> to tune wsitools' read-cache budget."
