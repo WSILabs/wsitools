@@ -21,7 +21,7 @@ func TestMPPToResolution(t *testing.T) {
 }
 
 func TestMPPToResolutionUnknown(t *testing.T) {
-	for _, mpp := range []float64{0, -1} {
+	for _, mpp := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
 		if n, d := MPPToResolution(mpp); n != 0 || d != 0 {
 			t.Errorf("MPPToResolution(%g) = %d/%d, want 0/0", mpp, n, d)
 		}
