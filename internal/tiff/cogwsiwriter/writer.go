@@ -475,9 +475,16 @@ func populateLevelIFD(b *tiff.EntryBuilder, spec LevelSpec, tileOffsets []uint64
 		}
 		if opts.Metadata.MPPX > 0 {
 			b.AddDouble(tiff.TagWSIMPPX, []float64{opts.Metadata.MPPX})
+			n, d := tiff.MPPToResolution(opts.Metadata.MPPX)
+			b.AddRational(tiff.TagXResolution, []uint32{n}, []uint32{d})
 		}
 		if opts.Metadata.MPPY > 0 {
 			b.AddDouble(tiff.TagWSIMPPY, []float64{opts.Metadata.MPPY})
+			n, d := tiff.MPPToResolution(opts.Metadata.MPPY)
+			b.AddRational(tiff.TagYResolution, []uint32{n}, []uint32{d})
+		}
+		if opts.Metadata.MPPX > 0 || opts.Metadata.MPPY > 0 {
+			b.AddShort(tiff.TagResolutionUnit, []uint16{tiff.ResolutionUnitCentimeter})
 		}
 		if opts.Metadata.Magnification > 0 {
 			b.AddDouble(tiff.TagWSIMagnification, []float64{opts.Metadata.Magnification})
