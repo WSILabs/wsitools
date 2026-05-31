@@ -198,6 +198,9 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		FormatName:       "svs",
 		AcceptedOrders:   acceptedOrdersForFormat("svs"),
 		DefaultOrder:     order,
+		MPPX:             desc.MPP,
+		MPPY:             desc.MPP,
+		Magnification:    desc.AppMag,
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)

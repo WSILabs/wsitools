@@ -58,8 +58,8 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 		ToolsVersion: Version,
 		DefaultOrder: order,
 		Metadata: cogwsiwriter.Metadata{
-			MPPX:                md.MPP,
-			MPPY:                md.MPP, // MPP is currently single-axis in source.Metadata
+			MPPX:                md.MPPX,
+			MPPY:                md.MPPY,
 			Magnification:       md.Magnification,
 			Make:                md.Make,
 			Model:               md.Model,
