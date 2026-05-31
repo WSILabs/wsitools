@@ -26,6 +26,15 @@ var doctorCmd = &cobra.Command{
 		fmt.Println("  ✓ jpeg2000  (openjpeg via internal/decoder)")
 		fmt.Println()
 		fmt.Println("Reader: opentile-go (see go.mod for version)")
+		fmt.Println()
+		fmt.Println("Memory:")
+		if memLimitResult.RAMBytes > 0 {
+			fmt.Printf("  Physical RAM:  %s\n", formatBytes(int64(memLimitResult.RAMBytes)))
+		} else {
+			fmt.Println("  Physical RAM:  unknown")
+		}
+		fmt.Printf("  Soft limit:    %s  (source: %s)\n",
+			memLimitDisplay(memLimitResult), memLimitResult.Source)
 		return nil
 	},
 }
