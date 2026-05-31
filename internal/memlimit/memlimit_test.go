@@ -117,3 +117,13 @@ func TestResolveBlankFlagFallsThrough(t *testing.T) {
 		t.Errorf("Source = %q, want %q (blank flag should fall through)", got.Source, SourceEnv)
 	}
 }
+
+func TestPhysicalRAMSmoke(t *testing.T) {
+	ram, err := PhysicalRAM()
+	if err != nil {
+		t.Skipf("PhysicalRAM unsupported on this platform: %v", err)
+	}
+	if ram < 1<<30 { // sanity: any dev/CI host has >= 1 GiB
+		t.Errorf("PhysicalRAM = %d bytes, implausibly small", ram)
+	}
+}

@@ -110,6 +110,3 @@ func Apply(flagVal string) (Result, error) {
 	}
 	return res, nil
 }
-
-// TEMP stub — replaced by build-tagged PhysicalRAM in Task 2.
-func PhysicalRAM() (uint64, error) { return 0, nil }
