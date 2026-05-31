@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	_ "github.com/wsilabs/wsitools/internal/codec/all"
+	"github.com/wsilabs/wsitools/internal/memlimit"
 	_ "github.com/wsilabs/opentile-go/decoder/all"
 	"github.com/spf13/cobra"
 )
@@ -21,8 +22,11 @@ var (
 	flagLogLevel   string
 	flagLogFormat  string
 	flagCPUProfile string
+	flagMaxMemory  string
 
 	cpuProfileFile *os.File
+
+	memLimitResult memlimit.Result
 )
 
 var rootCmd = &cobra.Command{
@@ -34,6 +38,19 @@ Run 'wsitools <command> --help' for command-specific flags and examples.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := setupLogger(); err != nil {
 			return err
+		}
+		res, applyErr := memlimit.Apply(flagMaxMemory)
+		if applyErr != nil {
+			return applyErr
+		}
+		memLimitResult = res
+		slog.Debug("memory soft limit",
+			"limit", memLimitDisplay(res),
+			"source", res.Source,
+			"ram", formatBytes(int64(res.RAMBytes)),
+			"applied", res.Applied)
+		if flagVerbose && res.Source != memlimit.SourceUnset {
+			fmt.Fprintf(os.Stderr, "memory soft limit: %s (%s)\n", memLimitDisplay(res), res.Source)
 		}
 		if flagCPUProfile != "" {
 			f, err := os.Create(flagCPUProfile)
@@ -63,6 +80,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagLogLevel, "log-level", "info", "debug|info|warn|error")
 	rootCmd.PersistentFlags().StringVar(&flagLogFormat, "log-format", "text", "text|json")
 	rootCmd.PersistentFlags().StringVar(&flagCPUProfile, "cpu-profile", "", "write CPU profile to <file> (debug)")
+	rootCmd.PersistentFlags().StringVar(&flagMaxMemory, "max-memory", "",
+		"soft memory cap, e.g. 8000 (MiB), 12GiB, or off; default 75% of RAM")
 }
 
 func setupLogger() error {
@@ -113,4 +132,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// memLimitDisplay renders a Result's limit for human output: the raw
+// GOMEMLIMIT string on the env path, "none (unlimited)" for an uncapped
+// limit, otherwise a human byte size.
+func memLimitDisplay(r memlimit.Result) string {
+	if r.Source == memlimit.SourceEnv {
+		return r.RawEnv
+	}
+	if r.LimitBytes == memlimit.Unlimited {
+		return "none (unlimited)"
+	}
+	return formatBytes(r.LimitBytes)
 }
