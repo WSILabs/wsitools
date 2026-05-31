@@ -61,9 +61,9 @@ WSI image classification when present.
 | 65087 | WSIMagnification | DOUBLE | L0 only | Scanner objective magnification (e.g. `20`, `40`). |
 
 The constants live in `internal/tiff/tags.go`. The reserved namespace is
-65080–65087; all eight are assigned. (Note: 65085–65087 are not yet in
-the `internal/tiff/tagnames.go` name dictionary, so `dump-ifds --raw`
-currently shows them by number, not name.)
+65080–65087; all eight are assigned, and all have names in the
+`internal/tiff/tagnames.go` dictionary so `dump-ifds --raw` shows them by
+name.
 
 ## Reading tags from a slide
 
