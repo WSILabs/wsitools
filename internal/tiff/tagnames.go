@@ -232,4 +232,7 @@ var tagNames = map[uint16]string{
 	65082: "WSILevelCount",
 	65083: "WSISourceFormat",
 	65084: "WSIToolsVersion",
+	65085: "WSIMPPx",
+	65086: "WSIMPPy",
+	65087: "WSIMagnification",
 }

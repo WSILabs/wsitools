@@ -18,6 +18,9 @@ func TestTagName(t *testing.T) {
 		{330, "SubIFDs"},
 		{347, "JPEGTables"},
 		{65083, "WSISourceFormat"},
+		{65085, "WSIMPPx"},
+		{65086, "WSIMPPy"},
+		{65087, "WSIMagnification"},
 		{12345, ""},
 	}
 	for _, c := range cases {
