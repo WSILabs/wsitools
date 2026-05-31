@@ -77,8 +77,16 @@ func (s *opentileSource) Metadata() Metadata {
 	if len(md.ScannerSoftware) > 0 {
 		m.Software = md.ScannerSoftware[0]
 	}
+	// Cross-format scale: opentile-go normalizes every format's native
+	// pixel size into MicronsPerPixelX/Y. Prefer that; fall back to the
+	// SVS-specific struct only when the cross-format value is absent.
+	m.MPPX = md.MicronsPerPixelX
+	m.MPPY = md.MicronsPerPixelY
+	m.MPP = md.MicronsPerPixel // opentile's symmetric value (0 if asymmetric)
 	if smd, ok := svsfmt.MetadataOf(s.t); ok {
-		m.MPP = smd.MPP
+		if m.MPPX == 0 && smd.MPP != 0 {
+			m.MPPX, m.MPPY, m.MPP = smd.MPP, smd.MPP, smd.MPP
+		}
 		if smd.Filename != "" {
 			m.Raw["filename"] = smd.Filename
 		}

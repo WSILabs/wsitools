@@ -110,7 +110,9 @@ func (c Compression) String() string {
 type Metadata struct {
 	Make, Model, Software, SerialNumber string
 	Magnification                       float64
-	MPP                                 float64 // micrometers per pixel; 0 if unknown
+	MPP                                 float64 // symmetric µm/px (0 if unknown OR asymmetric)
+	MPPX                                float64 // µm/px, X axis; 0 if unknown
+	MPPY                                float64 // µm/px, Y axis; 0 if unknown
 	AcquisitionDateTime                 time.Time
 	Raw                                 map[string]string
 }
