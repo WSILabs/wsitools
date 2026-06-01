@@ -201,6 +201,7 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		MPPX:             desc.MPP,
 		MPPY:             desc.MPP,
 		Magnification:    desc.AppMag,
+		ICCProfile:       src.ICCProfile(),
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)

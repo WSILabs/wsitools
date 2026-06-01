@@ -97,6 +97,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		MPPX:           md.MPPX,
 		MPPY:           md.MPPY,
 		Magnification:  md.Magnification,
+		ICCProfile:     md.ICCProfile,
 	}
 	if md.Make != "" {
 		opts.Make = md.Make
@@ -293,6 +294,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 		MPPX:           md.MPPX,
 		MPPY:           md.MPPY,
 		Magnification:  md.Magnification,
+		ICCProfile:     md.ICCProfile,
 	}
 	if md.Make != "" {
 		opts.Make = md.Make

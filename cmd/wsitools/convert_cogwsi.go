@@ -61,6 +61,7 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 			MPPX:                md.MPPX,
 			MPPY:                md.MPPY,
 			Magnification:       md.Magnification,
+			ICCProfile:          md.ICCProfile,
 			Make:                md.Make,
 			Model:               md.Model,
 			Software:            md.Software,
