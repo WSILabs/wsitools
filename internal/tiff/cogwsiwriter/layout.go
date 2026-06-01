@@ -29,6 +29,10 @@ type levelLayoutInput struct {
 	Compression  uint16
 	JPEGTables   []byte // optional, abbreviated-JPEG mode
 	IsL0         bool   // true for pyramid index 0 — gets the L0 metadata tags
+	// L0MetaExternal is the exact upper-bound external byte size of the L0
+	// metadata tags (ImageDescription, scanner strings, MPP/mag doubles,
+	// resolution, ICC). Replaces the old fixed 2 KiB guess. 0 for non-L0.
+	L0MetaExternal uint64
 }
 
 // associatedLayoutInput is one associated image (label/macro/thumbnail/overview).
@@ -52,6 +56,7 @@ type layoutInput struct {
 // levelLayoutPlan is the planner's per-level output.
 type levelLayoutPlan struct {
 	IFDOffset      uint64   // absolute file offset of this IFD record
+	Reserved       uint64   // bytes reserved for this IFD record + its external data
 	TileOffsets    []uint64 // absolute file offsets per tile, in source row-major order
 	TileDataOffset uint64   // offset of the first tile (== TileOffsets[0])
 }
@@ -59,6 +64,7 @@ type levelLayoutPlan struct {
 // associatedLayoutPlan is the planner's per-associated-image output.
 type associatedLayoutPlan struct {
 	IFDOffset  uint64
+	Reserved   uint64 // bytes reserved for this IFD record + its external data
 	DataOffset uint64
 }
 
@@ -105,6 +111,7 @@ func planLayout(in layoutInput) (layoutPlan, error) {
 	for i, lv := range in.Levels {
 		ifdSize, externalSize := ifdSizeForLevel(lv, useBig)
 		plan.Levels[i].IFDOffset = cursor
+		plan.Levels[i].Reserved = ifdSize + externalSize
 		cursor += ifdSize + externalSize
 	}
 
@@ -113,6 +120,7 @@ func planLayout(in layoutInput) (layoutPlan, error) {
 	for i, a := range in.Associated {
 		ifdSize, externalSize := ifdSizeForAssociated(a, useBig)
 		plan.Associated[i].IFDOffset = cursor
+		plan.Associated[i].Reserved = ifdSize + externalSize
 		cursor += ifdSize + externalSize
 	}
 
@@ -203,11 +211,10 @@ func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 		}
 	}
 	if lv.IsL0 {
-		// Reserve a generous allowance for ImageDescription, Make, Model,
-		// Software, DateTime, SourceFormat, ToolsVersion, MPP-X/Y, Magnification,
-		// BitsPerSample, and WSIImageType.
-		// 2 KiB is a comfortable upper bound for these tags combined.
-		external += 2048
+		// Exact upper-bound external size for the L0 metadata tags
+		// (ImageDescription, scanner strings, MPP/mag doubles, resolution,
+		// ICC). Replaces the old fixed 2 KiB guess.
+		external += lv.L0MetaExternal
 	}
 	return ifd, external
 }
@@ -234,9 +241,10 @@ func countTagsForLevel(lv levelLayoutInput) int {
 	if lv.IsL0 {
 		// ImageDescription, Make, Model, Software, DateTime, SourceFormat,
 		// ToolsVersion, WSIMPPX, WSIMPPY, WSIMagnification,
-		// XResolution, YResolution, ResolutionUnit. (13; emitted only
-		// when set — but for size budgeting we assume all may appear.)
-		n += 13
+		// XResolution, YResolution, ResolutionUnit, ICCProfile. (14;
+		// emitted only when set — but for size budgeting we assume all
+		// may appear.)
+		n += 14
 	}
 	return n
 }

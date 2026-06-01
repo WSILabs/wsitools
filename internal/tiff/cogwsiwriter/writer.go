@@ -30,6 +30,7 @@ type Metadata struct {
 	AcquisitionDateTime time.Time
 	SourceFormat        string
 	SourceImageDesc     string // optional provenance for ImageDescription
+	ICCProfile          []byte // embedded color profile; emitted on L0 as tag 34675
 }
 
 // LevelSpec describes one pyramid level. Compression and PhotometricInterpretation
@@ -217,13 +218,18 @@ func (w *Writer) Close() error {
 		for j, e := range entries {
 			bytesLen[j] = e.Length
 		}
+		l0MetaExternal := uint64(0)
+		if i == 0 {
+			l0MetaExternal = l0MetadataExternalBytes(w.opts)
+		}
 		in.Levels = append(in.Levels, levelLayoutInput{
-			TileBytes:    bytesLen,
-			TileCount:    uint32(len(entries)),
-			TileGeometry: tileGeom{TileW: lv.spec.TileWidth, TileH: lv.spec.TileHeight, ImgW: lv.spec.ImageWidth, ImgH: lv.spec.ImageHeight},
-			Compression:  lv.spec.Compression,
-			JPEGTables:   lv.spec.JPEGTables,
-			IsL0:         i == 0,
+			TileBytes:      bytesLen,
+			TileCount:      uint32(len(entries)),
+			TileGeometry:   tileGeom{TileW: lv.spec.TileWidth, TileH: lv.spec.TileHeight, ImgW: lv.spec.ImageWidth, ImgH: lv.spec.ImageHeight},
+			Compression:    lv.spec.Compression,
+			JPEGTables:     lv.spec.JPEGTables,
+			IsL0:           i == 0,
+			L0MetaExternal: l0MetaExternal,
 		})
 	}
 	for _, a := range w.assoc {
@@ -282,6 +288,10 @@ func (w *Writer) Close() error {
 			w.abortInternal()
 			return fmt.Errorf("encode IFD L%d: %w", i, err)
 		}
+		if got := uint64(len(ifd) + len(ext)); got > plan.Levels[i].Reserved {
+			w.abortInternal()
+			return fmt.Errorf("cogwsi: level %d IFD+external %d bytes exceeds reserved %d (layout sizing bug)", i, got, plan.Levels[i].Reserved)
+		}
 		blobs = append(blobs, ifdBlob{offset: plan.Levels[i].IFDOffset, ifd: ifd, ext: ext})
 	}
 	for i, a := range w.assoc {
@@ -294,6 +304,10 @@ func (w *Writer) Close() error {
 		if err != nil {
 			w.abortInternal()
 			return fmt.Errorf("encode IFD assoc%d: %w", i, err)
+		}
+		if got := uint64(len(ifd) + len(ext)); got > plan.Associated[i].Reserved {
+			w.abortInternal()
+			return fmt.Errorf("cogwsi: assoc %d IFD+external %d bytes exceeds reserved %d (layout sizing bug)", i, got, plan.Associated[i].Reserved)
 		}
 		blobs = append(blobs, ifdBlob{offset: plan.Associated[i].IFDOffset, ifd: ifd, ext: ext})
 	}
@@ -489,8 +503,40 @@ func populateLevelIFD(b *tiff.EntryBuilder, spec LevelSpec, tileOffsets []uint64
 		if opts.Metadata.Magnification > 0 {
 			b.AddDouble(tiff.TagWSIMagnification, []float64{opts.Metadata.Magnification})
 		}
+		if len(opts.Metadata.ICCProfile) > 0 {
+			b.AddUndefined(tiff.TagICCProfile, opts.Metadata.ICCProfile)
+		}
 	}
 	return nil
+}
+
+// l0MetadataExternalBytes is a safe upper bound on the external bytes the
+// L0 metadata tags consume. It sums each value's full byte length as if
+// external (inline values only make this an over-estimate, never under),
+// so the layout never under-reserves. Mirror populateLevelIFD's L0 block:
+// when you add/remove an L0 metadata tag, update this too. The Close-time
+// bounds-check is the backstop if they ever drift.
+func l0MetadataExternalBytes(opts Options) uint64 {
+	asciiLen := func(s string) uint64 {
+		if s == "" {
+			return 0
+		}
+		return uint64(len(s)) + 1 // NUL terminator
+	}
+	var n uint64
+	n += asciiLen(opts.Metadata.SourceImageDesc)
+	n += asciiLen(opts.Metadata.Make)
+	n += asciiLen(opts.Metadata.Model)
+	n += asciiLen(opts.Metadata.Software)
+	if !opts.Metadata.AcquisitionDateTime.IsZero() {
+		n += 20 // "YYYY:MM:DD HH:MM:SS\0"
+	}
+	n += asciiLen(opts.Metadata.SourceFormat)
+	n += asciiLen(opts.ToolsVersion)
+	n += 3 * 8 // WSIMPPX, WSIMPPY, WSIMagnification (DOUBLE, 8 bytes each)
+	n += 2 * 8 // XResolution, YResolution (RATIONAL, 8 bytes each)
+	n += uint64(len(opts.Metadata.ICCProfile))
+	return n
 }
 
 // populateAssocIFD fills a tiff.EntryBuilder for an associated image. Associated
