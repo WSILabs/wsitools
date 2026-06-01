@@ -90,3 +90,74 @@ func TestInfoReportsMPPForNDPI(t *testing.T) {
 		t.Errorf("info NDPI output missing 'MPP:' line:\n%s", out)
 	}
 }
+
+// iccLen returns the byte count of tag 34675 in `dump-ifds --raw` output,
+// or -1 if absent. Parses the "34675 (ICCProfile) UNDEFINED count=NNN" line.
+func iccLen(raw string) int {
+	for _, l := range strings.Split(raw, "\n") {
+		if strings.Contains(l, "34675") {
+			i := strings.Index(l, "count=")
+			if i < 0 {
+				return -1
+			}
+			n := 0
+			for _, c := range l[i+6:] {
+				if c < '0' || c > '9' {
+					break
+				}
+				n = n*10 + int(c-'0')
+			}
+			return n
+		}
+	}
+	return -1
+}
+
+// TestICCByteIdenticalAcrossPaths: JP2K-33003-1.svs's 141,992-byte ICC
+// profile is present, byte-length-identical, through the streamwriter
+// (svs re-encode), the cog-wsi writer (tile-copy), and downsample (which
+// pulls ICC via src.ICCProfile() directly). tiff/ome-tiff share the
+// streamwriter path with svs. (CMU-1.svs would also carry the same ICC
+// but its size triggers a pre-existing, ICC-unrelated streamwriter hang.)
+func TestICCByteIdenticalAcrossPaths(t *testing.T) {
+	bin := stripedBinary(t)
+	src := stripedSample(t, "svs/JP2K-33003-1.svs")
+	const wantLen = 141992
+	cases := []struct {
+		name string
+		args []string
+		out  string
+	}{
+		{"svs", []string{"convert", "--to", "svs", "--codec", "jpegxl"}, "o.svs"},
+		{"cog-wsi", []string{"convert", "--to", "cog-wsi"}, "o.cog.tiff"},
+		{"downsample", []string{"downsample", "--factor", "2"}, "o.ds.svs"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), c.out)
+			args := append(append([]string{}, c.args...), "-f", "-o", out, src)
+			if cmdOut, err := exec.Command(bin, args...).CombinedOutput(); err != nil {
+				if strings.Contains(string(cmdOut), "no space left on device") {
+					t.Skipf("disk full: %s", cmdOut)
+				}
+				t.Fatalf("%v: %v\n%s", c.args, err, cmdOut)
+			}
+			if got := iccLen(dumpRaw(t, bin, out)); got != wantLen {
+				t.Errorf("ICC length in %s = %d, want %d", c.name, got, wantLen)
+			}
+		})
+	}
+}
+
+// TestNoICCWhenSourceLacksIt: a source with no ICC emits no tag 34675.
+func TestNoICCWhenSourceLacksIt(t *testing.T) {
+	bin := stripedBinary(t)
+	src := stripedSample(t, "svs/scan_620_.svs") // no ICC
+	out := filepath.Join(t.TempDir(), "o.cog.tiff")
+	if cmdOut, err := exec.Command(bin, "convert", "--to", "cog-wsi", "-f", "-o", out, src).CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, cmdOut)
+	}
+	if got := iccLen(dumpRaw(t, bin, out)); got != -1 {
+		t.Errorf("expected no ICC tag, got length %d", got)
+	}
+}

@@ -204,11 +204,10 @@ func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 	if !big {
 		// BitsPerSample: 3 SHORTs = 6 bytes (> 4-byte classic inline cap).
 		external += 6
-		// WSIImageType ASCII: "pyramid\0" = 8 bytes (> 4-byte classic inline cap).
-		// IsL0 levels' 2048-byte budget below already covers this.
-		if !lv.IsL0 {
-			external += 8
-		}
+		// WSIImageType ASCII: "pyramid\0" = 8 bytes (> 4-byte classic inline
+		// cap). Counted for every pyramid level including L0 (the L0
+		// metadata sum below covers only the L0-specific tags).
+		external += 8
 	}
 	if lv.IsL0 {
 		// Exact upper-bound external size for the L0 metadata tags
