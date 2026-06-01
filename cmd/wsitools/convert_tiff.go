@@ -179,12 +179,39 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 			return fmt.Errorf("add level %d: %w", lvl.Index(), err)
 		}
 
+		// Drain the reorder buffer concurrently with the submit loop. The
+		// buffer is bounded (capacity ~1024); without a concurrent drainer,
+		// WriteTile blocks forever once a level has more tiles than the
+		// capacity (deferring the drain to Close deadlocks the submit loop).
+		// Mirrors the re-encode path's drain in transcodePyramid.
+		drainErr := make(chan error, 1)
+		go func() {
+			for {
+				idx, bytes, ok, err := lh.NextReady()
+				if err != nil {
+					drainErr <- err
+					return
+				}
+				if !ok {
+					drainErr <- nil
+					return
+				}
+				if err := lh.WriteTileAtIndex(idx, bytes); err != nil {
+					lh.Abort(err)
+					drainErr <- err
+					return
+				}
+			}
+		}()
+
 		buf := make([]byte, lvl.TileMaxSize())
 		grid := lvl.Grid()
 		for ty := 0; ty < grid.Y; ty++ {
 			for tx := 0; tx < grid.X; tx++ {
 				n, err := lvl.TileInto(tx, ty, buf)
 				if err != nil {
+					lh.Abort(err)
+					<-drainErr
 					w.Abort()
 					return fmt.Errorf("read tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
 				}
@@ -193,14 +220,20 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 				// reused tile-read buffer before handing off.
 				tile := append([]byte(nil), buf[:n]...)
 				if err := lh.WriteTile(uint32(tx), uint32(ty), tile); err != nil {
+					lh.Abort(err)
+					<-drainErr
 					w.Abort()
 					return fmt.Errorf("write tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
 				}
 			}
 		}
-		// Signal end of input for this level; the reorder buffer will
-		// drain synchronously during Close/buildLevelEntries.
+		// Signal end of input; wait for the concurrent drain to finish
+		// writing all tiles for this level.
 		lh.CloseInput()
+		if err := <-drainErr; err != nil {
+			w.Abort()
+			return fmt.Errorf("drain level %d: %w", lvl.Index(), err)
+		}
 	}
 
 	if !cvNoAssociated {
