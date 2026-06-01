@@ -29,6 +29,10 @@ type Options struct {
 	MPPY          float64
 	Magnification float64
 
+	// ICCProfile is the embedded color profile, emitted on L0 as tag
+	// 34675 (UNDEFINED) when non-empty.
+	ICCProfile []byte
+
 	// DefaultOrder is the tile emission strategy for levels that don't
 	// override via LevelSpec.Order. nil → RowMajor (which is the
 	// universal default for all writer variants).

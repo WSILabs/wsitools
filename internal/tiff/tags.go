@@ -27,6 +27,7 @@ const (
 	TagXResolution               uint16 = 282
 	TagYResolution               uint16 = 283
 	TagResolutionUnit            uint16 = 296
+	TagICCProfile                uint16 = 34675 // embedded ICC color profile (UNDEFINED)
 )
 
 // TIFF Compression tag values we support. The Compression tag (259)
