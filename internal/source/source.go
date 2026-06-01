@@ -113,6 +113,7 @@ type Metadata struct {
 	MPP                                 float64 // symmetric µm/px (0 if unknown OR asymmetric)
 	MPPX                                float64 // µm/px, X axis; 0 if unknown
 	MPPY                                float64 // µm/px, Y axis; 0 if unknown
+	ICCProfile                          []byte  // embedded color profile; nil if none
 	AcquisitionDateTime                 time.Time
 	Raw                                 map[string]string
 }

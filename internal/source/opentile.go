@@ -91,6 +91,7 @@ func (s *opentileSource) Metadata() Metadata {
 			m.Raw["filename"] = smd.Filename
 		}
 	}
+	m.ICCProfile = s.t.ICCProfile()
 	return m
 }
 
