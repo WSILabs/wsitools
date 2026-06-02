@@ -127,3 +127,18 @@ func TestTagConstantValues(t *testing.T) {
 		t.Errorf("TagYCbCrSubSampling = %d, want 530", TagYCbCrSubSampling)
 	}
 }
+
+func TestSubIFDAndSampleFormatConstants(t *testing.T) {
+	if TagSubIFDs != 330 {
+		t.Errorf("TagSubIFDs = %d, want 330", TagSubIFDs)
+	}
+	if TagSampleFormat != 339 {
+		t.Errorf("TagSampleFormat = %d, want 339", TagSampleFormat)
+	}
+	if got := TagName(TagSubIFDs); got != "SubIFDs" {
+		t.Errorf("TagName(330) = %q, want SubIFDs", got)
+	}
+	if got := TagName(TagSampleFormat); got != "SampleFormat" {
+		t.Errorf("TagName(339) = %q, want SampleFormat", got)
+	}
+}

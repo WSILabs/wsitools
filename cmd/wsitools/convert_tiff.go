@@ -112,6 +112,10 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 	if !md.AcquisitionDateTime.IsZero() {
 		opts.DateTime = md.AcquisitionDateTime
 	}
+	if container == "ome-tiff" {
+		opts.SubResolutionPyramid = true
+		opts.SampleFormat = 1
+	}
 
 	// ImageDescription handling: each container has its own L0
 	// detection signal — SVS needs "Aperio" prefix, OME needs "OME>"
@@ -142,6 +146,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 			srcImageDesc = SyntheticOMEDescription(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				md.MPP, md.MPP, "Image", srcSoft,
+				omeAssociatedSpecs(src),
 			)
 		}
 	default:
@@ -257,7 +262,8 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 	}
 
 	if !cvNoAssociated {
-		if err := writeAssociatedImages(src, w, container); err != nil {
+		omeSynthetic := container == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
+		if err := writeAssociatedImages(src, w, container, omeSynthetic); err != nil {
 			w.Abort()
 			return err
 		}
@@ -361,6 +367,10 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	if !md.AcquisitionDateTime.IsZero() {
 		opts.DateTime = md.AcquisitionDateTime
 	}
+	if resolvedContainer == "ome-tiff" {
+		opts.SubResolutionPyramid = true
+		opts.SampleFormat = 1
+	}
 
 	// ImageDescription handling (same logic as runConvertTIFFTileCopy).
 	var srcImageDesc string
@@ -386,6 +396,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			srcImageDesc = SyntheticOMEDescription(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				md.MPP, md.MPP, "Image", srcSoft,
+				omeAssociatedSpecs(src),
 			)
 		}
 	default:
@@ -413,7 +424,8 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	}
 
 	if !cvNoAssociated {
-		if err := writeAssociatedImages(src, w, resolvedContainer); err != nil {
+		omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
+		if err := writeAssociatedImages(src, w, resolvedContainer, omeSynthetic); err != nil {
 			w.Abort()
 			return err
 		}
@@ -660,8 +672,48 @@ func pickDecoder(c source.Compression) decoder.Factory {
 	return fac
 }
 
-func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string) error {
+// omeAssocName maps a wsitools associated-image kind to the OME-XML Image Name
+// the reader recognizes ("label"/"macro"/"thumbnail"), or "" if the kind has
+// no OME equivalent and must be omitted from OME output (otherwise the reader
+// would mis-classify it as a second pyramid).
+func omeAssocName(kind string) string {
+	switch kind {
+	case "label":
+		return "label"
+	case "macro", "overview":
+		return "macro"
+	case "thumbnail":
+		return "thumbnail"
+	}
+	return ""
+}
+
+// omeAssociatedSpecs returns the recognized associated images for OME output,
+// in src.Associated() order — the SAME order writeAssociatedImages writes them,
+// so OME-XML <Image> positions line up with top-level IFD positions.
+func omeAssociatedSpecs(src source.Source) []OMEAssoc {
+	var out []OMEAssoc
 	for _, a := range src.Associated() {
+		name := omeAssocName(a.Kind())
+		if name == "" {
+			slog.Debug("ome: dropping associated image with no OME mapping", "kind", a.Kind())
+			continue
+		}
+		out = append(out, OMEAssoc{Name: name, W: uint32(a.Size().X), H: uint32(a.Size().Y)})
+	}
+	return out
+}
+
+func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool) error {
+	for _, a := range src.Associated() {
+		// Synthetic OME path only: keep the written associated IFDs in sync
+		// with the <Image> entries omeAssociatedSpecs emitted (recognized
+		// kinds, same order). The native ome→ome path keeps the verbatim
+		// source OME-XML, which already describes its own associated images,
+		// so it is not filtered here.
+		if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Kind()) == "" {
+			continue
+		}
 		bs, err := a.Bytes()
 		if err != nil {
 			return fmt.Errorf("associated %s: %w", a.Kind(), err)

@@ -64,6 +64,11 @@ queued, deferred, or under consideration.
 ### v0.21 (in progress)
 - (no new utilities) Default soft memory cap: wsitools sets `GOMEMLIMIT` to 75% of physical RAM at startup so memory-heavy conversions degrade under GC pressure instead of OOM-ing the host. Global `--max-memory` flag + `GOMEMLIMIT` override (precedence `--max-memory` > env > default); `doctor` reports the active limit. New `internal/memlimit` package.
 - opentile-go upgraded v0.26.0 → v0.30.0 (NDPI decode-perf + a per-Slide read-memory budget, `OPENTILE_READ_MEMORY_BUDGET`, that byte-bounds the strip/tile decode caches). No wsitools API changes.
+- `convert --to ome-tiff` conformance: pyramid sub-resolutions now stored as
+  SubIFDs (330) of L0 (previously written as orphan top-level IFDs → readers
+  saw only L0); associated images enumerated in the OME-XML; SampleFormat
+  (339) + OME-XML preamble added. Grounded in the OME-TIFF spec
+  (`docs/references/ome-tiff-spec-notes.md`).
 
 ## Planned
 
