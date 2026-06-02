@@ -32,6 +32,8 @@ func TestLumaSampling(t *testing.T) {
 		{"4:4:4", sofJPEG(0x11), 1, 1, true},
 		{"not-jpeg", []byte{0x00, 0x01, 0x02, 0x03}, 0, 0, false},
 		{"no-sof", []byte{0xFF, 0xD8, 0xFF, 0xD9}, 0, 0, false},
+		{"sos-before-sof", []byte{0xFF, 0xD8, 0xFF, 0xDA}, 0, 0, false},
+		{"truncated-segment", []byte{0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x80}, 0, 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
