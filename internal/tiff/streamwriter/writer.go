@@ -143,6 +143,48 @@ func (w *Writer) appendBytes(p []byte) (uint64, error) {
 	return off, nil
 }
 
+// emitIFD builds, encodes, and writes one IFD at the current offset and
+// returns its start offset plus the file offset of its next-IFD pointer field
+// (for chain patching). When subIFDs is non-empty, a SubIFDs (330) tag listing
+// those child offsets is added before encoding (LONG8 on BigTIFF, LONG on
+// classic).
+func (w *Writer) emitIFD(entry *imageEntry, isL0 bool, subIFDs []uint64) (ifdStart uint64, nextPatchAt int64, err error) {
+	b, err := w.buildEntryBuilder(entry, isL0)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(subIFDs) > 0 {
+		if w.bigtiff {
+			b.AddLong8(tiff.TagSubIFDs, subIFDs)
+		} else {
+			v := make([]uint32, len(subIFDs))
+			for i, o := range subIFDs {
+				v[i] = uint32(o)
+			}
+			b.AddLong(tiff.TagSubIFDs, v)
+		}
+	}
+	ifdStart = uint64(w.off)
+	ifd, ext, err := b.Encode(ifdStart)
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err = w.appendBytes(ifd); err != nil {
+		return 0, 0, err
+	}
+	if len(ext) > 0 {
+		if _, err = w.appendBytes(ext); err != nil {
+			return 0, 0, err
+		}
+	}
+	nextPtrSize := int64(4)
+	if w.bigtiff {
+		nextPtrSize = 8
+	}
+	nextPatchAt = int64(ifdStart) + int64(len(ifd)) - nextPtrSize
+	return ifdStart, nextPatchAt, nil
+}
+
 // Close finalises the TIFF: emits all IFDs with correct chaining, patches
 // the first-IFD offset in the header, fsyncs, closes, and renames the
 // tmp file to the final path. Idempotent. On error the tmp file is removed.
@@ -178,53 +220,15 @@ func (w *Writer) Close() (err error) {
 		}
 	}
 
-	// Emit each IFD in order; record the offset of each IFD's next-IFD
-	// pointer field so we can patch the chain.
-	ifdStarts := make([]uint64, len(w.imgs))
-	nextIFDPatchAt := make([]int64, len(w.imgs))
-
-	for i, entry := range w.imgs {
-		b, err2 := w.buildEntryBuilder(entry, i == 0)
-		if err2 != nil {
-			return fmt.Errorf("streamwriter: build IFD %d: %w", i, err2)
-		}
-		ifdStart := uint64(w.off)
-		ifd, ext, err2 := b.Encode(ifdStart)
-		if err2 != nil {
-			return fmt.Errorf("streamwriter: encode IFD %d: %w", i, err2)
-		}
-		// Write the directory bytes then external bytes (Encode assigns
-		// external offsets at ifdStart + len(ifd)).
-		if _, err2 = w.appendBytes(ifd); err2 != nil {
-			return fmt.Errorf("streamwriter: write IFD %d: %w", i, err2)
-		}
-		if len(ext) > 0 {
-			if _, err2 = w.appendBytes(ext); err2 != nil {
-				return fmt.Errorf("streamwriter: write IFD %d external: %w", i, err2)
-			}
-		}
-		ifdStarts[i] = ifdStart
-		// next-IFD pointer is at the end of the directory record bytes.
-		// IFDRecordSize = entryCount + N*entrySize + nextIFD; next-IFD
-		// field is the last 4 (classic) or 8 (BigTIFF) bytes of `ifd`.
-		nextPtrSize := int64(4)
-		if w.bigtiff {
-			nextPtrSize = 8
-		}
-		nextIFDPatchAt[i] = int64(ifdStart) + int64(len(ifd)) - nextPtrSize
-	}
-
-	// Chain: patch each IFD's next-IFD field to point at the following IFD.
-	for i := 0; i < len(w.imgs)-1; i++ {
-		if err = w.patchOffset(nextIFDPatchAt[i], ifdStarts[i+1]); err != nil {
-			return fmt.Errorf("streamwriter: patch next-IFD for %d: %w", i, err)
-		}
-	}
-
-	// Patch the header's first-IFD pointer.
 	var firstIFD uint64
-	if len(ifdStarts) > 0 {
-		firstIFD = ifdStarts[0]
+	var perr error
+	if w.subResPyramid && pyramidCount > 0 {
+		firstIFD, perr = w.closeSubIFDLayout()
+	} else {
+		firstIFD, perr = w.closeFlatLayout()
+	}
+	if perr != nil {
+		return perr
 	}
 	firstAt := int64(4)
 	if w.bigtiff {
@@ -246,6 +250,82 @@ func (w *Writer) Close() (err error) {
 		return fmt.Errorf("streamwriter: rename: %w", err)
 	}
 	return nil
+}
+
+// closeFlatLayout emits every image as a top-level IFD in w.imgs order and
+// chains them linearly. Returns the first IFD offset. This is the layout for
+// every format except OME (SubResolutionPyramid off).
+func (w *Writer) closeFlatLayout() (uint64, error) {
+	ifdStarts := make([]uint64, len(w.imgs))
+	nextPatchAt := make([]int64, len(w.imgs))
+	for i, entry := range w.imgs {
+		start, patchAt, err := w.emitIFD(entry, i == 0, nil)
+		if err != nil {
+			return 0, fmt.Errorf("streamwriter: emit IFD %d: %w", i, err)
+		}
+		ifdStarts[i] = start
+		nextPatchAt[i] = patchAt
+	}
+	for i := 0; i < len(w.imgs)-1; i++ {
+		if err := w.patchOffset(nextPatchAt[i], ifdStarts[i+1]); err != nil {
+			return 0, fmt.Errorf("streamwriter: patch next-IFD for %d: %w", i, err)
+		}
+	}
+	if len(ifdStarts) == 0 {
+		return 0, nil
+	}
+	return ifdStarts[0], nil
+}
+
+// closeSubIFDLayout emits sub-resolution pyramid levels as SubIFDs of L0
+// (OME-TIFF convention): children first (capturing offsets), then L0 with a
+// SubIFDs (330) tag, then associated images. The top-level next-IFD chain is
+// L0 → associated…; sub-resolution IFDs are reachable only via 330 and keep
+// nextIFD = 0. Returns L0's offset (the first IFD).
+func (w *Writer) closeSubIFDLayout() (uint64, error) {
+	var l0 *imageEntry
+	var subRes, assoc []*imageEntry
+	for _, e := range w.imgs {
+		switch {
+		case e.pyramidLevelIndex == 0:
+			l0 = e
+		case e.pyramidLevelIndex > 0:
+			subRes = append(subRes, e) // w.imgs order = L1..Ln = largest→smallest
+		default:
+			assoc = append(assoc, e)
+		}
+	}
+	if l0 == nil {
+		return w.closeFlatLayout()
+	}
+	subOffsets := make([]uint64, 0, len(subRes))
+	for _, e := range subRes {
+		start, _, err := w.emitIFD(e, false, nil) // not chained; nextIFD stays 0
+		if err != nil {
+			return 0, fmt.Errorf("streamwriter: emit sub-resolution IFD: %w", err)
+		}
+		subOffsets = append(subOffsets, start)
+	}
+	l0Start, l0Patch, err := w.emitIFD(l0, true, subOffsets)
+	if err != nil {
+		return 0, fmt.Errorf("streamwriter: emit L0 IFD: %w", err)
+	}
+	topStarts := []uint64{l0Start}
+	topPatch := []int64{l0Patch}
+	for _, e := range assoc {
+		start, patch, err := w.emitIFD(e, false, nil)
+		if err != nil {
+			return 0, fmt.Errorf("streamwriter: emit associated IFD: %w", err)
+		}
+		topStarts = append(topStarts, start)
+		topPatch = append(topPatch, patch)
+	}
+	for i := 0; i < len(topStarts)-1; i++ {
+		if err := w.patchOffset(topPatch[i], topStarts[i+1]); err != nil {
+			return 0, fmt.Errorf("streamwriter: patch top-level next-IFD %d: %w", i, err)
+		}
+	}
+	return l0Start, nil
 }
 
 // Abort closes the file handle (if open) and removes the tmp file.
