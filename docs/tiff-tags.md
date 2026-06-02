@@ -65,6 +65,50 @@ The constants live in `internal/tiff/tags.go`. The reserved namespace is
 `internal/tiff/tagnames.go` dictionary so `dump-ifds --raw` shows them by
 name.
 
+## SVS writer tag profile
+
+`convert --to svs` aims to produce genuine-Aperio-shaped SVS. The sample
+fixtures split by producer, and the two producers emit different L0 tag
+sets:
+
+| Tag | Genuine Aperio | Grundium (Aperio-compatible) |
+|---|---|---|
+| ImageDepth (32997) | yes (= 1) | yes |
+| YCbCrSubSampling (530) | yes, for JPEG data | yes |
+| ICCProfile (34675) | sometimes | no |
+| Orientation (274) | no | yes |
+| XResolution/YResolution/ResolutionUnit (282/283/296) | **no** (MPP lives only in the Aperio `ImageDescription`) | yes |
+| PageNumber (297) | no | yes |
+| ReferenceBlackWhite (532) | no | yes |
+
+The wsitools SVS writer emits, on L0:
+
+- **ImageDepth (32997) = 1** — always. wsitools produces 2D output only.
+- **YCbCrSubSampling (530)** — only when the output is JPEG-compressed. The
+  value describes the **actual** chroma subsampling of the JPEG bytes
+  wsitools writes, not a copied or assumed constant: on the lossless
+  tile-copy path it is parsed from a real source tile's SOF marker; on the
+  re-encode path it is probed from the encoder's own output. This means the
+  emitted value can differ from the source file's declared 530 tag. For
+  example, genuine Aperio `CMU-1-Small-Region.svs` declares `530 = [2,2]`
+  but its tiles are actually RGB/4:4:4, so a lossless `--to svs` tile-copy
+  emits `[1,1]`; re-encoding the same slide with wsitools' YCbCr 4:2:0 JPEG
+  encoder (`--codec jpeg`) emits `[2,2]`. Because the writer sets
+  `PhotometricInterpretation = RGB (2)` for new-style JPEG-in-TIFF, tag 530
+  is **informational** — conformant decoders read color from the JPEG
+  codestream and ignore 530 — so describing the real bytes has no effect on
+  decode or color, only on fidelity to what was written.
+- **ICCProfile (34675)** — when the source carries one (pulled via
+  opentile's `Slide.ICCProfile()`).
+- Plus the wsitools-generated scale tags (XResolution/YResolution/
+  ResolutionUnit from MPP, and the WSI private MPP/magnification tags).
+
+**Non-goals (deliberately not emitted for Aperio conformance):** the
+Grundium-only tags Orientation (274), PageNumber (297), and
+ReferenceBlackWhite (532). Note wsitools *does* generate resolution tags
+(282/283/296) from MPP — a readability aid that genuine Aperio omits; that
+deviation is intentional and tracked separately.
+
 ## Reading tags from a slide
 
 `wsitools dump-ifds --raw <file>` emits every TIFF tag per IFD with names,
