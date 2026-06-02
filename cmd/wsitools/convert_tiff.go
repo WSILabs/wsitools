@@ -11,10 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spf13/cobra"
 	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/opentile-go/decoder"
-	"github.com/spf13/cobra"
 
+	qualityjpeg "github.com/wsilabs/wsitools/cmd/wsitools/quality/jpeg"
 	codec "github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/pipeline"
 	"github.com/wsilabs/wsitools/internal/source"
@@ -145,6 +146,19 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		}
 	default:
 		opts.ImageDescription = buildProvenanceDesc(src, "tile-copy", md)
+	}
+
+	// SVS Aperio-conformance L0 tags. ImageDepth is always 1 (2D output).
+	// YCbCrSubSampling is emitted only for JPEG output. For tile-copy we
+	// preserve the source file's TIFF tag 530 verbatim (the authoritative
+	// value for "what we are writing"), falling back to LumaSampling on the
+	// first tile if the source has no tag 530. A parse/read miss simply
+	// omits the tag rather than risking a wrong value.
+	if container == "svs" {
+		opts.ImageDepth = 1
+		if compressionTagFor(l0.Compression()) == tiff.CompressionJPEG {
+			opts.YCbCrSubSampling = sourceYCbCrSubSampling(input, l0)
+		}
 	}
 
 	w, err := streamwriter.Create(cvOutput, opts)
@@ -700,4 +714,37 @@ func buildProvenanceDesc(src source.Source, codecName string, md source.Metadata
 		fmt.Fprintf(&b, " date=%s", md.AcquisitionDateTime.Format("2006-01-02"))
 	}
 	return b.String()
+}
+
+// sourceYCbCrSubSampling returns the YCbCrSubSampling [H, V] pair for
+// SVS tile-copy output. It first reads tag 530 from the source file's
+// IFD 0 (preserving what the source scanner wrote verbatim), falling back
+// to parsing the first tile's JPEG SOF marker via LumaSampling. Returns
+// nil if neither source is parseable; the caller omits the tag on nil.
+func sourceYCbCrSubSampling(inputPath string, l0 source.Level) []uint16 {
+	const tagYCbCrSubSampling = 530
+	const typeShort = 3
+
+	// Try to read tag 530 directly from source IFD 0.
+	if ifds, err := source.WalkIFDsRaw(inputPath); err == nil && len(ifds) > 0 {
+		ifd0 := ifds[0]
+		bo := ifd0.ByteOrder
+		for _, e := range ifd0.Entries {
+			if e.Tag == tagYCbCrSubSampling && e.Type == typeShort &&
+				e.Count == 2 && len(e.Raw) >= 4 && bo != nil {
+				h := bo.Uint16(e.Raw[0:2])
+				v := bo.Uint16(e.Raw[2:4])
+				return []uint16{h, v}
+			}
+		}
+	}
+
+	// Fallback: parse the first tile's JPEG SOF marker.
+	buf := make([]byte, l0.TileMaxSize())
+	if n, err := l0.TileInto(0, 0, buf); err == nil {
+		if h, v, ok := qualityjpeg.LumaSampling(buf[:n]); ok {
+			return []uint16{h, v}
+		}
+	}
+	return nil
 }
