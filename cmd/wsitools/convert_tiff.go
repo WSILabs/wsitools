@@ -392,6 +392,16 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 		opts.ImageDescription = buildProvenanceDesc(src, codecName, md)
 	}
 
+	// SVS Aperio-conformance L0 tags. ImageDepth is always 1 (2D output).
+	// YCbCrSubSampling is probed from the encoder's actual output, so it
+	// matches the JPEG bytes we write (and is omitted for non-JPEG codecs).
+	if resolvedContainer == "svs" {
+		opts.ImageDepth = 1
+		if sub, ok := encoderChromaSubsampling(fac, knobs); ok {
+			opts.YCbCrSubSampling = sub
+		}
+	}
+
 	w, err := streamwriter.Create(cvOutput, opts)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
@@ -605,6 +615,30 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 		return pipeErr
 	}
 	return <-drainErr
+}
+
+// encoderChromaSubsampling probes the codec by encoding a tiny throwaway
+// tile and parsing the chroma subsampling actually present in the bytes it
+// produces. Returns ok=false for codecs whose output is not a JPEG (no SOF
+// marker) — so YCbCrSubSampling (530) is emitted only for JPEG output, with
+// a value that matches what we write rather than an assumed constant.
+func encoderChromaSubsampling(fac codec.EncoderFactory, knobs map[string]string) ([]uint16, bool) {
+	const probe = 16
+	enc, err := fac.NewEncoder(codec.LevelGeometry{
+		TileWidth: probe, TileHeight: probe, PixelFormat: codec.PixelFormatRGB8,
+	}, codec.Quality{Knobs: knobs})
+	if err != nil {
+		return nil, false
+	}
+	defer enc.Close()
+	out, err := enc.EncodeTile(make([]byte, probe*probe*3), probe, probe, nil)
+	if err != nil {
+		return nil, false
+	}
+	if h, v, ok := qualityjpeg.LumaSampling(out); ok {
+		return []uint16{h, v}, true
+	}
+	return nil, false
 }
 
 func pickDecoder(c source.Compression) decoder.Factory {

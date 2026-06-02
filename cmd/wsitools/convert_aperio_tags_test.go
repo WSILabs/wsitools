@@ -49,6 +49,27 @@ func TestConvertSVSAperioTagsJPEG(t *testing.T) {
 	}
 }
 
+// TestConvertSVSAperioTagsReencodeJPEG: re-encoding to JPEG (--codec jpeg)
+// emits ImageDepth=1 and YCbCrSubSampling=[2,2] — our encoder is YCbCr
+// 4:2:0, so [2,2] is what the written tiles actually are (unlike tile-copy
+// of this fixture, whose source tiles are RGB/4:4:4 -> [1,1]).
+func TestConvertSVSAperioTagsReencodeJPEG(t *testing.T) {
+	bin := stripedBinary(t)
+	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
+	out := filepath.Join(t.TempDir(), "out.svs")
+
+	if o, err := exec.Command(bin, "convert", "--to", "svs", "--codec", "jpeg", "-f", "-o", out, src).CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, o)
+	}
+	ifd0 := dumpIFD0Raw(t, bin, out)
+	if !strings.Contains(ifd0, "ImageDepth") {
+		t.Errorf("L0 missing ImageDepth:\n%s", ifd0)
+	}
+	if !strings.Contains(ifd0, "YCbCrSubSampling") || !strings.Contains(ifd0, "[2, 2]") {
+		t.Errorf("L0 missing YCbCrSubSampling [2, 2]:\n%s", ifd0)
+	}
+}
+
 // TestConvertNonSVSContainerOmitsAperioTags: the Aperio L0 tags are
 // SVS-only. Converting the same JPEG source to a plain tiff container must
 // emit neither ImageDepth nor YCbCrSubSampling. Uses CMU-1-Small-Region.svs
