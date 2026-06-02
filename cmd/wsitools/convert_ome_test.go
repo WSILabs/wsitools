@@ -26,6 +26,8 @@ func TestConvertOMEPyramidRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("info out: %v\n%s", err, outInfo)
 	}
+	// Counts pyramid level lines in `info` output ("  L0  …", "  L1  …").
+	// Associated-image lines use a different prefix, so they don't match.
 	srcLevels := strings.Count(string(srcInfo), "\n  L")
 	outLevels := strings.Count(string(outInfo), "\n  L")
 	if outLevels != srcLevels {

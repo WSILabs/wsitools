@@ -66,9 +66,9 @@ func writeOMEImage(b *strings.Builder, ifd int, name string, w, h uint32, mppX, 
 		fmt.Fprintf(b, ` PhysicalSizeY="%g" PhysicalSizeYUnit="µm"`, mppY)
 	}
 	b.WriteString(`>` + "\n")
-	b.WriteString(`      <Channel ID="Channel:` + fmt.Sprint(ifd) + `:0" Name="Red" SamplesPerPixel="1"/>` + "\n")
-	b.WriteString(`      <Channel ID="Channel:` + fmt.Sprint(ifd) + `:1" Name="Green" SamplesPerPixel="1"/>` + "\n")
-	b.WriteString(`      <Channel ID="Channel:` + fmt.Sprint(ifd) + `:2" Name="Blue" SamplesPerPixel="1"/>` + "\n")
+	fmt.Fprintf(b, `      <Channel ID="Channel:%d:0" Name="Red" SamplesPerPixel="1"/>`+"\n", ifd)
+	fmt.Fprintf(b, `      <Channel ID="Channel:%d:1" Name="Green" SamplesPerPixel="1"/>`+"\n", ifd)
+	fmt.Fprintf(b, `      <Channel ID="Channel:%d:2" Name="Blue" SamplesPerPixel="1"/>`+"\n", ifd)
 	fmt.Fprintf(b, `      <TiffData FirstC="0" FirstZ="0" FirstT="0" IFD="%d" PlaneCount="1"/>`+"\n", ifd)
 	b.WriteString(`    </Pixels>` + "\n")
 	b.WriteString(`  </Image>` + "\n")

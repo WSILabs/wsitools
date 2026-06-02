@@ -706,6 +706,11 @@ func omeAssociatedSpecs(src source.Source) []OMEAssoc {
 
 func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool) error {
 	for _, a := range src.Associated() {
+		// Synthetic OME path only: keep the written associated IFDs in sync
+		// with the <Image> entries omeAssociatedSpecs emitted (recognized
+		// kinds, same order). The native ome→ome path keeps the verbatim
+		// source OME-XML, which already describes its own associated images,
+		// so it is not filtered here.
 		if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Kind()) == "" {
 			continue
 		}
