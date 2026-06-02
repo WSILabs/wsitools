@@ -39,7 +39,7 @@ func TestImageDepthAndSubsamplingEmitted(t *testing.T) {
 		return strings.ToLower(string(out))
 	}
 	with := write(1, []uint16{2, 2})
-	if !strings.Contains(with, "image depth") {
+	if !strings.Contains(with, "image depth") && !strings.Contains(with, "32997") {
 		t.Errorf("ImageDepth not reported by tiffinfo:\n%s", with)
 	}
 	if !strings.Contains(with, "ycbcr subsampling") {
@@ -48,5 +48,8 @@ func TestImageDepthAndSubsamplingEmitted(t *testing.T) {
 	none := write(0, nil)
 	if strings.Contains(none, "ycbcr subsampling") {
 		t.Errorf("unexpected YCbCrSubSampling with zero values:\n%s", none)
+	}
+	if strings.Contains(none, "image depth") {
+		t.Errorf("unexpected ImageDepth with zero value:\n%s", none)
 	}
 }

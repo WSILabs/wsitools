@@ -33,8 +33,8 @@ type Options struct {
 	// 34675 (UNDEFINED) when non-empty.
 	ICCProfile []byte
 
-	// ImageDepth, when > 0, is emitted on L0 as tag 32997 (LONG). Genuine
-	// Aperio writes 1. wsitools only produces 2D output.
+	// ImageDepth, when > 0, is emitted on L0 as tag 32997 (LONG). Aperio
+	// SVS files carry this tag with value 1.
 	ImageDepth uint32
 
 	// YCbCrSubSampling, when len == 2, is emitted on L0 as tag 530
