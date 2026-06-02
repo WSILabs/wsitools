@@ -109,6 +109,27 @@ ReferenceBlackWhite (532). Note wsitools *does* generate resolution tags
 (282/283/296) from MPP — a readability aid that genuine Aperio omits; that
 deviation is intentional and tracked separately.
 
+## OME-TIFF writer
+
+`convert --to ome-tiff` follows the OME-TIFF sub-resolution convention
+(grounding: `docs/references/ome-tiff-spec-notes.md`):
+
+- **Pyramid sub-resolutions as SubIFDs (330).** The full-resolution level is
+  the only pyramid IFD in the top-level chain; levels L1..Ln are stored as
+  SubIFDs of L0, ordered largest→smallest, each with `NewSubfileType` (254)
+  bit 0 = 1. This is what makes a multi-level OME-TIFF read back as a pyramid
+  (a flat top-level pyramid would be seen as a single level).
+- **Positional Image↔IFD invariant.** Readers map the k-th OME-XML `<Image>`
+  to the k-th top-level IFD. wsitools emits `<Image>` in top-level IFD order:
+  the main pyramid (IFD 0), then associated images.
+- **Associated images** are enumerated as `<Image Name="label|macro|
+  thumbnail">` with `<TiffData IFD="k">` at their top-level position. Only
+  those three reserved names are recognized; any other Name would be read as a
+  second pyramid, so wsitools maps `overview`→`macro` and drops kinds with no
+  OME equivalent.
+- **SampleFormat (339) = 1** on every IFD, and the OME-XML carries the spec's
+  preamble comment.
+
 ## Reading tags from a slide
 
 `wsitools dump-ifds --raw <file>` emits every TIFF tag per IFD with names,
