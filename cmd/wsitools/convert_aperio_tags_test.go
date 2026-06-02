@@ -27,7 +27,8 @@ func dumpIFD0Raw(t *testing.T, bin, file string) string {
 }
 
 // TestConvertSVSAperioTagsJPEG: tile-copying a genuine-Aperio JPEG SVS
-// emits ImageDepth=1 and YCbCrSubSampling=[2,2] on L0.
+// emits ImageDepth=1 and YCbCrSubSampling=[1,1] matching the tiles'
+// actual 4:4:4 encoding (parsed from the real tile via LumaSampling).
 func TestConvertSVSAperioTagsJPEG(t *testing.T) {
 	bin := stripedBinary(t)
 	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
@@ -40,8 +41,8 @@ func TestConvertSVSAperioTagsJPEG(t *testing.T) {
 	if !strings.Contains(ifd0, "ImageDepth") {
 		t.Errorf("L0 missing ImageDepth:\n%s", ifd0)
 	}
-	if !strings.Contains(ifd0, "YCbCrSubSampling") || !strings.Contains(ifd0, "[2, 2]") {
-		t.Errorf("L0 missing YCbCrSubSampling [2, 2]:\n%s", ifd0)
+	if !strings.Contains(ifd0, "YCbCrSubSampling") || !strings.Contains(ifd0, "[1, 1]") {
+		t.Errorf("L0 missing YCbCrSubSampling [1, 1] (actual tile subsampling):\n%s", ifd0)
 	}
 }
 
