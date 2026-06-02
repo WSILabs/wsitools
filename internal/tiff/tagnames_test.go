@@ -109,3 +109,21 @@ func TestTypeSize(t *testing.T) {
 		}
 	}
 }
+
+func TestTagNameImageDepth(t *testing.T) {
+	if got := TagName(TagImageDepth); got != "ImageDepth" {
+		t.Fatalf("TagName(TagImageDepth) = %q, want %q", got, "ImageDepth")
+	}
+	if got := TagName(TagYCbCrSubSampling); got != "YCbCrSubSampling" {
+		t.Fatalf("TagName(TagYCbCrSubSampling) = %q, want %q", got, "YCbCrSubSampling")
+	}
+}
+
+func TestTagConstantValues(t *testing.T) {
+	if TagImageDepth != 32997 {
+		t.Errorf("TagImageDepth = %d, want 32997", TagImageDepth)
+	}
+	if TagYCbCrSubSampling != 530 {
+		t.Errorf("TagYCbCrSubSampling = %d, want 530", TagYCbCrSubSampling)
+	}
+}

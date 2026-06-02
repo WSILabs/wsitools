@@ -54,6 +54,8 @@ type Writer struct {
 	mppY             float64
 	magnification    float64
 	iccProfile       []byte
+	imageDepth       uint32
+	ycbcrSubSampling []uint16
 
 	// computed during Close.
 	pyramidLevelCount int
@@ -91,6 +93,8 @@ func Create(path string, opts Options) (*Writer, error) {
 		mppY:             opts.MPPY,
 		magnification:    opts.Magnification,
 		iccProfile:       opts.ICCProfile,
+		imageDepth:       opts.ImageDepth,
+		ycbcrSubSampling: opts.YCbCrSubSampling,
 	}
 	// Write a placeholder header (firstIFD = 0). It gets patched in Close.
 	if err := tiff.WriteHeader(f, bigtiff, 0); err != nil {
@@ -316,6 +320,12 @@ func (w *Writer) addL0Metadata(b *tiff.EntryBuilder) {
 	}
 	if len(w.iccProfile) > 0 {
 		b.AddUndefined(tiff.TagICCProfile, w.iccProfile)
+	}
+	if w.imageDepth > 0 {
+		b.AddLong(tiff.TagImageDepth, []uint32{w.imageDepth})
+	}
+	if len(w.ycbcrSubSampling) == 2 {
+		b.AddShort(tiff.TagYCbCrSubSampling, w.ycbcrSubSampling)
 	}
 }
 

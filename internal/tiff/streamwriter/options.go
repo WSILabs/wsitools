@@ -33,6 +33,15 @@ type Options struct {
 	// 34675 (UNDEFINED) when non-empty.
 	ICCProfile []byte
 
+	// ImageDepth, when > 0, is emitted on L0 as tag 32997 (LONG). Aperio
+	// SVS files carry this tag with value 1.
+	ImageDepth uint32
+
+	// YCbCrSubSampling, when len == 2, is emitted on L0 as tag 530
+	// (SHORT[2]). Only meaningful for JPEG-compressed output; the caller
+	// supplies the value that matches the JPEG bytes actually written.
+	YCbCrSubSampling []uint16
+
 	// DefaultOrder is the tile emission strategy for levels that don't
 	// override via LevelSpec.Order. nil → RowMajor (which is the
 	// universal default for all writer variants).

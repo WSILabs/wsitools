@@ -12,7 +12,7 @@ const (
 	TagImageDescription          uint16 = 270
 	TagMake                      uint16 = 271
 	TagModel                     uint16 = 272
-	TagStripOffsets               uint16 = 273
+	TagStripOffsets              uint16 = 273
 	TagSamplesPerPixel           uint16 = 277
 	TagRowsPerStrip              uint16 = 278
 	TagStripByteCounts           uint16 = 279
@@ -27,7 +27,9 @@ const (
 	TagXResolution               uint16 = 282
 	TagYResolution               uint16 = 283
 	TagResolutionUnit            uint16 = 296
+	TagYCbCrSubSampling          uint16 = 530
 	TagICCProfile                uint16 = 34675 // embedded ICC color profile (UNDEFINED)
+	TagImageDepth                uint16 = 32997 // z-depth; Aperio writes 1 (LONG)
 )
 
 // TIFF Compression tag values we support. The Compression tag (259)
@@ -42,10 +44,10 @@ const (
 	// These are in the private/experimental TIFF tag range; they are not
 	// registered with Adobe but match the values opentile-go's
 	// generictiff classifier recognizes.
-	CompressionWebP  uint16 = 50001 // Adobe-allocated
+	CompressionWebP   uint16 = 50001 // Adobe-allocated
 	CompressionJPEGXL uint16 = 50002 // Adobe-allocated (draft)
-	CompressionAVIF  uint16 = 60001 // wsitools private/experimental range
-	CompressionHTJ2K uint16 = 60003 // wsitools private/experimental range
+	CompressionAVIF   uint16 = 60001 // wsitools private/experimental range
+	CompressionHTJ2K  uint16 = 60003 // wsitools private/experimental range
 )
 
 // ResolutionUnitCentimeter is the ResolutionUnit (296) value for
