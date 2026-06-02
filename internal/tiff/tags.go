@@ -17,12 +17,14 @@ const (
 	TagRowsPerStrip              uint16 = 278
 	TagStripByteCounts           uint16 = 279
 	TagPlanarConfiguration       uint16 = 284
+	TagSubIFDs                   uint16 = 330
 	TagSoftware                  uint16 = 305
 	TagDateTime                  uint16 = 306
 	TagTileWidth                 uint16 = 322
 	TagTileLength                uint16 = 323
 	TagTileOffsets               uint16 = 324
 	TagTileByteCounts            uint16 = 325
+	TagSampleFormat              uint16 = 339
 	TagJPEGTables                uint16 = 347
 	TagXResolution               uint16 = 282
 	TagYResolution               uint16 = 283
