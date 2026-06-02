@@ -196,6 +196,9 @@ func (w *Writer) buildLevelEntries(entry *imageEntry, isL0 bool) (*tiff.EntryBui
 	b.AddShort(tiff.TagCompression, []uint16{s.Compression})
 	b.AddShort(tiff.TagPhotometricInterpretation, []uint16{s.Photometric})
 	b.AddShort(tiff.TagSamplesPerPixel, []uint16{s.SamplesPerPixel})
+	if w.sampleFormat != 0 {
+		b.AddShort(tiff.TagSampleFormat, []uint16{w.sampleFormat})
+	}
 	b.AddLong(tiff.TagTileWidth, []uint32{s.TileWidth})
 	b.AddLong(tiff.TagTileLength, []uint32{s.TileHeight})
 	if err := b.AddTileOffsets(tiff.TagTileOffsets, entry.tileOffsets); err != nil {

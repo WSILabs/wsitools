@@ -68,6 +68,9 @@ func (w *Writer) buildStrippedEntries(entry *imageEntry, isL0 bool) (*tiff.Entry
 	b.AddShort(tiff.TagCompression, []uint16{s.Compression})
 	b.AddShort(tiff.TagPhotometricInterpretation, []uint16{s.Photometric})
 	b.AddShort(tiff.TagSamplesPerPixel, []uint16{s.SamplesPerPixel})
+	if w.sampleFormat != 0 {
+		b.AddShort(tiff.TagSampleFormat, []uint16{w.sampleFormat})
+	}
 	b.AddLong(tiff.TagRowsPerStrip, []uint32{s.RowsPerStrip})
 	if err := b.AddTileOffsets(tiff.TagStripOffsets, []uint64{entry.stripOffset}); err != nil {
 		return nil, err

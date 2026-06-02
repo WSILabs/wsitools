@@ -42,6 +42,16 @@ type Options struct {
 	// supplies the value that matches the JPEG bytes actually written.
 	YCbCrSubSampling []uint16
 
+	// SampleFormat, when non-zero, is emitted as tag 339 (SHORT, count 1)
+	// on every IFD. OME-TIFF sets it to 1 (unsigned integer).
+	SampleFormat uint16
+
+	// SubResolutionPyramid, when true, lays out pyramid levels ≥1 as
+	// SubIFDs (330) of L0 instead of a flat top-level IFD chain (the
+	// OME-TIFF sub-resolution convention). Default false leaves the flat
+	// layout used by svs/tiff/cog-wsi untouched.
+	SubResolutionPyramid bool
+
 	// DefaultOrder is the tile emission strategy for levels that don't
 	// override via LevelSpec.Order. nil → RowMajor (which is the
 	// universal default for all writer variants).

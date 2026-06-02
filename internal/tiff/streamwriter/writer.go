@@ -56,6 +56,8 @@ type Writer struct {
 	iccProfile       []byte
 	imageDepth       uint32
 	ycbcrSubSampling []uint16
+	sampleFormat     uint16
+	subResPyramid    bool
 
 	// computed during Close.
 	pyramidLevelCount int
@@ -95,6 +97,8 @@ func Create(path string, opts Options) (*Writer, error) {
 		iccProfile:       opts.ICCProfile,
 		imageDepth:       opts.ImageDepth,
 		ycbcrSubSampling: opts.YCbCrSubSampling,
+		sampleFormat:     opts.SampleFormat,
+		subResPyramid:    opts.SubResolutionPyramid,
 	}
 	// Write a placeholder header (firstIFD = 0). It gets patched in Close.
 	if err := tiff.WriteHeader(f, bigtiff, 0); err != nil {
