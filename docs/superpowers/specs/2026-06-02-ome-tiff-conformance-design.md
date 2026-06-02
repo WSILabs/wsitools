@@ -27,6 +27,19 @@ OME-TIFF 6.0 sub-resolution convention — and enumerates associated images as
 additional `<Image>` elements. It also carries `SampleFormat` (339) and an
 OME-XML preamble comment.
 
+## Grounding
+
+This design is validated against the **official OME-TIFF specification** and
+the **OME 2016-06 XML schema** (distilled in
+`docs/references/ome-tiff-spec-notes.md`, retrieved 2026-06-02) in addition to
+the opentile reference reader and a genuine Bio-Formats fixture. The
+spec-normative sub-resolution rules (SubIFDs tag 330; offsets ordered largest
+to smallest; sub-res excluded from both the primary IFD chain and any
+TiffData; `NewSubfileType` bit 0 = 1 on each downsampled level; largest planes
+tiled) directly back R1/R2 below. Note the spec does **not** define
+associated-image representation — that is a reader/Bio-Formats convention (see
+R3).
+
 ## How the opentile OME reader works (the rules we must satisfy)
 
 Read from `opentile-go/formats/ometiff/{ome.go,series.go}` (canonical):
@@ -61,7 +74,12 @@ ome-tiff → `info` reports the same level count as the source).
 
 The 330 value type is **LONG8 on BigTIFF output, LONG on classic TIFF**,
 count = number of sub-resolution levels, values = file offsets of the
-sub-resolution IFDs in level order (L1, L2, …, Ln).
+sub-resolution IFDs **ordered by plane size from largest to smallest** (L1,
+L2, …, Ln — which is largest-to-smallest for a standard descending pyramid),
+per the OME-TIFF spec. Each sub-resolution IFD sets `NewSubfileType` (254)
+bit 0 = 1 (reduced-resolution); L0 keeps bit 0 = 0. wsitools'
+`newSubfileTypeForLevel` already produces this for non-SVS containers, so the
+ome-tiff path inherits it.
 
 ### R2 — Top-level IFD order
 
@@ -198,8 +216,10 @@ placeholder-then-patch round and any new EntryBuilder offset-exposure API.
 
 Extend `docs/tiff-tags.md` with an "OME-TIFF writer" note: pyramid
 sub-resolutions via SubIFDs (330), the positional Image↔IFD invariant, the
-recognized associated-image names, and `SampleFormat`/preamble. Update
-`docs/roadmap.md` shipped section when this lands.
+recognized associated-image names, and `SampleFormat`/preamble. The normative
+grounding lives in `docs/references/ome-tiff-spec-notes.md` (added 2026-06-02);
+link to it from the writer note. Update `docs/roadmap.md` shipped section when
+this lands.
 
 ## Out of scope / follow-ups
 
