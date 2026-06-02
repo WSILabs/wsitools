@@ -224,6 +224,8 @@ var tagNames = map[uint16]string{
 	33446: "MDScalePixel",
 	33447: "MDColorTable",
 
+	32997: "ImageDepth",
+
 	50001: "WebPCompression",
 	50002: "JPEGXLCompression",
 
