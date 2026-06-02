@@ -631,6 +631,8 @@ func encoderChromaSubsampling(fac codec.EncoderFactory, knobs map[string]string)
 		return nil, false
 	}
 	defer enc.Close()
+	// Pixel content is irrelevant; chroma subsampling is fixed at encoder
+	// construction, so an all-zero probe tile reveals the real value.
 	out, err := enc.EncodeTile(make([]byte, probe*probe*3), probe, probe, nil)
 	if err != nil {
 		return nil, false
