@@ -157,6 +157,8 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		opts.ImageDepth = 1
 		if compressionTagFor(l0.Compression()) == tiff.CompressionJPEG {
 			buf := make([]byte, l0.TileMaxSize())
+			// Independent of the write loop below; samples tile (0,0)'s
+			// chroma subsampling to describe the JPEG bytes we copy.
 			if n, err := l0.TileInto(0, 0, buf); err == nil {
 				if h, v, ok := qualityjpeg.LumaSampling(buf[:n]); ok {
 					opts.YCbCrSubSampling = []uint16{h, v}

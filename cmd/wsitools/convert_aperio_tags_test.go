@@ -41,19 +41,21 @@ func TestConvertSVSAperioTagsJPEG(t *testing.T) {
 	if !strings.Contains(ifd0, "ImageDepth") {
 		t.Errorf("L0 missing ImageDepth:\n%s", ifd0)
 	}
+	// CMU-1-Small-Region.svs tiles are RGB/4:4:4 JPEG, so the actual
+	// subsampling is [1,1] (the source's declared 530=[2,2] tag is ignored
+	// — we describe the bytes we write).
 	if !strings.Contains(ifd0, "YCbCrSubSampling") || !strings.Contains(ifd0, "[1, 1]") {
 		t.Errorf("L0 missing YCbCrSubSampling [1, 1] (actual tile subsampling):\n%s", ifd0)
 	}
 }
 
-// TestConvertSVSAperioTagsNonJPEG: tile-copying a JPEG2000 Aperio SVS to
-// --to tiff (tile-copy eligible, container != "svs") emits neither
-// ImageDepth nor YCbCrSubSampling — the Aperio-conformance block is
-// SVS-container-gated. This validates that the gate is tight; non-SVS
-// output is not contaminated with Aperio-private tags.
-func TestConvertSVSAperioTagsNonJPEG(t *testing.T) {
+// TestConvertNonSVSContainerOmitsAperioTags: the Aperio L0 tags are
+// SVS-only. Converting the same JPEG source to a plain tiff container must
+// emit neither ImageDepth nor YCbCrSubSampling. Uses CMU-1-Small-Region.svs
+// (in the CI fixture set) so the gate is exercised in CI, not just locally.
+func TestConvertNonSVSContainerOmitsAperioTags(t *testing.T) {
 	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/JP2K-33003-1.svs")
+	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
 	out := filepath.Join(t.TempDir(), "out.tiff")
 
 	if o, err := exec.Command(bin, "convert", "--to", "tiff", "-f", "-o", out, src).CombinedOutput(); err != nil {
@@ -61,9 +63,9 @@ func TestConvertSVSAperioTagsNonJPEG(t *testing.T) {
 	}
 	ifd0 := dumpIFD0Raw(t, bin, out)
 	if strings.Contains(ifd0, "ImageDepth") {
-		t.Errorf("L0 unexpectedly has ImageDepth for non-SVS output:\n%s", ifd0)
+		t.Errorf("non-SVS (tiff) output unexpectedly has ImageDepth:\n%s", ifd0)
 	}
 	if strings.Contains(ifd0, "YCbCrSubSampling") {
-		t.Errorf("L0 unexpectedly has YCbCrSubSampling for non-SVS output:\n%s", ifd0)
+		t.Errorf("non-SVS (tiff) output unexpectedly has YCbCrSubSampling:\n%s", ifd0)
 	}
 }
