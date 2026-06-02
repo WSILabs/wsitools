@@ -50,6 +50,9 @@ type Options struct {
 	// SubIFDs (330) of L0 instead of a flat top-level IFD chain (the
 	// OME-TIFF sub-resolution convention). Default false leaves the flat
 	// layout used by svs/tiff/cog-wsi untouched.
+	// Callers must add pyramid levels largest-first (L0, then L1..Ln in
+	// descending size); the sub-resolution SubIFD offsets are emitted in
+	// that order, which the OME-TIFF spec requires (largest to smallest).
 	SubResolutionPyramid bool
 
 	// DefaultOrder is the tile emission strategy for levels that don't

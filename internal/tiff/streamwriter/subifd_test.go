@@ -94,8 +94,11 @@ func TestSubIFDPyramidLayout(t *testing.T) {
 	if len(subIFDs) != 2 {
 		t.Fatalf("L0 SubIFDs count = %d, want 2", len(subIFDs))
 	}
-	s1, _, _ := readClassicIFD(t, b, subIFDs[0])
-	s2, _, _ := readClassicIFD(t, b, subIFDs[1])
+	s1, _, s1next := readClassicIFD(t, b, subIFDs[0])
+	s2, _, s2next := readClassicIFD(t, b, subIFDs[1])
+	if s1next != 0 || s2next != 0 {
+		t.Errorf("sub-resolution nextIFD = %d,%d, want 0,0 (not chained)", s1next, s2next)
+	}
 	if s1[256] != 8 || s2[256] != 4 {
 		t.Errorf("SubIFD widths = %d,%d, want 8,4 (largest→smallest)", s1[256], s2[256])
 	}

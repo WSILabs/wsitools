@@ -157,6 +157,8 @@ func (w *Writer) emitIFD(entry *imageEntry, isL0 bool, subIFDs []uint64) (ifdSta
 		if w.bigtiff {
 			b.AddLong8(tiff.TagSubIFDs, subIFDs)
 		} else {
+			// Classic TIFF: Encode already rejects IFD offsets >4 GiB, so
+			// every sub-resolution offset fits in a uint32.
 			v := make([]uint32, len(subIFDs))
 			for i, o := range subIFDs {
 				v[i] = uint32(o)
