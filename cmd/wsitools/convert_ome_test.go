@@ -62,3 +62,31 @@ func TestConvertOMEStructure(t *testing.T) {
 		t.Errorf("associated images not surfaced by reader:\n%s", info)
 	}
 }
+
+// TestConvertOMESingleLevel: a single-level source converted to ome-tiff is
+// still valid — L0 carries SampleFormat but NO SubIFDs tag (no sub-resolutions
+// to reference), and the reader sees exactly one pyramid level.
+func TestConvertOMESingleLevel(t *testing.T) {
+	bin := stripedBinary(t)
+	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
+	out := filepath.Join(t.TempDir(), "out.ome.tiff")
+
+	if o, err := exec.Command(bin, "convert", "--to", "ome-tiff", "-f", "-o", out, src).CombinedOutput(); err != nil {
+		t.Fatalf("convert: %v\n%s", err, o)
+	}
+	ifd0 := dumpIFD0Raw(t, bin, out)
+	if !strings.Contains(ifd0, "SampleFormat") {
+		t.Errorf("L0 missing SampleFormat:\n%s", ifd0)
+	}
+	if strings.Contains(ifd0, "SubIFDs") {
+		t.Errorf("single-level output unexpectedly has a SubIFDs tag:\n%s", ifd0)
+	}
+	// Reader sees exactly one pyramid level.
+	info, err := exec.Command(bin, "info", out).CombinedOutput()
+	if err != nil {
+		t.Fatalf("info: %v\n%s", err, info)
+	}
+	if got := strings.Count(string(info), "\n  L"); got != 1 {
+		t.Errorf("ome-tiff level count = %d, want 1:\n%s", got, info)
+	}
+}
