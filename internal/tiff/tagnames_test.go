@@ -111,15 +111,15 @@ func TestTypeSize(t *testing.T) {
 }
 
 func TestTagNameImageDepth(t *testing.T) {
-	if got := TagName(32997); got != "ImageDepth" {
-		t.Fatalf("TagName(32997) = %q, want %q", got, "ImageDepth")
+	if got := TagName(TagImageDepth); got != "ImageDepth" {
+		t.Fatalf("TagName(TagImageDepth) = %q, want %q", got, "ImageDepth")
 	}
-	if got := TagName(530); got != "YCbCrSubSampling" {
-		t.Fatalf("TagName(530) = %q, want %q", got, "YCbCrSubSampling")
+	if got := TagName(TagYCbCrSubSampling); got != "YCbCrSubSampling" {
+		t.Fatalf("TagName(TagYCbCrSubSampling) = %q, want %q", got, "YCbCrSubSampling")
 	}
 }
 
-func TestAperioTagConstants(t *testing.T) {
+func TestTagConstantValues(t *testing.T) {
 	if TagImageDepth != 32997 {
 		t.Errorf("TagImageDepth = %d, want 32997", TagImageDepth)
 	}
