@@ -58,6 +58,9 @@ func runHash(cmd *cobra.Command, args []string) error {
 
 	switch hashMode {
 	case "file":
+		if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+			return fmt.Errorf("file-mode hash is undefined for a directory (e.g. a DICOM series); use --mode pixel for a content hash, or pass a single file")
+		}
 		h, err := hashFile(path)
 		if err != nil {
 			return err
