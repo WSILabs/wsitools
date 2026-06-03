@@ -83,7 +83,17 @@ queued, deferred, or under consideration.
 
 ### Larger items
 - **`tile-server`** — HTTP DZI/IIIF tile server; analog of openslide-python `deepzoom_server.py`. Activates opentile-go v0.13's splice-prefix optimization (TilePrefix / TileBodyInto / SpliceJPEGTile).
-- **`dicom-wsi`** — convert WSI to DICOM-WSI format. Analog of `wsi2dcm` (highdicom) and `wsidicomizer`.
+- **`convert --to dicom`** (DICOM-WSI writer) — emit a DICOM VL Whole Slide
+  Microscopy Image set (Sup. 145). Analog of `wsi2dcm` / `wsidicomizer`.
+  **Approach decided (2026-06-03):** pure-Go on `suyashkumar/dicom`, **porting**
+  wsi2dcm's WSM-IOD-assembly logic (both Apache-2.0 → direct C++→Go port, no
+  clean-room; attribute Google's NOTICE) rather than wrapping it — wrapping would
+  drag in OpenSlide (LGPL-2.1, which opentile-go exists to replace) + OpenCV /
+  Boost / DCMTK. Port the *logic* into wsitools idioms (pure-Go focused packages;
+  reuse `internal/source`, `internal/pipeline`, the tile-copy fast path), NOT a
+  foreign code shape. Largest single target; phased (P0 TILED_FULL brightfield
+  spike → P1 full pyramid + tile-copy → P2 sparse/label/concatenation → P3
+  fluorescence). Rough scoping: `docs/notes/2026-06-03-dicom-writer-scoping.md`.
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
 
 ## Codecs (write-side, separate from utilities)
@@ -114,8 +124,8 @@ queued, deferred, or under consideration.
 
 ### Deferred from v0.20 (audit complete 2026-05-29; outcomes below)
 - ✅ **DZI cascade kernel** — audited. wsitools `convert --to dzi|szi` uses 2×2 box averaging; libvips dzsave does too (`--region-shrink=mean` default). Decoded pixels were bit-identical across three sample levels of CMU-1-Small-Region.svs. No change. Findings: `docs/notes/2026-05-29-dzi-kernel-audit.md`.
-- ⏳ **`downsample` CLI kernel flag** — audited; ship the flag. `--kernel {box, lanczos3, nearest}` with default `box`. Lanczos3 produces visibly sharper tissue output (+7% edge energy) but opentile-go's current Lanczos3 implementation is 213× slower than Box (naive per-pixel sin/cos, no separable 2-pass), making it unviable as default. Bilinear dropped from the value set — strictly worse than box at 4× downsample. Plan: `docs/superpowers/plans/2026-05-29-downsample-kernel-audit.md` (Step B7 skeleton).
-- ⏳ **Separable Lanczos3 in opentile-go** — follow-up for the inbound opentile-go updates. Current naive Lanczos3 takes ~10 min on a 100K×60K WSI; a separable 2-pass formulation with precomputed weights should bring it to ~5–10× box, making lanczos3 viable as default in workflows that prioritise quality over throughput.
+- ✅ **Separable Lanczos3 in opentile-go** — DONE. opentile-go v0.32.2 ships a separable, weight-cached two-pass Lanczos (WSILabs/opentile-go#9), now ~7–8× box (was 213×). wsitools bumped to v0.32.2.
+- 🚫 **`downsample` CLI spatial `--kernel` flag** — SHELVED (2026-06-03). Reading the code showed the premise was wrong: `downsample` already uses the right tool per stage (JPEG→libjpeg fast-scale, JP2K→box, cascade→box = libvips dzsave parity). A spatial Lanczos kernel in a *tiled* reducer would be slower AND introduce tile-boundary seams. The real win is **codec-domain scaled decode** via `DecodeOptions.Scale` (faster + anti-aliased + seam-free), tracked in opentile-go umbrella #11 (JP2K #10, HTJ2K #12, WebP/JXL queued) + a future codec-agnostic `downsample` refactor. See `docs/notes/2026-05-29-dzi-kernel-audit.md`.
 
 ## Quality gates
 
