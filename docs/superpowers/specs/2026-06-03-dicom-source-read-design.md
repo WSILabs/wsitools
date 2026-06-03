@@ -117,6 +117,21 @@ Single-series directories are unaffected (the common case opens normally). The
 escape hatch — pointing at a specific `.dcm` — already works, so no new flag is
 required; a `--series <UID>` selector is deferred (out of scope).
 
+**The ambiguity check keys off the input *type*, not the folder contents:**
+
+| Input | Folder has | Behavior |
+|---|---|---|
+| directory | 1 series | opens it |
+| directory | >1 series | **ambiguity error** |
+| single `.dcm` | 1 series | opens that series |
+| single `.dcm` | >1 series | opens **that instance's** series; others ignored — **no error** |
+
+A named `.dcm` is never ambiguous regardless of what else shares its folder
+(opentile-go anchors to the instance's `SeriesUID` and assembles only its
+same-series siblings). The ambiguity error fires **only** for *directory* inputs
+that resolve to >1 series — the implementation must not error on a named
+instance merely because its folder is mixed.
+
 ### Required opentile-go enhancement (file as part of this work)
 
 To produce that error without re-parsing DICOM in wsitools (which would violate
