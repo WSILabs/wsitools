@@ -104,3 +104,18 @@ func TestDumpIFDsRawTruncation(t *testing.T) {
 		t.Errorf("expected no truncation marker under --raw-full")
 	}
 }
+
+func TestDumpIFDsRejectsDICOM(t *testing.T) {
+	bin := stripedBinary(t)
+	dir := filepath.Join(testDir(t), "dicom", "Leica-4")
+	if _, err := os.Stat(dir); err != nil {
+		t.Skipf("no DICOM fixture at %s", dir)
+	}
+	out, err := runBin(bin, "dump-ifds", dir)
+	if err == nil {
+		t.Fatalf("expected error, got success:\n%s", out)
+	}
+	if !strings.Contains(string(out), "TIFF-dialect") {
+		t.Errorf("error should explain DICOM is not a TIFF-dialect source, got:\n%s", out)
+	}
+}
