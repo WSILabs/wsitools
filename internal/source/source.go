@@ -6,8 +6,12 @@ package source
 
 import (
 	"errors"
+	"fmt"
 	"image"
+	"strings"
 	"time"
+
+	dicom "github.com/wsilabs/opentile-go/formats/dicom"
 )
 
 // Source is what the transcode CLI consumes. Wraps an opentile-go Tiler.
@@ -116,6 +120,25 @@ type Metadata struct {
 	ICCProfile                          []byte  // embedded color profile; nil if none
 	AcquisitionDateTime                 time.Time
 	Raw                                 map[string]string
+}
+
+// AmbiguousSeriesError is returned by Open when a directory input resolves to
+// more than one distinct DICOM WSM series. A single .dcm instance is never
+// ambiguous (it anchors to its own SeriesUID).
+type AmbiguousSeriesError struct {
+	Path   string
+	Series []dicom.SeriesInfo
+}
+
+func (e *AmbiguousSeriesError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s contains %d distinct WSM series:\n", e.Path, len(e.Series))
+	for _, s := range e.Series {
+		fmt.Fprintf(&b, "  • %s  (%s %s, %d levels, %gx)\n",
+			s.SeriesUID, s.Manufacturer, s.Model, s.LevelCount, s.Magnification)
+	}
+	b.WriteString("Specify one by passing the path to a .dcm instance of the series you want.")
+	return b.String()
 }
 
 var (
