@@ -57,6 +57,17 @@ szi, svs, tiff, ome-tiff}`, `downsample`), and diagnostics (`doctor`,
   ln -s "$HOME/GitHub/opentile-go/sample_files" sample_files
   ```
 
+- **Verifying an opentile-go version bump:** running wsitools' suite only
+  confirms *non-regression* of existing paths — it does NOT exercise new
+  opentile-go behavior wsitools doesn't yet call. To verify the *update-specific*
+  changes, run opentile-go's own suite in its repo, and set its fixture gate or
+  the integration tests silently skip:
+  `OPENTILE_TESTDIR=$(pwd)/sample_files go test ./decoder/... ./formats/...`
+  (run `-v` and confirm the relevant tests PASS, not SKIP).
+- Heavy `-race` suites (esp. `cmd/wsitools`) can exceed Go's default 600s test
+  timeout under concurrent load → a false-FAIL that looks like a crash. Run heavy
+  suites uncontended and/or with `-timeout 30m`.
+
 ## No guessing
 
 When unsure about TIFF byte layout, Aperio ImageDescription, or any WSI
