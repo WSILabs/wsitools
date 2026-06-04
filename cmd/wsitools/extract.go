@@ -168,7 +168,13 @@ func decodeAssociated(path string, b []byte, comp source.Compression, w, h int) 
 		}
 		return img, nil
 	case source.CompressionDeflate, source.CompressionNone:
-		// Attempt to decode as a TIFF file (bytes include a TIFF wrapper).
+		// DICOM uncompressed associated images return raw interleaved 8-bit RGB
+		// (w*h*3 bytes). SVS-family "none"/"deflate" associated images return a
+		// TIFF-wrapped blob. Discriminate by exact length: a w*h*3 match is raw
+		// RGB; otherwise fall back to the TIFF-wrapper path.
+		if len(b) == w*h*3 {
+			return rgbToImage(b, w, h), nil
+		}
 		return xtiff.Decode(bytes.NewReader(b))
 	}
 	return nil, fmt.Errorf("source compression %s is not decodable for extract", comp)

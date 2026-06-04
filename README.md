@@ -53,9 +53,18 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   through associated images verbatim. SVS-only.
 
 Source formats accepted: SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE,
-generic-TIFF, NDPI, OME-OneFrame, Leica SCN (single-image), and COG-WSI.
-Striped sources produce reproducible but synthesized JPEG tiles in the
-output (bit-exact tile-copy applies only to natively-tiled sources).
+generic-TIFF, NDPI, OME-OneFrame, Leica SCN (single-image), COG-WSI, and
+DICOM-WSI. Striped sources produce reproducible but synthesized JPEG tiles
+in the output (bit-exact tile-copy applies only to natively-tiled sources).
+
+**DICOM-WSI input.** A DICOM source may be either a single `.dcm` instance
+or a directory containing a WSM series — pass the path to either. A named
+`.dcm` always opens the series it belongs to (its siblings sharing the same
+`SeriesUID`), even when the directory holds other slides. If a directory holds more
+than one distinct WSM series, pass a specific `.dcm` of the slide you want
+(a multi-series directory otherwise resolves to a single dominant series). (`dump-ifds` is TIFF-only and does not apply to
+DICOM; use `hash --mode pixel` rather than the default file-mode for a DICOM
+content hash.)
 
 **Diagnostics**
 

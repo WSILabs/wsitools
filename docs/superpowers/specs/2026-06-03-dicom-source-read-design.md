@@ -137,7 +137,8 @@ instance merely because its folder is mixed.
 To produce that error without re-parsing DICOM in wsitools (which would violate
 "opentile-go is canonical"), opentile-go must surface the set of WSM series under
 a path. **A GitHub issue on `WSILabs/opentile-go` is an explicit deliverable of
-this spec** (same pattern as #7/#9/#10/#11/#12). Requested capability:
+this spec** (same pattern as #7/#9/#10/#11/#12) — filed as
+**WSILabs/opentile-go#13**. Requested capability:
 
 > Enumerate WSM series under a directory/instance path without fully opening a
 > slide — e.g. `dicom.ListWSMSeries(path) ([]SeriesInfo, error)` returning per

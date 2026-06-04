@@ -77,6 +77,15 @@ func runDumpIFDs(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	path := args[0]
 
+	// dump-ifds reads raw TIFF IFDs; non-TIFF-dialect sources (DICOM, IFE) have none.
+	if s, err := source.Open(path); err == nil {
+		f := s.Format()
+		s.Close()
+		if f == "dicom" || f == "ife" {
+			return fmt.Errorf("dump-ifds requires a TIFF-dialect source; %s is %s (no TIFF IFDs to dump)", path, f)
+		}
+	}
+
 	if dumpIFDsRaw {
 		return runDumpIFDsRaw(cmd, path)
 	}

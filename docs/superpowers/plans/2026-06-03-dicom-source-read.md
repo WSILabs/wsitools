@@ -341,7 +341,7 @@ Sibling of #10/#11/#12. Consumer: wsitools DICOM read support (`docs/superpowers
 
 ### Task B7 (BLOCKED on Task B4's API): multi-series ambiguity error
 
-> **Do not implement until the opentile-go enumeration API from Task B4 ships and wsitools is bumped to that version.** Until then, a directory with >1 series opens the dominant series as today (documented in Task B6). When the API lands, write the concrete TDD steps then, following this approach:
+> **Do not implement until the opentile-go enumeration API from Task B4 (filed as WSILabs/opentile-go#13) ships and wsitools is bumped to that version.** Until then, a directory with >1 series opens the dominant series as today (documented in Task B6). When the API lands, write the concrete TDD steps then, following this approach:
 
 **Approach:**
 - Add a preflight in `internal/source/Open` (so every command inherits it): when `path` is a **directory**, call the new opentile-go enumeration; if it reports >1 WSM series, return a typed error (`ErrAmbiguousDICOMSeries`) listing each series' `SeriesUID` + level count + make/model/mag and instructing the user to pass a specific `.dcm`. Single-instance inputs skip the check (never ambiguous).
