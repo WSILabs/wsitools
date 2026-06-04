@@ -27,7 +27,19 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   v0.31 exposes raw TIFF tags cross-format (`Slide.LevelTIFFTags` /
   `AssociatedTIFFTags` / `TIFFDirectoriesOf`, typed `TIFFTag`,
   pixel-pointer-filtered) — the foundation for upcoming metadata
-  carry-through. Clean drop-in; no wsitools API changes.
+  carry-through. Clean drop-in; no wsitools API changes. Later upgraded
+  through v0.33.0 (chroma-subsampling JP2K decode fix; separable Lanczos;
+  codec-domain scaled decode for JPEG2000/HTJ2K; `dicom.ListWSMSeries`).
+- `downsample` primary reduction is now codec-agnostic: it uses codec-domain
+  scaled decode (`DecodeOptions.Scale`) where the source codec supports it and
+  falls back to full-decode + box otherwise.
+  - **JP2K sources now decode via wavelet resolution-reduction** (opentile-go
+    v0.33.0) instead of full-decode + box — faster and sharper, but **output
+    pixels are no longer byte-identical** to prior releases for JP2K sources.
+  - **Fixes** `downsample --factor 16` on JPEG sources (previously errored with
+    `scale=16 (want 1,2,4,8)`).
+  - **Adds** `downsample` support for AVIF / WebP / HTJ2K sources (previously
+    `unsupported compression`).
 
 ## [0.20.0] — 2026-05-29
 
