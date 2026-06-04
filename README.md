@@ -60,9 +60,10 @@ in the output (bit-exact tile-copy applies only to natively-tiled sources).
 **DICOM-WSI input.** A DICOM source may be either a single `.dcm` instance
 or a directory containing a WSM series — pass the path to either. A named
 `.dcm` always opens the series it belongs to (its siblings sharing the same
-`SeriesUID`), even when the directory holds other slides. If a directory holds more
-than one distinct WSM series, pass a specific `.dcm` of the slide you want
-(a multi-series directory otherwise resolves to a single dominant series). (`dump-ifds` is TIFF-only and does not apply to
+`SeriesUID`), even when the directory holds other slides. If a directory holds
+more than one distinct WSM series, wsitools **refuses with an error** that lists
+the candidate series; pass a specific `.dcm` of the slide you want to resolve
+the ambiguity. (`dump-ifds` is TIFF-only and does not apply to
 DICOM; use `hash --mode pixel` rather than the default file-mode for a DICOM
 content hash.)
 

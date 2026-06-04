@@ -3,9 +3,11 @@ package source
 import (
 	"fmt"
 	"image"
+	"os"
 
 	opentile "github.com/wsilabs/opentile-go"
 	_ "github.com/wsilabs/opentile-go/formats/all"
+	dicom "github.com/wsilabs/opentile-go/formats/dicom"
 	svsfmt "github.com/wsilabs/opentile-go/formats/svs"
 )
 
@@ -14,6 +16,14 @@ import (
 // zero tile geometry on level 0 (genuinely unhandled future cases) are
 // rejected with ErrUnsupportedFormat.
 func Open(path string) (Source, error) {
+	// Safe-by-default: a directory holding >1 distinct WSM series is ambiguous;
+	// refuse rather than silently opening the dominant one. A single .dcm is
+	// never ambiguous (it anchors to its own SeriesUID), so only check dirs.
+	if fi, statErr := os.Stat(path); statErr == nil && fi.IsDir() {
+		if infos, lerr := dicom.ListWSMSeries(path); lerr == nil && len(infos) > 1 {
+			return nil, &AmbiguousSeriesError{Path: path, Series: infos}
+		}
+	}
 	t, err := opentile.OpenFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("source: open %s: %w", path, err)
