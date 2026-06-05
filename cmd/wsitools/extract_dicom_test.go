@@ -14,7 +14,7 @@ func TestExtractDICOMUncompressedLabel(t *testing.T) {
 		t.Skipf("no DICOM fixture at %s", dir)
 	}
 	out := filepath.Join(t.TempDir(), "label.png")
-	if cmdOut, err := runBin(bin, "extract", "--kind", "label", "-o", out, dir); err != nil {
+	if cmdOut, err := runBin(bin, "extract", "--type", "label", "-o", out, dir); err != nil {
 		t.Fatalf("extract label: %v\n%s", err, cmdOut)
 	}
 	fi, err := os.Stat(out)

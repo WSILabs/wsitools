@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	extractKind   string
+	extractType   string
 	extractOutput string
 	extractFormat string
 )
@@ -30,9 +30,9 @@ var extractCmd = &cobra.Command{
 	Short: "Save an associated image (label/macro/thumbnail/overview) as PNG or JPEG",
 	Long: `Save an associated image embedded in a WSI as a standalone PNG or JPEG file.
 
-Available associated-image kinds depend on the source format and the slide:
+Available associated-image types depend on the source format and the slide:
 typically label, macro, thumbnail, overview. Run 'wsitools info <file>'
-to list which kinds the slide carries.
+to list which types the slide carries.
 
 For --format jpeg, when the source associated image is already JPEG-compressed,
 the original bytes are passed through verbatim (no decode/re-encode loss).
@@ -42,10 +42,10 @@ For --format png, the image is decoded to RGB and re-encoded as PNG.`,
 }
 
 func init() {
-	extractCmd.Flags().StringVar(&extractKind, "kind", "", "associated-image kind (label|macro|thumbnail|overview)")
+	extractCmd.Flags().StringVar(&extractType, "type", "", "associated-image type (label|macro|thumbnail|overview)")
 	extractCmd.Flags().StringVarP(&extractOutput, "output", "o", "", "output file path")
 	extractCmd.Flags().StringVar(&extractFormat, "format", "png", "output format: png|jpeg")
-	_ = extractCmd.MarkFlagRequired("kind")
+	_ = extractCmd.MarkFlagRequired("type")
 	_ = extractCmd.MarkFlagRequired("output")
 	rootCmd.AddCommand(extractCmd)
 }
@@ -67,19 +67,19 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	var match source.AssociatedImage
 	var available []string
 	for _, a := range src.Associated() {
-		available = append(available, a.Kind())
-		if a.Kind() == extractKind {
+		available = append(available, a.Type())
+		if a.Type() == extractType {
 			match = a
 		}
 	}
 	if match == nil {
-		return fmt.Errorf("no associated image with kind %q (available: %s)",
-			extractKind, strings.Join(available, ", "))
+		return fmt.Errorf("no associated image with type %q (available: %s)",
+			extractType, strings.Join(available, ", "))
 	}
 
 	bytesIn, err := match.Bytes()
 	if err != nil {
-		return fmt.Errorf("read associated %s: %w", extractKind, err)
+		return fmt.Errorf("read associated %s: %w", extractType, err)
 	}
 	srcComp := match.Compression()
 

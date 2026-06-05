@@ -46,7 +46,7 @@ func init() {
 
 type dumpIFDEntry struct {
 	Index           int     `json:"index"`
-	Kind            string  `json:"kind"`        // "pyramid", "label", "macro", "thumbnail", "overview", "probability", "map", "(unclassified)"
+	ImageType       string  `json:"image_type"`  // "pyramid", "label", "macro", "thumbnail", "overview", "probability", "map", "(unclassified)"
 	LevelIndex      *int    `json:"level_index,omitempty"`
 	Width           uint64  `json:"width"`
 	Height          uint64  `json:"height"`
@@ -119,7 +119,7 @@ func runDumpIFDs(cmd *cobra.Command, args []string) error {
 			SubfileType:     ifd.NewSubfileType,
 			IsSubIFD:        ifd.IsSubIFD,
 		}
-		entry.Kind, entry.LevelIndex = classifier(ifd)
+		entry.ImageType, entry.LevelIndex = classifier(ifd)
 		if ifd.HasWSITags() {
 			entry.WSITags = &wsiTag{
 				WSIImageType:    ifd.WSIImageType,
@@ -149,7 +149,7 @@ func runDumpIFDsRaw(cmd *cobra.Command, path string) error {
 }
 
 // buildIFDClassifier returns a function that, given an IFDRecord, returns
-// (kind, levelIndex). It crossrefs against source.Source's Levels() and
+// (imageType, levelIndex). It crossrefs against source.Source's Levels() and
 // Associated() by matching (width, height, compression-string) tuples.
 func buildIFDClassifier(src source.Source) func(source.IFDRecord) (string, *int) {
 	type key struct {
@@ -157,8 +157,8 @@ func buildIFDClassifier(src source.Source) func(source.IFDRecord) (string, *int)
 		comp string
 	}
 	type val struct {
-		kind  string
-		level *int
+		imageType string
+		level     *int
 	}
 	m := map[key]val{}
 	for _, lvl := range src.Levels() {
@@ -168,7 +168,7 @@ func buildIFDClassifier(src source.Source) func(source.IFDRecord) (string, *int)
 			comp: lvl.Compression().String(),
 		}
 		idx := lvl.Index()
-		m[k] = val{kind: "pyramid", level: &idx}
+		m[k] = val{imageType: "pyramid", level: &idx}
 	}
 	for _, a := range src.Associated() {
 		k := key{
@@ -179,14 +179,14 @@ func buildIFDClassifier(src source.Source) func(source.IFDRecord) (string, *int)
 		// Don't overwrite a level mapping if dimensions+comp collide
 		// (extremely rare, but be safe).
 		if _, ok := m[k]; !ok {
-			m[k] = val{kind: a.Kind()}
+			m[k] = val{imageType: a.Type()}
 		}
 	}
 	return func(ifd source.IFDRecord) (string, *int) {
 		comp := tiffCompressionName(ifd.Compression)
 		k := key{w: ifd.Width, h: ifd.Height, comp: comp}
 		if v, ok := m[k]; ok {
-			return v.kind, v.level
+			return v.imageType, v.level
 		}
 		return "(unclassified)", nil
 	}
@@ -221,7 +221,7 @@ func tiffCompressionName(tag uint64) string {
 
 func renderDumpIFDsText(w io.Writer, r *dumpIFDsResult) error {
 	for _, ifd := range r.IFDs {
-		label := ifd.Kind
+		label := ifd.ImageType
 		if ifd.LevelIndex != nil {
 			label = fmt.Sprintf("pyramid L%d", *ifd.LevelIndex)
 		}

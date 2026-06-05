@@ -28,7 +28,7 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 - `wsitools hash` — content hash. `--mode file` (default,
   `sha256sum`-equivalent) or `--mode pixel` (L0 RGB tiles in raster order,
   stable across re-encode).
-- `wsitools extract --kind <k> -o <path>` — save an associated image
+- `wsitools extract --type <t> -o <path>` — save an associated image
   (label / macro / thumbnail / overview) as PNG (default) or JPEG. JPEG
   output is byte-pass-through when the source is already JPEG.
 
@@ -163,7 +163,7 @@ wsitools dump-ifds --raw --json slide.svs | jq .
 wsitools region --x 10000 --y 8000 --w 1024 --h 1024 --level 0 -o tile.png slide.svs
 
 # Save the slide's label as a standalone PNG
-wsitools extract --kind label -o label.png slide.svs
+wsitools extract --type label -o label.png slide.svs
 
 # Content hash for cache identity / dedup (default: SHA-256 of file bytes)
 wsitools hash slide.svs

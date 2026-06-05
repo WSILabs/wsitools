@@ -61,7 +61,9 @@ type Level interface {
 // AssociatedImage is one of label / macro / thumbnail / overview /
 // probability / map / associated.
 type AssociatedImage interface {
-	Kind() string
+	// Type returns the associated-image type (label/macro/thumbnail/...),
+	// mirroring opentile-go's AssociatedImage.Type().
+	Type() string
 	Size() image.Point
 	Compression() Compression
 	Bytes() ([]byte, error) // self-contained encoded blob

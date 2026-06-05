@@ -672,12 +672,12 @@ func pickDecoder(c source.Compression) decoder.Factory {
 	return fac
 }
 
-// omeAssocName maps a wsitools associated-image kind to the OME-XML Image Name
-// the reader recognizes ("label"/"macro"/"thumbnail"), or "" if the kind has
+// omeAssocName maps a wsitools associated-image type to the OME-XML Image Name
+// the reader recognizes ("label"/"macro"/"thumbnail"), or "" if the type has
 // no OME equivalent and must be omitted from OME output (otherwise the reader
 // would mis-classify it as a second pyramid).
-func omeAssocName(kind string) string {
-	switch kind {
+func omeAssocName(typ string) string {
+	switch typ {
 	case "label":
 		return "label"
 	case "macro", "overview":
@@ -694,9 +694,9 @@ func omeAssocName(kind string) string {
 func omeAssociatedSpecs(src source.Source) []OMEAssoc {
 	var out []OMEAssoc
 	for _, a := range src.Associated() {
-		name := omeAssocName(a.Kind())
+		name := omeAssocName(a.Type())
 		if name == "" {
-			slog.Debug("ome: dropping associated image with no OME mapping", "kind", a.Kind())
+			slog.Debug("ome: dropping associated image with no OME mapping", "type", a.Type())
 			continue
 		}
 		out = append(out, OMEAssoc{Name: name, W: uint32(a.Size().X), H: uint32(a.Size().Y)})
@@ -708,15 +708,15 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 	for _, a := range src.Associated() {
 		// Synthetic OME path only: keep the written associated IFDs in sync
 		// with the <Image> entries omeAssociatedSpecs emitted (recognized
-		// kinds, same order). The native ome→ome path keeps the verbatim
+		// types, same order). The native ome→ome path keeps the verbatim
 		// source OME-XML, which already describes its own associated images,
 		// so it is not filtered here.
-		if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Kind()) == "" {
+		if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Type()) == "" {
 			continue
 		}
 		bs, err := a.Bytes()
 		if err != nil {
-			return fmt.Errorf("associated %s: %w", a.Kind(), err)
+			return fmt.Errorf("associated %s: %w", a.Type(), err)
 		}
 		spec := streamwriter.StrippedSpec{
 			Width:           uint32(a.Size().X),
@@ -727,15 +727,15 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 			Photometric:     2,
 			Compression:     mapCompressionForOutput(a.Compression()),
 			StripBytes:      bs,
-			NewSubfileType:  newSubfileTypeForAssoc(container, a.Kind()),
-			WSIImageType:    a.Kind(),
+			NewSubfileType:  newSubfileTypeForAssoc(container, a.Type()),
+			WSIImageType:    a.Type(),
 		}
 		// SVS-shaped output: emit Aperio-flavored NewSubfileType via
 		// ExtraTags (macro=9, label=1). Clear spec.NewSubfileType so the
 		// writer doesn't also emit a default value — EntryBuilder doesn't
 		// dedup, so a duplicate tag would corrupt the IFD.
 		if container == "svs" {
-			switch a.Kind() {
+			switch a.Type() {
 			case "macro", "overview":
 				spec.NewSubfileType = 0
 				spec.ExtraTags = buildSVSMacroExtraTags()
@@ -745,7 +745,7 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 			}
 		}
 		if err := w.AddStripped(spec); err != nil {
-			return fmt.Errorf("write associated %s: %w", a.Kind(), err)
+			return fmt.Errorf("write associated %s: %w", a.Type(), err)
 		}
 	}
 	return nil
@@ -786,9 +786,9 @@ func newSubfileTypeForLevel(idx int, container string) uint32 {
 // SVS-shaped output adds the Aperio-private macro=9 marker via
 // ExtraTags in writeAssociatedImages — that path doesn't need special
 // handling here.
-func newSubfileTypeForAssoc(container, kind string) uint32 {
+func newSubfileTypeForAssoc(container, typ string) uint32 {
 	_ = container
-	_ = kind
+	_ = typ
 	return 1
 }
 

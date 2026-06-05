@@ -40,7 +40,7 @@ type associatedLayoutInput struct {
 	Bytes         uint32 // total length
 	Width, Height uint32
 	Compression   uint16
-	Kind          string // canonical WSIImageType value
+	Type          string // canonical WSIImageType value
 }
 
 type layoutInput struct {

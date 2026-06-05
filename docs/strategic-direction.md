@@ -771,7 +771,7 @@ Roughly the order of leverage and risk. ✅ = shipped, ⏳ = queued.
    is additive.
 8. ⏳ **`wsitools extract`-to-container** — region-at-scale to a container
    output (SVS / TIFF / COG-WSI / JPEG / PNG). Distinct from today's
-   shipped `extract --kind label|macro|...` which only saves associated
+   shipped `extract --type label|macro|...` which only saves associated
    images. Reuses the strip iterator + writer plumbing from #5.
 9. ⏳ **`wsitools tile-server`** — needs the strip iterator's shared tile
    cache (`WithTileCache`) operational; everything else is HTTP plumbing.

@@ -234,7 +234,7 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		"out_h", outH,
 	)
 
-	// Segregate associated images by Kind so we can interleave them into the
+	// Segregate associated images by Type so we can interleave them into the
 	// IFD stream in Aperio's quirky order:
 	//   L0, [thumbnail], L1, L2, …, LN, label, macro
 	// opentile-go's SVS classifier takes the LAST 2 trailing pages as
@@ -255,13 +255,13 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if len(otherAssoc) > 0 {
-		var kinds []string
+		var types []string
 		for _, a := range otherAssoc {
-			kinds = append(kinds, a.Type())
+			types = append(types, a.Type())
 		}
 		slog.Warn("dropping associated images not supported by Aperio classifier",
 			"count", len(otherAssoc),
-			"kinds", kinds,
+			"types", types,
 		)
 	}
 

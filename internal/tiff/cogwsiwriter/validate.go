@@ -7,26 +7,26 @@ import (
 	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
-// ErrInvalidAssocKind is returned by AddAssociated when the spec's
-// Kind isn't one of the four COG-WSI v0.1 §6 allowed values.
-var ErrInvalidAssocKind = errors.New("invalid associated image kind")
+// ErrInvalidAssocType is returned by AddAssociated when the spec's
+// Type isn't one of the four COG-WSI v0.1 §6 allowed values.
+var ErrInvalidAssocType = errors.New("invalid associated image type")
 
-// validAssocKinds is the COG-WSI v0.1 set of allowed WSIImageType
+// validAssocTypes is the COG-WSI v0.1 set of allowed WSIImageType
 // values for associated-image IFDs. Stricter than the general
 // tiff.ValidateWSIImageType set (which permits probability, map,
 // associated as well).
-var validAssocKinds = map[string]bool{
+var validAssocTypes = map[string]bool{
 	tiff.WSIImageTypeLabel:     true,
 	tiff.WSIImageTypeMacro:     true,
 	tiff.WSIImageTypeThumbnail: true,
 	tiff.WSIImageTypeOverview:  true,
 }
 
-// validateAssocKind returns nil if kind is one of the four allowed
-// associated-image kinds; otherwise wraps ErrInvalidAssocKind.
-func validateAssocKind(kind string) error {
-	if !validAssocKinds[kind] {
-		return fmt.Errorf("cogwsi: invalid associated kind %q (want one of label|macro|thumbnail|overview): %w", kind, ErrInvalidAssocKind)
+// validateAssocType returns nil if typ is one of the four allowed
+// associated-image types; otherwise wraps ErrInvalidAssocType.
+func validateAssocType(typ string) error {
+	if !validAssocTypes[typ] {
+		return fmt.Errorf("cogwsi: invalid associated type %q (want one of label|macro|thumbnail|overview): %w", typ, ErrInvalidAssocType)
 	}
 	return nil
 }
