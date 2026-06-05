@@ -33,6 +33,19 @@ const omePreamble = `<!-- Warning: this comment is an OME-XML metadata block, wh
 // associated images to enumerate as <Image> elements (IFD positions
 // 1, 2, … matching the order writeAssociatedImages writes them).
 func SyntheticOMEDescription(l0W, l0H uint32, mppX, mppY float64, name, srcSoftware string, assoc []OMEAssoc) string {
+	return syntheticOMEDescriptionMag(l0W, l0H, mppX, mppY, 0, name, srcSoftware, assoc)
+}
+
+// SyntheticOMEDescriptionWithMag is like SyntheticOMEDescription but also
+// emits an <Instrument>/<Objective NominalMagnification="mag"> block and
+// links the primary <Image> to it via <ObjectiveSettings>, allowing
+// opentile-go's OME reader to populate md.Magnification on re-open.
+// mag is ignored (no <Instrument> block emitted) when mag <= 0.
+func SyntheticOMEDescriptionWithMag(l0W, l0H uint32, mppX, mppY, mag float64, name, srcSoftware string, assoc []OMEAssoc) string {
+	return syntheticOMEDescriptionMag(l0W, l0H, mppX, mppY, mag, name, srcSoftware, assoc)
+}
+
+func syntheticOMEDescriptionMag(l0W, l0H uint32, mppX, mppY, mag float64, name, srcSoftware string, assoc []OMEAssoc) string {
 	if name == "" {
 		name = "Image"
 	}
@@ -45,9 +58,17 @@ func SyntheticOMEDescription(l0W, l0H uint32, mppX, mppY float64, name, srcSoftw
 		b.WriteString(` (from ` + xmlEscape(srcSoftware) + `)`)
 	}
 	b.WriteString(`">` + "\n")
-	writeOMEImage(&b, 0, name, l0W, l0H, mppX, mppY)
+	// Emit an <Instrument>/<Objective> block when magnification is known so
+	// opentile-go's OME reader can populate md.Magnification via the
+	// <ObjectiveSettings> link on the primary image.
+	if mag > 0 {
+		fmt.Fprintf(&b, `  <Instrument ID="Instrument:0">`+"\n")
+		fmt.Fprintf(&b, `    <Objective ID="Objective:0" NominalMagnification="%g"/>`+"\n", mag)
+		b.WriteString(`  </Instrument>` + "\n")
+	}
+	writeOMEImage(&b, 0, name, l0W, l0H, mppX, mppY, mag > 0)
 	for i, a := range assoc {
-		writeOMEImage(&b, 1+i, a.Name, a.W, a.H, 0, 0)
+		writeOMEImage(&b, 1+i, a.Name, a.W, a.H, 0, 0, false)
 	}
 	b.WriteString(`</OME>`)
 	return b.String()
@@ -55,8 +76,13 @@ func SyntheticOMEDescription(l0W, l0H uint32, mppX, mppY float64, name, srcSoftw
 
 // writeOMEImage writes one <Image>/<Pixels> block mapping to top-level IFD ifd.
 // mppX/mppY are emitted as PhysicalSize only when non-zero.
-func writeOMEImage(b *strings.Builder, ifd int, name string, w, h uint32, mppX, mppY float64) {
+// hasObjective, when true, emits <ObjectiveSettings ID="Objective:0"/> linking
+// this image to the Objective defined in the surrounding <Instrument> block.
+func writeOMEImage(b *strings.Builder, ifd int, name string, w, h uint32, mppX, mppY float64, hasObjective bool) {
 	fmt.Fprintf(b, `  <Image ID="Image:%d" Name="%s">`+"\n", ifd, xmlEscape(name))
+	if hasObjective {
+		b.WriteString(`    <ObjectiveSettings ID="Objective:0"/>` + "\n")
+	}
 	fmt.Fprintf(b, `    <Pixels ID="Pixels:%d:0" DimensionOrder="XYCZT" Type="uint8"`, ifd)
 	fmt.Fprintf(b, ` SizeX="%d" SizeY="%d" SizeZ="1" SizeC="3" SizeT="1"`, w, h)
 	if mppX != 0 {

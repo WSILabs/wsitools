@@ -86,3 +86,23 @@ func TestConvertFactorRejectsBadValue(t *testing.T) {
 		t.Fatalf("expected invalid-factor rejection, got success:\n%s", o)
 	}
 }
+
+func TestConvertFactorOMETIFF(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "o.ome.tiff")
+	if o, err := runBin(bin, "convert", "--to", "ome-tiff", "--factor", "4", "-f", "-o", out, src); err != nil {
+		t.Fatalf("ome-tiff --factor 4: %v\n%s", err, o)
+	}
+	// 20x fixture, factor 4 -> 5x. Output must read back as ome-tiff at the reduced size.
+	info, _ := runBin(bin, "info", out)
+	if !strings.Contains(string(info), "Magnification: 5x") {
+		t.Errorf("expected 5x in info:\n%s", info)
+	}
+	if !strings.Contains(string(info), "Format:  ome-tiff") {
+		t.Errorf("expected ome-tiff format in info:\n%s", info)
+	}
+}

@@ -98,6 +98,20 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 			cvBigTIFFFlag,
 			cvNoAssociated,
 		)
+	case "ome-tiff":
+		return downsampleToOMETIFF(
+			cmd.Context(),
+			input,
+			cvOutput,
+			cvFactor,
+			cvTargetMag,
+			quality,
+			workers,
+			cvTileOrder,
+			cvForce,
+			cvBigTIFFFlag,
+			cvNoAssociated,
+		)
 	default:
 		return fmt.Errorf("--factor for --to %s not yet implemented", target)
 	}
@@ -600,6 +614,194 @@ func downsampleToCOGWSI(
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("close writer: %w", err)
 	}
+
+	var outSizeStr string
+	if fi, err := os.Stat(output); err == nil {
+		outSizeStr = formatBytes(fi.Size())
+	}
+	fmt.Printf("wrote %s (%s)\n", output, outSizeStr)
+	return nil
+}
+
+// downsampleToOMETIFF is the reduce-then-rebuild body for convert --to ome-tiff --factor N.
+// It mirrors downsampleToTIFF but emits a conformant OME-XML ImageDescription on L0
+// (PhysicalSizeX/Y = scaled MPP) and uses the OME-TIFF streamwriter options
+// (SubResolutionPyramid=true, SampleFormat=1). Associated images are filtered to
+// recognized OME types (label/macro/thumbnail) so the OME-XML Image list stays
+// consistent with the written IFDs.
+func downsampleToOMETIFF(
+	ctx context.Context,
+	input, output string,
+	factor, targetMag int,
+	quality, workers int,
+	tileOrderName string,
+	force bool,
+	bigtiffFlag string,
+	noAssociated bool,
+) error {
+	if quality < 1 || quality > 100 {
+		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if _, err := os.Stat(input); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
+	if !force {
+		if _, err := os.Stat(output); err == nil {
+			return fmt.Errorf("output exists (use --force to overwrite): %s", output)
+		}
+	}
+	absIn, _ := filepath.Abs(input)
+	absOut, _ := filepath.Abs(output)
+	if absIn == absOut {
+		return fmt.Errorf("input and output paths are the same")
+	}
+
+	src, err := opentile.OpenFile(input)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer src.Close()
+	if src.Format() != opentile.FormatSVS {
+		return fmt.Errorf("--factor ome-tiff output supports SVS sources only; got %s", src.Format())
+	}
+
+	// Parse source ImageDescription to get MPP and magnification.
+	rawDesc, err := source.ReadSourceImageDescription(input)
+	if err != nil {
+		return fmt.Errorf("read source ImageDescription: %w", err)
+	}
+	desc, err := ParseImageDescription(rawDesc)
+	if err != nil {
+		return fmt.Errorf("parse source ImageDescription: %w", err)
+	}
+
+	// Resolve --target-mag if set.
+	if targetMag > 0 {
+		if desc.AppMag <= 0 {
+			return fmt.Errorf("--target-mag set but source AppMag is unknown/zero")
+		}
+		ratio := desc.AppMag / float64(targetMag)
+		f := int(ratio + 0.0001)
+		if !isValidFactor(f) || float64(f) != ratio {
+			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", desc.AppMag, targetMag, ratio)
+		}
+		factor = f
+	}
+	if !isValidFactor(factor) {
+		return fmt.Errorf("--factor must be one of {2,4,8,16}, got %d", factor)
+	}
+
+	srcL0 := src.Levels()[0]
+	srcW := srcL0.Size.W
+	srcH := srcL0.Size.H
+	outW := srcW / factor
+	outH := srcH / factor
+	if outW <= 0 || outH <= 0 {
+		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outW, outH, factor)
+	}
+
+	// Scale metadata: MPP grows by factor, magnification shrinks by factor.
+	mppX := desc.MPP * float64(factor)
+	mppY := desc.MPP * float64(factor)
+	mag := desc.AppMag / float64(factor)
+
+	var bigtiffMode tiff.BigTIFFMode
+	switch bigtiffFlag {
+	case "on":
+		bigtiffMode = tiff.BigTIFFOn
+	case "off":
+		bigtiffMode = tiff.BigTIFFOff
+	default: // "auto" or ""
+		if predictBigTIFFNeeded(srcL0, src.Levels(), factor) {
+			bigtiffMode = tiff.BigTIFFOn
+		} else {
+			bigtiffMode = tiff.BigTIFFOff
+		}
+	}
+
+	order, err := tileorder.ByName(tileOrderName)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
+	// Build associated-image specs for OME-XML: only recognized types
+	// (label/macro/thumbnail) are listed so IFD positions stay consistent.
+	var omeAssocs []OMEAssoc
+	if !noAssociated {
+		for _, a := range src.Associated() {
+			name := omeAssocName(a.Type())
+			if name == "" {
+				continue
+			}
+			omeAssocs = append(omeAssocs, OMEAssoc{Name: name, W: uint32(a.Size().W), H: uint32(a.Size().H)})
+		}
+	}
+
+	// Build OME-XML with reduced L0 dimensions, scaled MPP, and scaled
+	// magnification so opentile-go's OME reader populates md.Magnification.
+	omeXML := SyntheticOMEDescriptionWithMag(
+		uint32(outW), uint32(outH),
+		mppX, mppY, mag,
+		"Image", string(src.Format()),
+		omeAssocs,
+	)
+
+	w, err := streamwriter.Create(output, streamwriter.Options{
+		BigTIFF:              bigtiffMode,
+		ImageDescription:     omeXML,
+		ToolsVersion:         Version,
+		SourceFormat:         string(src.Format()),
+		FormatName:           "ome-tiff",
+		AcceptedOrders:       acceptedOrdersForFormat("ome-tiff"),
+		DefaultOrder:         order,
+		MPPX:                 mppX,
+		MPPY:                 mppY,
+		Magnification:        mag,
+		ICCProfile:           src.ICCProfile(),
+		SubResolutionPyramid: true,
+		SampleFormat:         1,
+	})
+	if err != nil {
+		return fmt.Errorf("create writer: %w", err)
+	}
+
+	closed := false
+	defer func() {
+		if !closed {
+			w.Abort()
+		}
+	}()
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Build pyramid using the shared reduce-then-rebuild path (no postL0Hook
+	// needed for OME-TIFF; associated images follow after all pyramid levels).
+	if err := buildPyramid(ctx, src, w, factor, quality, workers, nil); err != nil {
+		return fmt.Errorf("build pyramid: %w", err)
+	}
+
+	// Write associated images filtered to recognized OME types (consistent
+	// with omeAssocs above so IFD count matches OME-XML Image list).
+	if !noAssociated {
+		for _, a := range src.Associated() {
+			if omeAssocName(a.Type()) == "" {
+				continue
+			}
+			if err := writeOneAssociated(w, a); err != nil {
+				return fmt.Errorf("write associated %s: %w", a.Type(), err)
+			}
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close writer: %w", err)
+	}
+	closed = true
 
 	var outSizeStr string
 	if fi, err := os.Stat(output); err == nil {
