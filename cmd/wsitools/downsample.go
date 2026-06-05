@@ -66,16 +66,24 @@ var (
 
 var downsampleCmd = &cobra.Command{
 	Use:   "downsample [flags] <input>",
-	Short: "Downsample a WSI by a power-of-2 factor",
+	Short: "Downsample a WSI by a power-of-2 factor (format-preserving)",
 	Long: `Downsample a WSI by an integer power-of-2 factor (default 2 = 40x → 20x).
 Regenerates the entire pyramid from the new L0; passes through associated
 images (label, macro, thumbnail, overview) verbatim.
 
-v0.1 supports SVS sources only.
+The output container matches the source format:
+  SVS        → svs
+  OME-TIFF   → ome-tiff
+  Generic-TIFF → tiff (plain pyramidal TIFF)
+  COG-WSI    → cog-wsi
+
+For formats without a matching writer (NDPI, Philips-TIFF, BIF, IFE,
+Leica SCN, DICOM, SZI, …) use 'convert --to {svs|tiff|ome-tiff|cog-wsi}
+--factor N' to downsample into a different container.
 
 Examples:
 
-  # 40x → 20x SVS (defaults)
+  # 40x → 20x (same format as source)
   wsitools downsample -o slide-20x.svs slide-40x.svs
 
   # 40x → 10x at higher quality, 8 workers
@@ -114,11 +122,28 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		"jobs", dsJobs,
 	)
 
-	// Delegate to the shared SVS reduce-then-rebuild engine. All flag
-	// resolution (--target-mag → factor, BigTIFF auto-detect, associated
-	// image ordering) is handled inside downsampleToSVS.
-	if err := downsampleToSVS(
+	// Probe source format to determine output target.
+	src, err := opentile.OpenFile(input)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	srcFormat := string(src.Format())
+	src.Close()
+
+	target, ok := downsampleTargetForFormat(srcFormat)
+	if !ok {
+		return fmt.Errorf(
+			"downsample preserves the source format; %s has no matching writer — "+
+				"use 'convert --to {svs|tiff|ome-tiff|cog-wsi} --factor N' to downsample into a different container",
+			srcFormat,
+		)
+	}
+
+	// Delegate to the shared dispatch (same engines used by convert --to X --factor N).
+	// bigtiff="" means auto; noAssociated=false (downsample always passes through associated images).
+	if err := dispatchDownsampleByTarget(
 		cmd.Context(),
+		target,
 		input,
 		dsOutput,
 		dsFactor,
@@ -126,8 +151,8 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		dsQuality,
 		dsJobs,
 		dsTileOrder,
-		dsForce,
 		"", // bigtiff: "" means auto (downsample has no --bigtiff flag)
+		dsForce,
 		false, // noAssociated: downsample always passes through associated images
 	); err != nil {
 		return err

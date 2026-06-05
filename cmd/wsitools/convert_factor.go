@@ -1,7 +1,7 @@
 package main
 
 // convert_factor.go — runConvertFactor dispatches convert --factor/--target-mag
-// for targets that support reduce-then-rebuild (svs, tiff, cog-wsi).
+// for targets that support reduce-then-rebuild (svs, tiff, cog-wsi, ome-tiff).
 //
 // The SVS path reuses the exact same engine as runDownsample: it calls
 // downsampleToSVS, a helper factored out of runDownsample that takes all
@@ -14,6 +14,11 @@ package main
 //
 // The COG-WSI path (downsampleToCOGWSI + buildPyramidCOGWSI) routes the same
 // reduced L0 + pyramid through the cogwsiwriter instead of the streamwriter.
+//
+// dispatchDownsampleByTarget is the shared dispatch table used by both
+// runConvertFactor (convert --to X --factor N) and runDownsample (format-
+// preserving reduce). Both front-ends resolve their flags and call this
+// function with explicit parameters — no global flag variables are read here.
 
 import (
 	"context"
@@ -37,8 +42,51 @@ import (
 	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
+// downsampleTargetForFormat maps the four writable source formats to their
+// matching downsample target string. Returns ("", false) for formats that have
+// no writable target (ndpi, philips-tiff, bif, ife, leica-scn, dicom, szi, …).
+func downsampleTargetForFormat(format string) (string, bool) {
+	switch opentile.Format(format) {
+	case opentile.FormatSVS:
+		return "svs", true
+	case opentile.FormatOMETIFF:
+		return "ome-tiff", true
+	case opentile.FormatGenericTIFF:
+		return "tiff", true
+	case opentile.FormatCOGWSI:
+		return "cog-wsi", true
+	default:
+		return "", false
+	}
+}
+
+// dispatchDownsampleByTarget is the shared dispatch used by both runConvertFactor
+// (convert --to X --factor N) and runDownsample (format-preserving reduce).
+// All parameters are explicit — no global flag variables are read here.
+func dispatchDownsampleByTarget(
+	ctx context.Context,
+	target, input, output string,
+	factor, targetMag, quality, workers int,
+	tileOrderName string,
+	bigtiffFlag string,
+	force, noAssociated bool,
+) error {
+	switch target {
+	case "svs":
+		return downsampleToSVS(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+	case "tiff":
+		return downsampleToTIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+	case "cog-wsi":
+		return downsampleToCOGWSI(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+	case "ome-tiff":
+		return downsampleToOMETIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+	default:
+		return fmt.Errorf("--factor for --to %s not yet implemented", target)
+	}
+}
+
 // runConvertFactor is called by runConvertTIFF when --factor or --target-mag is
-// set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi.
+// set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi, ome-tiff.
 func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time) error {
 	// Parse common flags shared by all targets.
 	quality := 90
@@ -55,66 +103,20 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 		workers = runtime.NumCPU()
 	}
 
-	switch target {
-	case "svs":
-		return downsampleToSVS(
-			cmd.Context(),
-			input,
-			cvOutput,
-			cvFactor,
-			cvTargetMag,
-			quality,
-			workers,
-			cvTileOrder,
-			cvForce,
-			cvBigTIFFFlag,
-			cvNoAssociated,
-		)
-	case "tiff":
-		return downsampleToTIFF(
-			cmd.Context(),
-			input,
-			cvOutput,
-			cvFactor,
-			cvTargetMag,
-			quality,
-			workers,
-			cvTileOrder,
-			cvForce,
-			cvBigTIFFFlag,
-			cvNoAssociated,
-		)
-	case "cog-wsi":
-		return downsampleToCOGWSI(
-			cmd.Context(),
-			input,
-			cvOutput,
-			cvFactor,
-			cvTargetMag,
-			quality,
-			workers,
-			cvTileOrder,
-			cvForce,
-			cvBigTIFFFlag,
-			cvNoAssociated,
-		)
-	case "ome-tiff":
-		return downsampleToOMETIFF(
-			cmd.Context(),
-			input,
-			cvOutput,
-			cvFactor,
-			cvTargetMag,
-			quality,
-			workers,
-			cvTileOrder,
-			cvForce,
-			cvBigTIFFFlag,
-			cvNoAssociated,
-		)
-	default:
-		return fmt.Errorf("--factor for --to %s not yet implemented", target)
-	}
+	return dispatchDownsampleByTarget(
+		cmd.Context(),
+		target,
+		input,
+		cvOutput,
+		cvFactor,
+		cvTargetMag,
+		quality,
+		workers,
+		cvTileOrder,
+		cvBigTIFFFlag,
+		cvForce,
+		cvNoAssociated,
+	)
 }
 
 // downsampleToSVS is the shared reduce-then-rebuild body used by both
@@ -338,29 +340,33 @@ func downsampleToTIFF(
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer src.Close()
-	if src.Format() != opentile.FormatSVS {
-		return fmt.Errorf("--factor tiff output supports SVS sources only; got %s", src.Format())
-	}
 
-	// Parse source ImageDescription to get MPP and magnification.
-	rawDesc, err := source.ReadSourceImageDescription(input)
-	if err != nil {
-		return fmt.Errorf("read source ImageDescription: %w", err)
-	}
-	desc, err := ParseImageDescription(rawDesc)
-	if err != nil {
-		return fmt.Errorf("parse source ImageDescription: %w", err)
+	// Resolve source MPP and magnification — prefer the Aperio ImageDescription
+	// (SVS sources) so that AppMag/MPP are preserved verbatim; fall back to
+	// opentile metadata for all other formats.
+	var srcMPPX, srcMPPY, srcMag float64
+	rawDesc, _ := source.ReadSourceImageDescription(input)
+	desc, descErr := ParseImageDescription(rawDesc)
+	if descErr == nil {
+		srcMPPX = desc.MPP
+		srcMPPY = desc.MPP
+		srcMag = desc.AppMag
+	} else {
+		md := src.Metadata()
+		srcMPPX = md.MicronsPerPixelX
+		srcMPPY = md.MicronsPerPixelY
+		srcMag = md.Magnification
 	}
 
 	// Resolve --target-mag if set.
 	if targetMag > 0 {
-		if desc.AppMag <= 0 {
+		if srcMag <= 0 {
 			return fmt.Errorf("--target-mag set but source AppMag is unknown/zero")
 		}
-		ratio := desc.AppMag / float64(targetMag)
+		ratio := srcMag / float64(targetMag)
 		f := int(ratio + 0.0001)
 		if !isValidFactor(f) || float64(f) != ratio {
-			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", desc.AppMag, targetMag, ratio)
+			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", srcMag, targetMag, ratio)
 		}
 		factor = f
 	}
@@ -378,9 +384,9 @@ func downsampleToTIFF(
 	}
 
 	// Scale metadata: MPP grows by factor, magnification shrinks by factor.
-	mppX := desc.MPP * float64(factor)
-	mppY := desc.MPP * float64(factor)
-	mag := desc.AppMag / float64(factor)
+	mppX := srcMPPX * float64(factor)
+	mppY := srcMPPY * float64(factor)
+	mag := srcMag / float64(factor)
 
 	var bigtiffMode tiff.BigTIFFMode
 	switch bigtiffFlag {
@@ -499,27 +505,32 @@ func downsampleToCOGWSI(
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer src.Close()
-	if src.Format() != opentile.FormatSVS {
-		return fmt.Errorf("--factor cog-wsi output supports SVS sources only; got %s", src.Format())
-	}
 
-	rawDesc, err := source.ReadSourceImageDescription(input)
-	if err != nil {
-		return fmt.Errorf("read source ImageDescription: %w", err)
-	}
-	desc, err := ParseImageDescription(rawDesc)
-	if err != nil {
-		return fmt.Errorf("parse source ImageDescription: %w", err)
+	// Resolve source MPP and magnification — prefer the Aperio ImageDescription
+	// (SVS sources) so that AppMag/MPP are preserved verbatim; fall back to
+	// opentile metadata for all other formats.
+	var srcMPPX, srcMPPY, srcMag float64
+	rawDescCOG, _ := source.ReadSourceImageDescription(input)
+	descCOG, descErrCOG := ParseImageDescription(rawDescCOG)
+	if descErrCOG == nil {
+		srcMPPX = descCOG.MPP
+		srcMPPY = descCOG.MPP
+		srcMag = descCOG.AppMag
+	} else {
+		md := src.Metadata()
+		srcMPPX = md.MicronsPerPixelX
+		srcMPPY = md.MicronsPerPixelY
+		srcMag = md.Magnification
 	}
 
 	if targetMag > 0 {
-		if desc.AppMag <= 0 {
+		if srcMag <= 0 {
 			return fmt.Errorf("--target-mag set but source AppMag is unknown/zero")
 		}
-		ratio := desc.AppMag / float64(targetMag)
+		ratio := srcMag / float64(targetMag)
 		f := int(ratio + 0.0001)
 		if !isValidFactor(f) || float64(f) != ratio {
-			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", desc.AppMag, targetMag, ratio)
+			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", srcMag, targetMag, ratio)
 		}
 		factor = f
 	}
@@ -536,9 +547,9 @@ func downsampleToCOGWSI(
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outW, outH, factor)
 	}
 
-	mppX := desc.MPP * float64(factor)
-	mppY := desc.MPP * float64(factor)
-	mag := desc.AppMag / float64(factor)
+	mppX := srcMPPX * float64(factor)
+	mppY := srcMPPY * float64(factor)
+	mag := srcMag / float64(factor)
 
 	bigTIFFMode, err := parseBigTIFFFlag(bigtiffFlag)
 	if err != nil {
@@ -664,29 +675,33 @@ func downsampleToOMETIFF(
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer src.Close()
-	if src.Format() != opentile.FormatSVS {
-		return fmt.Errorf("--factor ome-tiff output supports SVS sources only; got %s", src.Format())
-	}
 
-	// Parse source ImageDescription to get MPP and magnification.
-	rawDesc, err := source.ReadSourceImageDescription(input)
-	if err != nil {
-		return fmt.Errorf("read source ImageDescription: %w", err)
-	}
-	desc, err := ParseImageDescription(rawDesc)
-	if err != nil {
-		return fmt.Errorf("parse source ImageDescription: %w", err)
+	// Resolve source MPP and magnification — prefer the Aperio ImageDescription
+	// (SVS sources) so that AppMag/MPP are preserved verbatim; fall back to
+	// opentile metadata for all other formats.
+	var srcMPPX, srcMPPY, srcMag float64
+	rawDescOME, _ := source.ReadSourceImageDescription(input)
+	descOME, descErrOME := ParseImageDescription(rawDescOME)
+	if descErrOME == nil {
+		srcMPPX = descOME.MPP
+		srcMPPY = descOME.MPP
+		srcMag = descOME.AppMag
+	} else {
+		md := src.Metadata()
+		srcMPPX = md.MicronsPerPixelX
+		srcMPPY = md.MicronsPerPixelY
+		srcMag = md.Magnification
 	}
 
 	// Resolve --target-mag if set.
 	if targetMag > 0 {
-		if desc.AppMag <= 0 {
+		if srcMag <= 0 {
 			return fmt.Errorf("--target-mag set but source AppMag is unknown/zero")
 		}
-		ratio := desc.AppMag / float64(targetMag)
+		ratio := srcMag / float64(targetMag)
 		f := int(ratio + 0.0001)
 		if !isValidFactor(f) || float64(f) != ratio {
-			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", desc.AppMag, targetMag, ratio)
+			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", srcMag, targetMag, ratio)
 		}
 		factor = f
 	}
@@ -704,9 +719,9 @@ func downsampleToOMETIFF(
 	}
 
 	// Scale metadata: MPP grows by factor, magnification shrinks by factor.
-	mppX := desc.MPP * float64(factor)
-	mppY := desc.MPP * float64(factor)
-	mag := desc.AppMag / float64(factor)
+	mppX := srcMPPX * float64(factor)
+	mppY := srcMPPY * float64(factor)
+	mag := srcMag / float64(factor)
 
 	var bigtiffMode tiff.BigTIFFMode
 	switch bigtiffFlag {

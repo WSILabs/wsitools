@@ -127,3 +127,54 @@ func TestConvertFactorOMETIFF(t *testing.T) {
 		t.Errorf("expected ome-tiff format in info:\n%s", info)
 	}
 }
+
+// downsample is format-preserving: OME-TIFF source -> OME-TIFF output (reduced).
+func TestDownsamplePreservesOMETIFF(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "ome-tiff", "Leica-1.ome.tiff")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "o.ome.tiff")
+	if o, err := runBin(bin, "downsample", "--factor", "2", "--quiet", "-f", "-o", out, src); err != nil {
+		t.Fatalf("downsample ome-tiff: %v\n%s", err, o)
+	}
+	info, _ := runBin(bin, "info", out)
+	if !strings.Contains(string(info), "Format:  ome-tiff") {
+		t.Errorf("expected ome-tiff output, got:\n%s", info)
+	}
+}
+
+// downsample of a COG-WSI source preserves cog-wsi.
+func TestDownsamplePreservesCOGWSI(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "cog-wsi", "CMU-1-Small-Region_cog-wsi.tiff")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "o.cog.tiff")
+	if o, err := runBin(bin, "downsample", "--factor", "2", "--quiet", "-f", "-o", out, src); err != nil {
+		t.Fatalf("downsample cog-wsi: %v\n%s", err, o)
+	}
+	info, _ := runBin(bin, "info", out)
+	if !strings.Contains(string(info), "Format:  cog-wsi") {
+		t.Errorf("expected cog-wsi output, got:\n%s", info)
+	}
+}
+
+// downsample of a non-writable source format errors with a pointer to convert.
+func TestDownsampleRejectsNonWritableFormat(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "ndpi", "CMU-1.ndpi")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "o.ndpi")
+	o, err := runBin(bin, "downsample", "--factor", "2", "-f", "-o", out, src)
+	if err == nil {
+		t.Fatalf("expected error for ndpi source, got success:\n%s", o)
+	}
+	if !strings.Contains(string(o), "convert --to") {
+		t.Errorf("error should point to convert --to, got:\n%s", o)
+	}
+}
