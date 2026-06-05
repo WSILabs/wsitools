@@ -7,6 +7,13 @@
 A Swiss-army knife of utilities for whole-slide imaging (WSI) files used in
 digital pathology.
 
+> [!WARNING]
+> **Pre-1.0 — expect breaking changes.** wsitools is under active development
+> and not yet API/CLI stable. Anything may change between releases without a
+> deprecation period: CLI flags and subcommands, JSON output fields, and
+> output file-format details. Pin a specific version and review
+> [`CHANGELOG.md`](./CHANGELOG.md) before upgrading.
+
 See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 
 ## What's here (v0.21)
