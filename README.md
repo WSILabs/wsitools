@@ -54,8 +54,35 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 
 Source formats accepted: SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE,
 generic-TIFF, NDPI, OME-OneFrame, Leica SCN (single-image), COG-WSI, and
-DICOM-WSI. Striped sources produce reproducible but synthesized JPEG tiles
-in the output (bit-exact tile-copy applies only to natively-tiled sources).
+DICOM-WSI.
+
+### Format × command support
+
+| Source format | `info` | `region` | `dump-ifds` | `extract`¹ | `hash`² | convert (from)³ | convert (to)⁴ | `downsample` |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| SVS           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
+| Philips-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — |
+| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | — |
+| BIF           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — |
+| generic-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | — |
+| NDPI          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
+| OME-OneFrame  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
+| Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
+| COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | — |
+| IFE           | ✓ | ✓ | — | ✓ | ✓ | ✓  | — | — |
+| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | —⁶ | — |
+
+¹ `extract` works when the slide carries that associated image (label/macro/thumbnail/overview); run `info` to list which.
+² `hash`: `--mode pixel` works for every format; the default file-mode is a single-file SHA-256.
+³ **convert (from)** — readable as a convert source. **✓\*** = striped source: opentile-go synthesizes a tile grid over the source strips, so `convert` decodes + re-encodes (reproducible JPEG tiles) rather than doing a bit-exact tile-copy. The lossless tile-copy fast path applies only to natively-tiled sources (plain ✓).
+⁴ **convert (to)** — available as a convert output **target**. The full target set is `cog-wsi`, `svs`, `tiff` (→ generic-TIFF), `ome-tiff`, `dzi`, `szi`; **DZI and SZI** are output-only pyramid formats (not readable sources, so not listed as rows).
+⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
+⁶ DICOM-WSI **write** is planned (writer scoped, not yet built).
+
+`downsample` is SVS-source-only (it emits a downsampled SVS).
+
+Striped sources produce reproducible but synthesized JPEG tiles in the output
+(bit-exact tile-copy applies only to natively-tiled sources).
 
 **DICOM-WSI input.** A DICOM source may be either a single `.dcm` instance
 or a directory containing a WSM series — pass the path to either. A named
