@@ -19,6 +19,14 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Changed
 
+- **BREAKING — associated-image terminology "kind" → "type"** (aligns with
+  opentile-go's `AssociatedImage.Type()`):
+  - `extract --kind` is renamed to `extract --type` (no alias — the old flag is
+    removed).
+  - `info --json` associated-image field `kind` → `type`.
+  - `dump-ifds --json` IFD-classification field `kind` → `image_type` (named
+    `image_type` rather than `type` to avoid colliding with `--raw`'s existing
+    per-tag TIFF `type` field).
 - opentile-go upgraded v0.26.0 → v0.31.0. v0.27–v0.29 are internal NDPI
   decode-perf work (pixel-frame cache, cross-format decoder-handle pool,
   ReadRegion allocation elimination); v0.30 adds a per-Slide read-memory
