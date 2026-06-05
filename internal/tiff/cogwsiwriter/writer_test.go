@@ -244,17 +244,17 @@ func TestWriterAddAssociatedRejectsInvalidKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Abort()
-	err = w.AddAssociated(cogwsiwriter.AssociatedSpec{Kind: "probability", Bytes: []byte("x")})
+	err = w.AddAssociated(cogwsiwriter.AssociatedSpec{Type: "probability", Bytes: []byte("x")})
 	if err == nil {
-		t.Fatalf("expected error for kind=probability")
+		t.Fatalf("expected error for type=probability")
 	}
-	if !strings.Contains(err.Error(), "invalid associated kind") {
+	if !strings.Contains(err.Error(), "invalid associated type") {
 		t.Errorf("unexpected error: %v", err)
 	}
-	// Valid kinds: label, macro, thumbnail, overview.
-	for _, kind := range []string{"label", "macro", "thumbnail", "overview"} {
-		if err := w.AddAssociated(cogwsiwriter.AssociatedSpec{Kind: kind, Bytes: []byte("x")}); err != nil {
-			t.Errorf("kind=%s: unexpected error: %v", kind, err)
+	// Valid types: label, macro, thumbnail, overview.
+	for _, ty := range []string{"label", "macro", "thumbnail", "overview"} {
+		if err := w.AddAssociated(cogwsiwriter.AssociatedSpec{Type: ty, Bytes: []byte("x")}); err != nil {
+			t.Errorf("type=%s: unexpected error: %v", ty, err)
 		}
 	}
 }

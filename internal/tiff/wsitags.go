@@ -3,7 +3,7 @@ package tiff
 import "fmt"
 
 // WSIImageType canonical values. Lowercase to match opentile-go's
-// AssociatedImage.Kind() vocabulary.
+// AssociatedImage.Type() vocabulary.
 const (
 	WSIImageTypePyramid     = "pyramid"
 	WSIImageTypeLabel       = "label"

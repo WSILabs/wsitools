@@ -47,7 +47,7 @@ type infoLevel struct {
 }
 
 type infoAssoc struct {
-	Kind        string `json:"kind"`
+	Type        string `json:"type"`
 	Width       int    `json:"width"`
 	Height      int    `json:"height"`
 	Compression string `json:"compression"`
@@ -119,7 +119,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	}
 	for _, a := range src.Associated() {
 		result.Associated = append(result.Associated, infoAssoc{
-			Kind:        a.Kind(),
+			Type:        a.Type(),
 			Width:       a.Size().X,
 			Height:      a.Size().Y,
 			Compression: a.Compression().String(),
@@ -175,7 +175,7 @@ func renderInfoText(w io.Writer, r *infoResult) error {
 		fmt.Fprintln(w, "Associated images:")
 		for _, a := range r.Associated {
 			fmt.Fprintf(w, "  %-10s %d × %d    %s\n",
-				a.Kind, a.Width, a.Height, a.Compression)
+				a.Type, a.Width, a.Height, a.Compression)
 		}
 	}
 	return nil

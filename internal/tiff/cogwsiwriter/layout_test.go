@@ -96,8 +96,8 @@ func TestLayoutAssociatedImagesPlacedAfterPyramid(t *testing.T) {
 			{TileBytes: []uint32{100, 100}, TileCount: 2, TileGeometry: tileGeom{TileW: 256, TileH: 256, ImgW: 512, ImgH: 256}},
 		},
 		Associated: []associatedLayoutInput{
-			{Bytes: 5000, Width: 1024, Height: 512, Kind: "label"},
-			{Bytes: 2000, Width: 512, Height: 256, Kind: "macro"},
+			{Bytes: 5000, Width: 1024, Height: 512, Type: "label"},
+			{Bytes: 2000, Width: 512, Height: 256, Type: "macro"},
 		},
 		BigTIFFMode: BigTIFFAuto,
 	}

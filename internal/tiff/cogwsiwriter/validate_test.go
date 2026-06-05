@@ -5,23 +5,23 @@ import (
 	"testing"
 )
 
-func TestValidateAssocKindAcceptsAllowed(t *testing.T) {
-	for _, k := range []string{"label", "macro", "thumbnail", "overview"} {
-		if err := validateAssocKind(k); err != nil {
-			t.Errorf("validateAssocKind(%q): unexpected error %v", k, err)
+func TestValidateAssocTypeAcceptsAllowed(t *testing.T) {
+	for _, ty := range []string{"label", "macro", "thumbnail", "overview"} {
+		if err := validateAssocType(ty); err != nil {
+			t.Errorf("validateAssocType(%q): unexpected error %v", ty, err)
 		}
 	}
 }
 
-func TestValidateAssocKindRejectsOther(t *testing.T) {
-	for _, k := range []string{"", "pyramid", "probability", "map", "associated"} {
-		err := validateAssocKind(k)
+func TestValidateAssocTypeRejectsOther(t *testing.T) {
+	for _, ty := range []string{"", "pyramid", "probability", "map", "associated"} {
+		err := validateAssocType(ty)
 		if err == nil {
-			t.Errorf("validateAssocKind(%q): expected error", k)
+			t.Errorf("validateAssocType(%q): expected error", ty)
 			continue
 		}
-		if !errors.Is(err, ErrInvalidAssocKind) {
-			t.Errorf("validateAssocKind(%q): error should wrap ErrInvalidAssocKind, got %v", k, err)
+		if !errors.Is(err, ErrInvalidAssocType) {
+			t.Errorf("validateAssocType(%q): error should wrap ErrInvalidAssocType, got %v", ty, err)
 		}
 	}
 }

@@ -145,4 +145,4 @@ The WSIImageType vocabulary aligns with DICOM Whole Slide Imaging (PS3.3
 Sup. 145), which uses VOLUME / LABEL / OVERVIEW / THUMBNAIL as standard
 ImageType values for WSI files. We use lowercase + the additional values
 `pyramid`, `macro`, `probability`, `map`, `associated` to match
-opentile-go's existing AssociatedImage.Kind() vocabulary.
+opentile-go's existing AssociatedImage.Type() vocabulary.

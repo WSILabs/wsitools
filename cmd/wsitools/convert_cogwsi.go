@@ -116,23 +116,23 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 			bs, err := a.Bytes()
 			if err != nil {
 				w.Abort()
-				return fmt.Errorf("read associated %s: %w", a.Kind(), err)
+				return fmt.Errorf("read associated %s: %w", a.Type(), err)
 			}
 			if err := w.AddAssociated(cogwsiwriter.AssociatedSpec{
-				Kind:        a.Kind(),
+				Type:        a.Type(),
 				Width:       uint32(a.Size().X),
 				Height:      uint32(a.Size().Y),
 				Compression: compressionTagFor(a.Compression()),
 				Photometric: 2,
 				Bytes:       bs,
 			}); err != nil {
-				if errors.Is(err, cogwsiwriter.ErrInvalidAssocKind) {
-					slog.Warn("skipping associated image with unsupported kind",
-						"kind", a.Kind(), "reason", err)
+				if errors.Is(err, cogwsiwriter.ErrInvalidAssocType) {
+					slog.Warn("skipping associated image with unsupported type",
+						"type", a.Type(), "reason", err)
 					continue
 				}
 				w.Abort()
-				return fmt.Errorf("add associated %s: %w", a.Kind(), err)
+				return fmt.Errorf("add associated %s: %w", a.Type(), err)
 			}
 		}
 	}

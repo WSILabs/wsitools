@@ -61,7 +61,7 @@ type LevelHandle struct {
 
 // AssociatedSpec describes one associated image.
 type AssociatedSpec struct {
-	Kind            string // canonical WSIImageType value
+	Type            string // canonical WSIImageType value
 	Width, Height   uint32
 	Compression     uint16
 	Photometric     uint16
@@ -168,7 +168,7 @@ func (w *Writer) AddAssociated(spec AssociatedSpec) error {
 	if w.closed {
 		return fmt.Errorf("writer closed")
 	}
-	if err := validateAssocKind(spec.Kind); err != nil {
+	if err := validateAssocType(spec.Type); err != nil {
 		return err
 	}
 	w.assoc = append(w.assoc, assocSpooled{spec: spec})
@@ -238,7 +238,7 @@ func (w *Writer) Close() error {
 			Width:       a.spec.Width,
 			Height:      a.spec.Height,
 			Compression: a.spec.Compression,
-			Kind:        a.spec.Kind,
+			Type:        a.spec.Type,
 		})
 	}
 
@@ -574,6 +574,6 @@ func populateAssocIFD(b *tiff.EntryBuilder, bigtiff bool, spec AssociatedSpec, d
 		b.AddLong(279 /*StripByteCounts*/, []uint32{uint32(len(spec.Bytes))})
 	}
 	b.AddLong(278 /*RowsPerStrip*/, []uint32{spec.Height})
-	b.AddASCII(tiff.TagWSIImageType, spec.Kind)
+	b.AddASCII(tiff.TagWSIImageType, spec.Type)
 	return nil
 }
