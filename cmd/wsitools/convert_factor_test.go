@@ -50,6 +50,29 @@ func TestConvertFactorRejectsDZI(t *testing.T) {
 	}
 }
 
+// tiff + cog-wsi targets must produce scaled metadata (factor-4 of a 20x → 5x).
+func TestConvertFactorTIFFTargets(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	// 20x fixture, factor 4 -> 5x, MPP x4.
+	for _, tgt := range []struct{ to, ext string }{{"tiff", "tiff"}, {"cog-wsi", "cog.tiff"}} {
+		tgt := tgt
+		t.Run(tgt.to, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "o."+tgt.ext)
+			if o, err := runBin(bin, "convert", "--to", tgt.to, "--factor", "4", "-f", "-o", out, src); err != nil {
+				t.Fatalf("%s --factor 4: %v\n%s", tgt.to, err, o)
+			}
+			info, _ := runBin(bin, "info", out)
+			if !strings.Contains(string(info), "Magnification: 5x") {
+				t.Errorf("%s: expected 5x in info:\n%s", tgt.to, info)
+			}
+		})
+	}
+}
+
 // invalid factor rejected (full message wired in a later task; here at least it must not silently pass).
 func TestConvertFactorRejectsBadValue(t *testing.T) {
 	bin := stripedBinary(t)

@@ -15,6 +15,11 @@ import (
 )
 
 func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
+	// --factor / --target-mag: reduce-then-rebuild via runConvertFactor.
+	if cvFactor != 1 || cvTargetMag != 0 {
+		return runConvertFactor(cmd, input, "cog-wsi", start)
+	}
+
 	if _, err := os.Stat(input); err != nil {
 		return fmt.Errorf("input %s: %w", input, err)
 	}
