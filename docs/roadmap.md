@@ -95,20 +95,16 @@ queued, deferred, or under consideration.
   spike → P1 full pyramid + tile-copy → P2 sparse/label/concatenation → P3
   fluorescence). Rough scoping: `docs/notes/2026-06-03-dicom-writer-scoping.md`.
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
-- **Unify downsample into `convert --factor N` (extend scaling to all formats).**
-  Today `downsample` is **SVS-source → SVS-out only** (deliberate v0.1 scope) and
-  `convert` is dimension-preserving (no scale option). The decode side is already
-  format-agnostic after the 2026-06-04 codec-agnostic refactor; the remaining
-  SVS coupling is **output + metadata scaling** (`downsample` hardcodes an SVS
-  writer and Aperio-specific `MutateForDownsample` for AppMag/MPP). Rather than
-  bolt per-format writers onto `downsample`, add a `--factor` (and/or
-  `--target-mag`) scale option to `convert`, which already owns every target's
-  writer + metadata emission (incl. the per-axis MPP/mag scale-metadata work) —
-  giving "downsample any source to any target with correctly-scaled MPP
-  (×N) + magnification (÷N)" for free per target. Then keep `downsample` as a
-  thin alias or deprecate it. Needs per-format metadata-scaling (OME-XML, SZI
-  scan-properties, …) — a real feature, brainstorm→spec→branch. See the
-  format×command matrix in README (downsample's lone ✓ is SVS).
+- ✅ **DONE (2026-06-05): unify downsample/convert scaling.** `convert --factor N`
+  / `--target-mag M` ships for `svs|tiff|ome-tiff|cog-wsi` (reduce-then-rebuild
+  via the shared `internal/downscale` engine, per-target MPP×N / mag÷N scaling).
+  `downsample` is now **format-preserving** (reduces SVS/OME-TIFF/generic-TIFF/
+  COG-WSI in place, sharing the same engine; errors with a `convert` pointer for
+  non-writable source formats). Spec/plan:
+  `docs/superpowers/{specs,plans}/2026-06-05-convert-factor-scaling*`.
+  **Still deferred:** `dzi`/`szi --factor` (base-reduced DeepZoom). Possible
+  follow-up: split the ~950-line `cmd/wsitools/convert_factor.go` (four target
+  paths + cog-wsi pyramid helpers) into focused files / a writer interface.
 
 ## Codecs (write-side, separate from utilities)
 
