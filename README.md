@@ -56,11 +56,13 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   store-method ZIP, plus an optional `scan-properties.xml` populated from
   source metadata.
 - `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
-  40x → 20x). Regenerates the full pyramid from the new base. Passes
-  through associated images verbatim. SVS-only — a convenience alias for
-  `convert --to svs --factor N`. To downsample into another container, use
-  `convert --to {svs,tiff,ome-tiff,cog-wsi} --factor N` (scales MPP ×N /
-  magnification ÷N; `dzi`/`szi` not yet supported).
+  40x → 20x), **format-preserving**: the output is the same container as the
+  source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,
+  COG-WSI→COG-WSI). Regenerates the full pyramid from the new base, scales MPP
+  ×N / magnification ÷N, and passes associated images through verbatim. Sources
+  with no matching writer error with a pointer to `convert`. To downsample
+  *into a different* container, use `convert --to {svs,tiff,ome-tiff,cog-wsi}
+  --factor N` (`dzi`/`szi` not yet supported).
 
 Source formats accepted: SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE,
 generic-TIFF, NDPI, OME-OneFrame, Leica SCN (single-image), COG-WSI, and
@@ -72,13 +74,13 @@ DICOM-WSI.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | SVS           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
 | Philips-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — |
-| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | — |
+| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
 | BIF           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — |
-| generic-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | — |
+| generic-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
 | NDPI          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
 | OME-OneFrame  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
 | Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
-| COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | — |
+| COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
 | IFE           | ✓ | ✓ | — | ✓ | ✓ | ✓  | — | — |
 | DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | —⁶ | — |
 
@@ -89,7 +91,9 @@ DICOM-WSI.
 ⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
 ⁶ DICOM-WSI **write** is planned (writer scoped, not yet built).
 
-`downsample` is SVS-source-only (it emits a downsampled SVS).
+`downsample` is **format-preserving** — it reduces a slide and emits the same
+container it read (the ✓ rows: SVS, OME-TIFF, generic-TIFF, COG-WSI). Other
+source formats error with a pointer to `convert --to … --factor`.
 
 Striped sources produce reproducible but synthesized JPEG tiles in the output
 (bit-exact tile-copy applies only to natively-tiled sources).
