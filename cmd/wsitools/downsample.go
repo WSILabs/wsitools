@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
@@ -41,10 +40,8 @@ import (
 	"github.com/wsilabs/wsitools/internal/downscale"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/pipeline"
-	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
-	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 const (
@@ -106,212 +103,40 @@ func init() {
 
 func runDownsample(cmd *cobra.Command, args []string) error {
 	input := args[0]
-
-	// Validation.
-	if dsQuality < 1 || dsQuality > 100 {
-		return fmt.Errorf("--quality must be in [1, 100], got %d", dsQuality)
-	}
-	if dsJobs < 1 {
-		dsJobs = 1
-	}
-	if _, err := os.Stat(input); err != nil {
-		return fmt.Errorf("input: %w", err)
-	}
-	if !dsForce {
-		if _, err := os.Stat(dsOutput); err == nil {
-			return fmt.Errorf("output exists (use --force to overwrite): %s", dsOutput)
-		}
-	}
-	absIn, _ := filepath.Abs(input)
-	absOut, _ := filepath.Abs(dsOutput)
-	if absIn == absOut {
-		return fmt.Errorf("input and output paths are the same")
-	}
-
-	// Open source.
-	src, err := opentile.OpenFile(input)
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer src.Close()
-	if src.Format() != opentile.FormatSVS {
-		return fmt.Errorf("v0.1 downsample supports SVS sources only; got %s", src.Format())
-	}
-
-	// Parse source ImageDescription (read raw from TIFF tag 270 of IFD 0;
-	// opentile-go's Tiler does not expose the raw description verbatim).
-	rawDesc, err := source.ReadSourceImageDescription(input)
-	if err != nil {
-		return fmt.Errorf("read source ImageDescription: %w", err)
-	}
-	desc, err := ParseImageDescription(rawDesc)
-	if err != nil {
-		return fmt.Errorf("parse source ImageDescription: %w", err)
-	}
-
-	// Resolve --target-mag if specified (overrides --factor).
-	if dsTargetMag > 0 {
-		if desc.AppMag <= 0 {
-			return fmt.Errorf("--target-mag set but source AppMag is unknown/zero")
-		}
-		ratio := desc.AppMag / float64(dsTargetMag)
-		// Snap to nearest valid power-of-2 factor and verify it matches.
-		f := int(ratio + 0.0001)
-		if !isValidFactor(f) || float64(f) != ratio {
-			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", desc.AppMag, dsTargetMag, ratio)
-		}
-		dsFactor = f
-	}
-	if !isValidFactor(dsFactor) {
-		return fmt.Errorf("--factor must be one of {2,4,8,16}, got %d", dsFactor)
-	}
-
-	// Compute output L0 dimensions.
-	srcL0 := src.Levels()[0]
-	srcW := srcL0.Size.W
-	srcH := srcL0.Size.H
-	outW := srcW / dsFactor
-	outH := srcH / dsFactor
-	if outW <= 0 || outH <= 0 {
-		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outW, outH, dsFactor)
-	}
-
-	// Mutate the ImageDescription for the new magnification + geometry.
-	desc.MutateForDownsample(dsFactor, uint32(outW), uint32(outH))
-
-	// Predict output size to decide BigTIFF promotion.
-	bigtiffMode := tiff.BigTIFFOff
-	if predictBigTIFFNeeded(srcL0, src.Levels(), dsFactor) {
-		bigtiffMode = tiff.BigTIFFOn
-	}
-
-	order, err := tileorder.ByName(dsTileOrder)
-	if err != nil {
-		return fmt.Errorf("--tile-order: %w", err)
-	}
-
-	// Open writer (atomic .tmp + rename via streamwriter.Close).
-	w, err := streamwriter.Create(dsOutput, streamwriter.Options{
-		BigTIFF:          bigtiffMode,
-		ImageDescription: desc.Encode(),
-		ToolsVersion:     Version,
-		SourceFormat:     string(src.Format()),
-		FormatName:       "svs",
-		AcceptedOrders:   acceptedOrdersForFormat("svs"),
-		DefaultOrder:     order,
-		MPPX:             desc.MPP,
-		MPPY:             desc.MPP,
-		Magnification:    desc.AppMag,
-		ICCProfile:       src.ICCProfile(),
-	})
-	if err != nil {
-		return fmt.Errorf("create writer: %w", err)
-	}
-
-	// Build pyramid (Abort the writer + remove the tmp file on any error
-	// path; Close is the success path).
-	closed := false
-	defer func() {
-		if !closed {
-			w.Abort()
-		}
-	}()
-
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	start := time.Now()
 
 	slog.Info("starting downsample",
 		"input", input,
 		"output", dsOutput,
 		"factor", dsFactor,
+		"target_mag", dsTargetMag,
 		"quality", dsQuality,
 		"jobs", dsJobs,
-		"src_w", srcW,
-		"src_h", srcH,
-		"out_w", outW,
-		"out_h", outH,
 	)
 
-	// Segregate associated images by Type so we can interleave them into the
-	// IFD stream in Aperio's quirky order:
-	//   L0, [thumbnail], L1, L2, …, LN, label, macro
-	// opentile-go's SVS classifier takes the LAST 2 trailing pages as
-	// label + macro (by SubfileType 9 = macro, else label), so they MUST come
-	// after all pyramid levels. thumbnail (non-tiled) belongs between L0 and L1.
-	var thumbnail, label, macro opentile.AssociatedImage
-	var otherAssoc []opentile.AssociatedImage
-	for _, a := range src.Associated() {
-		switch a.Type() {
-		case "thumbnail":
-			thumbnail = a
-		case "label":
-			label = a
-		case "macro", "overview":
-			macro = a
-		default:
-			otherAssoc = append(otherAssoc, a)
-		}
-	}
-	if len(otherAssoc) > 0 {
-		var types []string
-		for _, a := range otherAssoc {
-			types = append(types, a.Type())
-		}
-		slog.Warn("dropping associated images not supported by Aperio classifier",
-			"count", len(otherAssoc),
-			"types", types,
-		)
-	}
-
-	// postL0Hook is called by buildPyramid immediately after writing IFD 0 (L0)
-	// and before writing L1+. This is where we inject the thumbnail so it lands
-	// at IFD position 1 — the slot opentile-go's classifier uses for thumbnail.
-	postL0Hook := func() error {
-		if thumbnail == nil {
-			return nil
-		}
-		return writeOneAssociated(w, thumbnail)
-	}
-
-	start := time.Now()
-	if err := buildPyramid(ctx, src, w, dsFactor, dsQuality, dsJobs, postL0Hook); err != nil {
-		return fmt.Errorf("build pyramid: %w", err)
-	}
-
-	// Write label then macro at the end — they must be the last 2 trailing pages
-	// so opentile-go's classifyPages picks them up correctly.
-	if label != nil {
-		if err := writeOneAssociated(w, label); err != nil {
-			return fmt.Errorf("write associated label: %w", err)
-		}
-	}
-	if macro != nil {
-		if err := writeOneAssociated(w, macro); err != nil {
-			return fmt.Errorf("write associated macro/overview: %w", err)
-		}
-	}
-
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("close writer: %w", err)
-	}
-	closed = true
-
-	elapsed := time.Since(start)
-
-	// Report output file size.
-	var outSizeStr string
-	if fi, err := os.Stat(dsOutput); err == nil {
-		outSizeStr = formatBytes(fi.Size())
+	// Delegate to the shared SVS reduce-then-rebuild engine. All flag
+	// resolution (--target-mag → factor, BigTIFF auto-detect, associated
+	// image ordering) is handled inside downsampleToSVS.
+	if err := downsampleToSVS(
+		cmd.Context(),
+		input,
+		dsOutput,
+		dsFactor,
+		dsTargetMag,
+		dsQuality,
+		dsJobs,
+		dsTileOrder,
+		dsForce,
+		"", // bigtiff: "" means auto (downsample has no --bigtiff flag)
+		false, // noAssociated: downsample always passes through associated images
+	); err != nil {
+		return err
 	}
 
 	slog.Info("downsample complete",
 		"output", dsOutput,
-		"elapsed", elapsed.Round(time.Millisecond).String(),
-		"output_size", outSizeStr,
+		"elapsed", time.Since(start).Round(time.Millisecond).String(),
 	)
-	fmt.Printf("wrote %s (%s, %s)\n", dsOutput, outSizeStr, elapsed.Round(time.Millisecond))
 	return nil
 }
 

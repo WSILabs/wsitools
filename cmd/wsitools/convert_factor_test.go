@@ -87,6 +87,27 @@ func TestConvertFactorRejectsBadValue(t *testing.T) {
 	}
 }
 
+func TestDownsampleAliasEqualsConvert(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	a := filepath.Join(t.TempDir(), "a.svs")
+	b := filepath.Join(t.TempDir(), "b.svs")
+	if o, err := runBin(bin, "downsample", "--factor", "2", "--quiet", "-f", "-o", a, src); err != nil {
+		t.Fatalf("downsample: %v\n%s", err, o)
+	}
+	if o, err := runBin(bin, "convert", "--to", "svs", "--factor", "2", "-f", "-o", b, src); err != nil {
+		t.Fatalf("convert: %v\n%s", err, o)
+	}
+	ha, _ := runBin(bin, "hash", "--mode", "pixel", a)
+	hb, _ := runBin(bin, "hash", "--mode", "pixel", b)
+	if pixelDigest(ha) == "" || pixelDigest(ha) != pixelDigest(hb) {
+		t.Errorf("downsample alias != convert --to svs --factor:\n a=%s\n b=%s", ha, hb)
+	}
+}
+
 func TestConvertFactorOMETIFF(t *testing.T) {
 	bin := stripedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
