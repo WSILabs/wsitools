@@ -6,6 +6,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
+- `convert --factor N` / `--target-mag M` — downsample while converting, for
+  `--to svs|tiff|ome-tiff|cog-wsi`, with correctly-scaled MPP (×N) and
+  magnification (÷N). `dzi`/`szi` not yet supported.
+- `downsample` is now **format-preserving** and works on more sources: it
+  reduces SVS, OME-TIFF, generic-TIFF, and COG-WSI slides in place (same
+  container in/out, MPP/mag scaled), instead of SVS-only. Sources with no
+  matching writer error with a pointer to `convert --to … --factor`. Shares the
+  reduction engine (`internal/downscale`) with `convert --factor`.
+
 - Default soft memory limit: wsitools now sets `GOMEMLIMIT` to 75% of
   physical RAM at startup so memory-heavy conversions degrade under GC
   pressure instead of OOM-ing the host. Override with the global

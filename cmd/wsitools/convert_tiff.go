@@ -29,6 +29,11 @@ import (
 // Without --codec, tile-copy applies when the source is natively tiled and
 // the target container accepts the source codec verbatim.
 func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) error {
+	// --factor / --target-mag: reduce-then-rebuild via runConvertFactor.
+	if cvFactor != 1 || cvTargetMag != 0 {
+		return runConvertFactor(cmd, input, target, start)
+	}
+
 	src, err := source.Open(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {

@@ -21,11 +21,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
@@ -39,12 +37,11 @@ import (
 	otdecoder "github.com/wsilabs/opentile-go/decoder"
 	otresample "github.com/wsilabs/opentile-go/resample"
 	codec "github.com/wsilabs/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/downscale"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/pipeline"
-	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
-	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 const (
@@ -69,16 +66,24 @@ var (
 
 var downsampleCmd = &cobra.Command{
 	Use:   "downsample [flags] <input>",
-	Short: "Downsample a WSI by a power-of-2 factor",
+	Short: "Downsample a WSI by a power-of-2 factor (format-preserving)",
 	Long: `Downsample a WSI by an integer power-of-2 factor (default 2 = 40x → 20x).
 Regenerates the entire pyramid from the new L0; passes through associated
 images (label, macro, thumbnail, overview) verbatim.
 
-v0.1 supports SVS sources only.
+The output container matches the source format:
+  SVS        → svs
+  OME-TIFF   → ome-tiff
+  Generic-TIFF → tiff (plain pyramidal TIFF)
+  COG-WSI    → cog-wsi
+
+For formats without a matching writer (NDPI, Philips-TIFF, BIF, IFE,
+Leica SCN, DICOM, SZI, …) use 'convert --to {svs|tiff|ome-tiff|cog-wsi}
+--factor N' to downsample into a different container.
 
 Examples:
 
-  # 40x → 20x SVS (defaults)
+  # 40x → 20x (same format as source)
   wsitools downsample -o slide-20x.svs slide-40x.svs
 
   # 40x → 10x at higher quality, 8 workers
@@ -106,212 +111,57 @@ func init() {
 
 func runDownsample(cmd *cobra.Command, args []string) error {
 	input := args[0]
-
-	// Validation.
-	if dsQuality < 1 || dsQuality > 100 {
-		return fmt.Errorf("--quality must be in [1, 100], got %d", dsQuality)
-	}
-	if dsJobs < 1 {
-		dsJobs = 1
-	}
-	if _, err := os.Stat(input); err != nil {
-		return fmt.Errorf("input: %w", err)
-	}
-	if !dsForce {
-		if _, err := os.Stat(dsOutput); err == nil {
-			return fmt.Errorf("output exists (use --force to overwrite): %s", dsOutput)
-		}
-	}
-	absIn, _ := filepath.Abs(input)
-	absOut, _ := filepath.Abs(dsOutput)
-	if absIn == absOut {
-		return fmt.Errorf("input and output paths are the same")
-	}
-
-	// Open source.
-	src, err := opentile.OpenFile(input)
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer src.Close()
-	if src.Format() != opentile.FormatSVS {
-		return fmt.Errorf("v0.1 downsample supports SVS sources only; got %s", src.Format())
-	}
-
-	// Parse source ImageDescription (read raw from TIFF tag 270 of IFD 0;
-	// opentile-go's Tiler does not expose the raw description verbatim).
-	rawDesc, err := source.ReadSourceImageDescription(input)
-	if err != nil {
-		return fmt.Errorf("read source ImageDescription: %w", err)
-	}
-	desc, err := ParseImageDescription(rawDesc)
-	if err != nil {
-		return fmt.Errorf("parse source ImageDescription: %w", err)
-	}
-
-	// Resolve --target-mag if specified (overrides --factor).
-	if dsTargetMag > 0 {
-		if desc.AppMag <= 0 {
-			return fmt.Errorf("--target-mag set but source AppMag is unknown/zero")
-		}
-		ratio := desc.AppMag / float64(dsTargetMag)
-		// Snap to nearest valid power-of-2 factor and verify it matches.
-		f := int(ratio + 0.0001)
-		if !isValidFactor(f) || float64(f) != ratio {
-			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", desc.AppMag, dsTargetMag, ratio)
-		}
-		dsFactor = f
-	}
-	if !isValidFactor(dsFactor) {
-		return fmt.Errorf("--factor must be one of {2,4,8,16}, got %d", dsFactor)
-	}
-
-	// Compute output L0 dimensions.
-	srcL0 := src.Levels()[0]
-	srcW := srcL0.Size.W
-	srcH := srcL0.Size.H
-	outW := srcW / dsFactor
-	outH := srcH / dsFactor
-	if outW <= 0 || outH <= 0 {
-		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outW, outH, dsFactor)
-	}
-
-	// Mutate the ImageDescription for the new magnification + geometry.
-	desc.MutateForDownsample(dsFactor, uint32(outW), uint32(outH))
-
-	// Predict output size to decide BigTIFF promotion.
-	bigtiffMode := tiff.BigTIFFOff
-	if predictBigTIFFNeeded(srcL0, src.Levels(), dsFactor) {
-		bigtiffMode = tiff.BigTIFFOn
-	}
-
-	order, err := tileorder.ByName(dsTileOrder)
-	if err != nil {
-		return fmt.Errorf("--tile-order: %w", err)
-	}
-
-	// Open writer (atomic .tmp + rename via streamwriter.Close).
-	w, err := streamwriter.Create(dsOutput, streamwriter.Options{
-		BigTIFF:          bigtiffMode,
-		ImageDescription: desc.Encode(),
-		ToolsVersion:     Version,
-		SourceFormat:     string(src.Format()),
-		FormatName:       "svs",
-		AcceptedOrders:   acceptedOrdersForFormat("svs"),
-		DefaultOrder:     order,
-		MPPX:             desc.MPP,
-		MPPY:             desc.MPP,
-		Magnification:    desc.AppMag,
-		ICCProfile:       src.ICCProfile(),
-	})
-	if err != nil {
-		return fmt.Errorf("create writer: %w", err)
-	}
-
-	// Build pyramid (Abort the writer + remove the tmp file on any error
-	// path; Close is the success path).
-	closed := false
-	defer func() {
-		if !closed {
-			w.Abort()
-		}
-	}()
-
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	start := time.Now()
 
 	slog.Info("starting downsample",
 		"input", input,
 		"output", dsOutput,
 		"factor", dsFactor,
+		"target_mag", dsTargetMag,
 		"quality", dsQuality,
 		"jobs", dsJobs,
-		"src_w", srcW,
-		"src_h", srcH,
-		"out_w", outW,
-		"out_h", outH,
 	)
 
-	// Segregate associated images by Type so we can interleave them into the
-	// IFD stream in Aperio's quirky order:
-	//   L0, [thumbnail], L1, L2, …, LN, label, macro
-	// opentile-go's SVS classifier takes the LAST 2 trailing pages as
-	// label + macro (by SubfileType 9 = macro, else label), so they MUST come
-	// after all pyramid levels. thumbnail (non-tiled) belongs between L0 and L1.
-	var thumbnail, label, macro opentile.AssociatedImage
-	var otherAssoc []opentile.AssociatedImage
-	for _, a := range src.Associated() {
-		switch a.Type() {
-		case "thumbnail":
-			thumbnail = a
-		case "label":
-			label = a
-		case "macro", "overview":
-			macro = a
-		default:
-			otherAssoc = append(otherAssoc, a)
-		}
+	// Probe source format to determine output target.
+	src, err := opentile.OpenFile(input)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
 	}
-	if len(otherAssoc) > 0 {
-		var types []string
-		for _, a := range otherAssoc {
-			types = append(types, a.Type())
-		}
-		slog.Warn("dropping associated images not supported by Aperio classifier",
-			"count", len(otherAssoc),
-			"types", types,
+	srcFormat := string(src.Format())
+	src.Close()
+
+	target, ok := downsampleTargetForFormat(srcFormat)
+	if !ok {
+		return fmt.Errorf(
+			"downsample preserves the source format; %s has no matching writer — "+
+				"use 'convert --to {svs|tiff|ome-tiff|cog-wsi} --factor N' to downsample into a different container",
+			srcFormat,
 		)
 	}
 
-	// postL0Hook is called by buildPyramid immediately after writing IFD 0 (L0)
-	// and before writing L1+. This is where we inject the thumbnail so it lands
-	// at IFD position 1 — the slot opentile-go's classifier uses for thumbnail.
-	postL0Hook := func() error {
-		if thumbnail == nil {
-			return nil
-		}
-		return writeOneAssociated(w, thumbnail)
-	}
-
-	start := time.Now()
-	if err := buildPyramid(ctx, src, w, dsFactor, dsQuality, dsJobs, postL0Hook); err != nil {
-		return fmt.Errorf("build pyramid: %w", err)
-	}
-
-	// Write label then macro at the end — they must be the last 2 trailing pages
-	// so opentile-go's classifyPages picks them up correctly.
-	if label != nil {
-		if err := writeOneAssociated(w, label); err != nil {
-			return fmt.Errorf("write associated label: %w", err)
-		}
-	}
-	if macro != nil {
-		if err := writeOneAssociated(w, macro); err != nil {
-			return fmt.Errorf("write associated macro/overview: %w", err)
-		}
-	}
-
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("close writer: %w", err)
-	}
-	closed = true
-
-	elapsed := time.Since(start)
-
-	// Report output file size.
-	var outSizeStr string
-	if fi, err := os.Stat(dsOutput); err == nil {
-		outSizeStr = formatBytes(fi.Size())
+	// Delegate to the shared dispatch (same engines used by convert --to X --factor N).
+	// bigtiff="" means auto; noAssociated=false (downsample always passes through associated images).
+	if err := dispatchDownsampleByTarget(
+		cmd.Context(),
+		target,
+		input,
+		dsOutput,
+		dsFactor,
+		dsTargetMag,
+		dsQuality,
+		dsJobs,
+		dsTileOrder,
+		"", // bigtiff: "" means auto (downsample has no --bigtiff flag)
+		dsForce,
+		false, // noAssociated: downsample always passes through associated images
+	); err != nil {
+		return err
 	}
 
 	slog.Info("downsample complete",
 		"output", dsOutput,
-		"elapsed", elapsed.Round(time.Millisecond).String(),
-		"output_size", outSizeStr,
+		"elapsed", time.Since(start).Round(time.Millisecond).String(),
 	)
-	fmt.Printf("wrote %s (%s, %s)\n", dsOutput, outSizeStr, elapsed.Round(time.Millisecond))
 	return nil
 }
 
@@ -424,7 +274,7 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	}
 	slog.Debug("materialising output L0 raster", "out_w", outW, "out_h", outH, "raster_mb", rasterBytes/(1024*1024))
 	outL0 := make([]byte, rasterBytes)
-	if err := materializeOutputL0(ctx, src, srcL0, outL0, outW, outH, factor); err != nil {
+	if err := downscale.MaterializeReducedL0(ctx, src, srcL0, outL0, outW, outH, factor); err != nil {
 		if progress != nil {
 			progress.Wait()
 		}
@@ -523,162 +373,6 @@ func cropRaster(src []byte, srcW, srcH, dstW, dstH int) []byte {
 		copy(dst[y*rowBytes:(y+1)*rowBytes], src[y*srcW*3:y*srcW*3+rowBytes])
 	}
 	return dst
-}
-
-// materializeOutputL0 decodes every source-L0 tile reduced by 1/factor and
-// pastes the result into outL0 at the correct image-space position. Each tile
-// is reduced codec-agnostically (see decodeReducedTile): codec-domain scaled
-// decode where the source codec supports it (JPEG IDCT fast-scale, JP2K/HTJ2K
-// wavelet resolution decode), else full-decode + chained 2x2 box-average.
-func materializeOutputL0(ctx context.Context, src *opentile.Slide, srcL0 opentile.Level, outL0 []byte, outW, outH, factor int) error {
-	srcCompression := srcL0.Compression
-	srcGrid := srcL0.Grid
-	srcTileW := srcL0.TileSize.W
-	srcTileH := srcL0.TileSize.H
-	srcW := srcL0.Size.W
-	srcH := srcL0.Size.H
-
-	// libjpeg-turbo's scale formula: outDim = ceil(inDim * 1 / factor).
-	// For interior tiles this is srcTileW/factor, srcTileH/factor exactly
-	// (we choose factors that divide common tile sizes 240/256 cleanly:
-	// 240/2=120, 240/4=60, 240/8=30, 240/16=15; same shape for 256).
-	fac, ok := otdecoder.GetByCompressionTag(opentile.CompressionToTIFFTag(srcCompression))
-	if !ok {
-		return fmt.Errorf("no decoder registered for source compression %s", srcCompression)
-	}
-
-	tileBuf := make([]byte, src.TileMaxSize(srcL0.Index))
-
-	for ty := 0; ty < srcGrid.H; ty++ {
-		for tx := 0; tx < srcGrid.W; tx++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			n, err := src.RawTileInto(srcL0.Index, tx, ty, tileBuf)
-			if err != nil {
-				return fmt.Errorf("read source tile (%d,%d): %w", tx, ty, err)
-			}
-			compressed := tileBuf[:n]
-			// Compute the image-space destination rect for this source tile.
-			// The source tile covers [sx0, sx1) × [sy0, sy1) in source-pixel
-			// space, clamped at the image bounds. The corresponding output
-			// region is [sx0/factor, sx1/factor) × [sy0/factor, sy1/factor).
-			sx0 := tx * srcTileW
-			sy0 := ty * srcTileH
-			sx1 := sx0 + srcTileW
-			sy1 := sy0 + srcTileH
-			if sx1 > srcW {
-				sx1 = srcW
-			}
-			if sy1 > srcH {
-				sy1 = srcH
-			}
-			validSrcW := sx1 - sx0
-			validSrcH := sy1 - sy0
-
-			// Codec-domain scaled decode where the source codec supports it
-			// (JPEG IDCT, JP2K/HTJ2K wavelet resolution), else full-decode +
-			// box-halve. Self-contained per tile, so seam-free.
-			decoded, decW, decH, err := decodeReducedTile(fac, compressed, srcTileW, srcTileH, factor)
-			if err != nil {
-				return fmt.Errorf("decode tile (%d,%d): %w", tx, ty, err)
-			}
-
-			// The valid region inside the decoded tile (in decoded-pixel
-			// units): only the pixels corresponding to actual image content,
-			// not padding past the slide edge.
-			validDecW := (validSrcW + factor - 1) / factor
-			validDecH := (validSrcH + factor - 1) / factor
-			if validDecW > decW {
-				validDecW = decW
-			}
-			if validDecH > decH {
-				validDecH = decH
-			}
-
-			// Destination position in the output L0 raster.
-			dx := sx0 / factor
-			dy := sy0 / factor
-			// Clamp to output bounds (defensive: rounding could nudge past
-			// outW/outH at the slide edge).
-			if dx+validDecW > outW {
-				validDecW = outW - dx
-			}
-			if dy+validDecH > outH {
-				validDecH = outH - dy
-			}
-			pasteIntoRaster(outL0, outW, outH, dx, dy, decoded, decW, validDecW, validDecH)
-		}
-	}
-	return nil
-}
-
-// pasteIntoRaster copies the top-left validW×validH region of the decoded RGB
-// tile (which has stride decW*3) into the dst raster at position (dx, dy).
-// Caller must have clamped validW/validH to fit inside dst.
-func pasteIntoRaster(dst []byte, dstW, dstH, dx, dy int, src []byte, srcStrideW, validW, validH int) {
-	if validW <= 0 || validH <= 0 {
-		return
-	}
-	rowBytes := validW * 3
-	srcStride := srcStrideW * 3
-	dstStride := dstW * 3
-	for y := 0; y < validH; y++ {
-		srcOff := y * srcStride
-		dstOff := (dy+y)*dstStride + dx*3
-		copy(dst[dstOff:dstOff+rowBytes], src[srcOff:srcOff+rowBytes])
-	}
-}
-
-// decodeReducedTile decodes one source tile's compressed bytes reduced by
-// `factor`, preferring codec-domain scaled decode (DecodeOptions.Scale) and
-// falling back to a full decode + box-halving only when the codec cannot
-// scale-decode (ErrUnsupportedScale). Returns packed RGB and its actual dims.
-func decodeReducedTile(fac otdecoder.Factory, compressed []byte, srcTileW, srcTileH, factor int) (pix []byte, w, h int, err error) {
-	dec := fac.New()
-	defer dec.Close()
-	img, derr := dec.Decode(compressed, otdecoder.DecodeOptions{Scale: factor, Format: otdecoder.PixelFormatRGB})
-	if derr == nil {
-		return img.Pix, img.Width, img.Height, nil
-	}
-	if !errors.Is(derr, otdecoder.ErrUnsupportedScale) {
-		return nil, 0, 0, derr
-	}
-	// Codec can't scale-decode at this factor: full decode + box-halve.
-	full, ferr := dec.Decode(compressed, otdecoder.DecodeOptions{Scale: 1, Format: otdecoder.PixelFormatRGB})
-	if ferr != nil {
-		return nil, 0, 0, ferr
-	}
-	return downsampleByPowerOf2(full.Pix, srcTileW, srcTileH, factor)
-}
-
-// downsampleByPowerOf2 chains Box-halving steps log2(factor) times to produce
-// a downsampled RGB buffer. Returns the downsampled bytes and its dimensions.
-// Requires factor to be a power of two and srcW/srcH to be even at every
-// step (the v0.1 caller ensures this by choosing factor ∈ {2,4,8,16} and
-// using source tile sizes that are multiples of 16).
-func downsampleByPowerOf2(rgb []byte, srcW, srcH, factor int) ([]byte, int, int, error) {
-	cur := rgb
-	curW, curH := srcW, srcH
-	for f := factor; f > 1; f /= 2 {
-		srcImg := &otdecoder.Image{
-			Width:  curW,
-			Height: curH,
-			Stride: curW * 3,
-			Format: otdecoder.PixelFormatRGB,
-			Pix:    cur,
-		}
-		dstImg := otdecoder.NewImageFormat(curW/2, curH/2, otdecoder.PixelFormatRGB)
-		if err := otresample.ImageInto(srcImg, dstImg, otresample.Box); err != nil {
-			return nil, 0, 0, err
-		}
-		cur = dstImg.Pix
-		curW /= 2
-		curH /= 2
-	}
-	return cur, curW, curH, nil
 }
 
 // encodeAndWriteLevel encodes the in-memory RGB raster into 256x256 abbreviated
