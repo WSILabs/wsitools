@@ -69,6 +69,14 @@ queued, deferred, or under consideration.
   saw only L0); associated images enumerated in the OME-XML; SampleFormat
   (339) + OME-XML preamble added. Grounded in the OME-TIFF spec
   (`docs/references/ome-tiff-spec-notes.md`).
+- ✅ **DONE: associated-image editing — Slice 1 (SVS + generic-TIFF).** Four
+  command groups (`label`, `macro`, `thumbnail`, `overview`), each with `remove`
+  and `replace` subcommands. Pyramid tile bytes are copied verbatim (prefix-copy
+  + tail-re-emit splice; no decode, no re-encode); only the tail IFD is rewritten.
+  `label remove` is the primary PHI/deidentification path. `label replace` uses
+  LZW + Predictor 2 by default (lossless, barcode-safe); `macro`/`thumbnail`/
+  `overview replace` default to JPEG. `--in-place` for atomic overwrite. Built on
+  opentile-go v0.36.0 (`AssociatedIFDOffset`) + `github.com/hhrutter/lzw`.
 
 ## Planned
 
@@ -76,6 +84,17 @@ queued, deferred, or under consideration.
 - **`dump-tile`** — single tile's compressed bytes to file or stdout. Pure debug aid.
 
 ### Operations
+- **Associated-image editing — Slice 2 (OME-TIFF + COG-WSI + extras).** Extends
+  the Slice 1 splice engine to handle SubIFD-bearing layouts:
+  - OME-TIFF: SubIFD-range-aware splice + OME-XML `<Image>` sync (drop or swap
+    the `<Image>` block that corresponds to the target associated image).
+  - COG-WSI: SubIFD splice preserving the COG-WSI ghost area and WSI extension
+    tags.
+  - Additional flags deferred from Slice 1: `--rotate {90,180,270}` for label
+    orientation correction; `--if-exists {remove,skip,error}` for idempotent
+    scripted remove (default: `error` if already absent).
+  - DICOM-WSI: associated-instance drop / swap (separate DICOM series logic,
+    not a TIFF splice).
 - **`tagset`** — in-place TIFF tag edit (e.g. ImageDescription, Software). Useful for fixing one bad slide in a pool without full re-encode.
 - **`inventory`** — walk a directory; dump CSV/JSON of slide metadata for pool-management UIs.
 - **`verify`** — open every IFD, decode every tile, report errors. "fsck for WSI."

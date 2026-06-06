@@ -39,6 +39,29 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   (label / macro / thumbnail / overview) as PNG (default) or JPEG. JPEG
   output is byte-pass-through when the source is already JPEG.
 
+**Associated-image editing**
+
+- `wsitools label remove <slide>` — strip the label image (PHI) from an
+  SVS or generic-TIFF file. The pyramid tile bytes are copied verbatim
+  (no decode, no re-encode); only the tail IFD is rewritten. Output is a
+  clean, compact file with no recoverable label PHI. Writes
+  `<stem>_relabeled<ext>` next to the input by default; use `-o/--output`
+  for an explicit path or `--in-place` to atomically overwrite the
+  original (temp + fsync + rename).
+- `wsitools label replace --image new.png <slide>` — replace the label
+  with a new image. Encoding defaults to LZW + Predictor 2 (lossless,
+  barcode-safe); override with `--compression {jpeg,lzw,deflate,none}`.
+  `--resize fit|stretch|none` (default `fit`), `--bg RRGGBB` for
+  letterbox fill (default `F5F5E6`), `--force` to skip the aspect guard,
+  `--label-dims WxH` to override target dimensions.
+- `wsitools macro|thumbnail|overview remove|replace …` — same splice
+  mechanics for the other associated-image types; `replace` defaults to
+  JPEG encoding.
+
+Other formats (DICOM, NDPI, Philips, BIF, IFE, Leica) are not supported
+for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
+`label replace` instead.
+
 **Conversion**
 
 - `wsitools convert --to cog-wsi` — losslessly copy a WSI into the COG-WSI
@@ -70,19 +93,19 @@ DICOM-WSI.
 
 ### Format × command support
 
-| Source format | `info` | `region` | `dump-ifds` | `extract`¹ | `hash`² | convert (from)³ | convert (to)⁴ | `downsample` |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| SVS           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
-| Philips-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — |
-| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
-| BIF           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — |
-| generic-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
-| NDPI          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
-| OME-OneFrame  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
-| Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — |
-| COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ |
-| IFE           | ✓ | ✓ | — | ✓ | ✓ | ✓  | — | — |
-| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | —⁶ | — |
+| Source format | `info` | `region` | `dump-ifds` | `extract`¹ | `hash`² | convert (from)³ | convert (to)⁴ | `downsample` | label/macro remove\|replace⁷ |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| SVS           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
+| Philips-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — | — |
+| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | —⁸ |
+| BIF           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — | — |
+| generic-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
+| NDPI          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
+| OME-OneFrame  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
+| Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
+| COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | —⁸ |
+| IFE           | ✓ | ✓ | — | ✓ | ✓ | ✓  | — | — | — |
+| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | —⁶ | — | — |
 
 ¹ `extract` works when the slide carries that associated image (label/macro/thumbnail/overview); run `info` to list which.
 ² `hash`: `--mode pixel` works for every format; the default file-mode is a single-file SHA-256.
@@ -90,6 +113,8 @@ DICOM-WSI.
 ⁴ **convert (to)** — available as a convert output **target**. The full target set is `cog-wsi`, `svs`, `tiff` (→ generic-TIFF), `ome-tiff`, `dzi`, `szi`; **DZI and SZI** are output-only pyramid formats (not readable sources, so not listed as rows). All ✓ targets except `dzi`/`szi` also accept `--factor N` / `--target-mag M` to downsample during conversion (scales MPP ×N / magnification ÷N).
 ⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
 ⁶ DICOM-WSI **write** is planned (writer scoped, not yet built).
+⁷ **label/macro remove|replace** — applies equally to `thumbnail` and `overview`. Pyramid tile bytes are copied verbatim (no decode/re-encode); only the tail IFD is rewritten.
+⁸ Planned (Slice 2): SubIFD-range-aware splice for OME-TIFF + OME-XML `<Image>` sync; SubIFD splice for COG-WSI.
 
 `downsample` is **format-preserving** — it reduces a slide and emits the same
 container it read (the ✓ rows: SVS, OME-TIFF, generic-TIFF, COG-WSI). Other
@@ -185,6 +210,36 @@ wsitools hash slide.svs
 # Pixel-stable hash (decodes L0 tiles → SHA-256 of RGB raster)
 wsitools hash --mode pixel slide.svs
 ```
+
+### Associated-image editing (deidentification)
+
+```sh
+# Strip the label (PHI) — pyramid bytes untouched, no decode/re-encode
+wsitools label remove slide.svs
+# → writes slide_relabeled.svs next to the input
+
+# Overwrite the original atomically (temp + fsync + rename)
+wsitools label remove --in-place slide.svs
+
+# Explicit output path
+wsitools label remove -o deidentified.svs slide.svs
+
+# Replace the label with a new image (LZW+predictor2 default — lossless, barcode-safe)
+wsitools label replace --image new_label.png slide.svs
+
+# Replace with explicit compression and letterbox background
+wsitools label replace --image new_label.png --compression jpeg --bg F5F5E6 slide.svs
+
+# Remove or replace the macro / thumbnail / overview the same way
+wsitools macro remove slide.svs
+wsitools macro replace --image new_macro.jpg slide.svs
+wsitools thumbnail remove slide.svs
+wsitools overview remove slide.svs
+```
+
+Supported for SVS and generic-TIFF. OME-TIFF and COG-WSI support is
+planned (Slice 2). Other formats (DICOM, NDPI, Philips, BIF, IFE, Leica)
+are not writable — convert first with `convert --to {svs,tiff}`.
 
 ### Conversion
 

@@ -6,6 +6,35 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
+- **Associated-image editing** — four command groups, each with `remove` and
+  `replace` subcommands: `label`, `macro`, `thumbnail`, `overview`. Supported
+  on SVS and generic-TIFF.
+  - `remove` strips the target associated image entirely (label PHI removal).
+  - `replace` swaps it with a new image file.
+  - Pyramid tile bytes are **copied verbatim** (no decode, no re-encode); only
+    the tail IFD is rewritten via a prefix-copy + tail-re-emit splice. Output
+    contains no recoverable label PHI.
+  - Output defaults to `<stem>_relabeled<ext>` next to the input (auto-numbered
+    if the path exists); `-o/--output` for an explicit path; `--in-place` for
+    atomic overwrite (temp + fsync + rename).
+  - `label replace` defaults to **LZW + Predictor 2** (lossless, barcode-safe);
+    `macro`/`thumbnail`/`overview replace` default to **JPEG**.
+    `--compression {jpeg,lzw,deflate,none}` overrides.
+  - `--resize fit|stretch|none` (default `fit`), `--bg RRGGBB` letterbox fill
+    (default `F5F5E6`), `--force` to skip the aspect guard,
+    `--label-dims WxH` to override target dimensions.
+  - OME-TIFF and COG-WSI: planned (Slice 2 — SubIFD-range-aware splice +
+    OME-XML sync). Other formats (DICOM, NDPI, Philips, BIF, IFE, Leica)
+    are rejected with a pointer to `convert`.
+- opentile-go bumped to **v0.36.0** — adds `AssociatedIFDOffset` used by the
+  splice engine to locate and excise associated-image IFDs without walking the
+  full IFD chain.
+
+### Dependencies
+
+- New: `github.com/hhrutter/lzw` — pure-Go LZW encoder used for
+  lossless label replacement (LZW + Predictor 2).
+
 - `convert --factor N` / `--target-mag M` — downsample while converting, for
   `--to svs|tiff|ome-tiff|cog-wsi`, with correctly-scaled MPP (×N) and
   magnification (÷N). `dzi`/`szi` not yet supported.
