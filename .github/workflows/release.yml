@@ -1,0 +1,78 @@
+name: Release
+
+# Create a GitHub Release when a vX.Y.Z tag is pushed. Release notes are the
+# matching section of CHANGELOG.md; the title is the annotated tag's subject
+# line (falling back to the tag name). Notes-only — no binary artifacts (the
+# codec cgo deps make cross-platform binaries a separate concern). The CI
+# workflow runs the test suite on the same tag push in parallel.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: create GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags so the annotated tag's message is readable.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Build release notes + title
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+
+          # Extract the CHANGELOG section for this version (between its
+          # "## [VERSION] ..." header and the next "## [" header).
+          awk -v ver="$VERSION" '
+            BEGIN { pat = "^## \\[" ver "\\]" }
+            $0 ~ pat { f = 1; next }
+            f && /^## \[/ { exit }
+            f { print }
+          ' CHANGELOG.md > release_notes.md
+
+          if [ ! -s release_notes.md ]; then
+            echo "::warning::no CHANGELOG section for ${VERSION}; using a placeholder"
+            printf 'Release %s\n' "$TAG" > release_notes.md
+          fi
+
+          TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          [ -z "$TITLE" ] && TITLE="$TAG"
+          # Persist title across steps (may contain spaces/colons).
+          {
+            echo "tag=$TAG"
+            echo "title<<__EOF__"
+            echo "$TITLE"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          # Mark pre-releases (tags like v1.2.3-rc1).
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          TITLE: ${{ steps.meta.outputs.title }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --notes-file release_notes.md $PRERELEASE
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TITLE" --notes-file release_notes.md $PRERELEASE
+          fi

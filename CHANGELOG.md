@@ -4,6 +4,12 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Changed
+
+- CI: a `Release` workflow now auto-creates the GitHub Release on `v*` tag push,
+  with notes pulled from the matching `CHANGELOG.md` section and the title from
+  the annotated tag's subject (notes-only; no binary artifacts).
+
 ## [0.21.0] — 2026-06-06
 
 ### Added
