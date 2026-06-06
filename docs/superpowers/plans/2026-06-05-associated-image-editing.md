@@ -13,6 +13,8 @@
 
 **Dependency note:** Phase B (engine) is fully independent and is built first. Phase C (integration) consumes the opentile-go release from Phase A; if that release is not yet available, **stop after Phase B** and resume Phase C once the opentile-go bump lands. Do not substitute a heuristic locator — the opentile-go method is the decided design.
 
+**opentile-go issue (Phase A, filed):** https://github.com/WSILabs/opentile-go/issues/15
+
 **Branch:** create `feat/associated-image-editing` off `main`. Never implement on `main`.
 
 ---
