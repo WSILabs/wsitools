@@ -19,9 +19,15 @@ import (
 
 const rowsPerStrip = 2
 
+// tagWSIImageType is the wsitools/COG-WSI private tag (65080) carrying the
+// associated-image type. opentile-go's generic-TIFF classifier treats it as
+// authoritative (formats/generictiff/classifier.go).
+const tagWSIImageType = 65080
+
 // replaceOpts controls how buildReplacementIFD encodes the image.
 type replaceOpts struct {
 	typ         string     // label|macro|thumbnail|overview
+	format      string     // source container: "svs" | "generic-tiff"
 	compression string     // "", "jpeg", "lzw", "deflate", "none"
 	desc        string     // ImageDescription to write (may be empty)
 	resize      string     // "fit"|"stretch"|"none" ("" => "fit")
@@ -61,18 +67,55 @@ func buildReplacementIFD(img image.Image, o replaceOpts) (*edit.ReplacementIFD, 
 		desc = fmt.Sprintf("%s %dx%d", o.typ, width, height)
 	}
 
+	var rep *edit.ReplacementIFD
+	var err error
 	switch codec {
 	case "lzw":
-		return buildLZWReplacementIFD(img, width, height, desc)
+		rep, err = buildLZWReplacementIFD(img, width, height, desc)
 	case "jpeg":
-		return buildJPEGReplacementIFD(img, width, height, desc)
+		rep, err = buildJPEGReplacementIFD(img, width, height, desc)
 	case "deflate":
-		return buildDeflateReplacementIFD(img, width, height, desc)
+		rep, err = buildDeflateReplacementIFD(img, width, height, desc)
 	case "none":
-		return buildRawReplacementIFD(img, width, height, desc)
+		rep, err = buildRawReplacementIFD(img, width, height, desc)
 	default:
 		return nil, fmt.Errorf("unknown compression %q (want lzw, jpeg, deflate, none)", codec)
 	}
+	if err != nil {
+		return nil, err
+	}
+	applyAssocMarkers(rep, o.format, o.typ)
+	return rep, nil
+}
+
+// applyAssocMarkers stamps the new IFD with the signals each reader uses to
+// classify an associated image by type, so a replaced/added image is read back
+// as the intended type rather than misclassified.
+//
+//   - SVS classification is purely structural (opentile-go formats/svs/series.go):
+//     a trailing non-tiled page is Macro iff NewSubfileType==9, else Label. The
+//     codec builders default NewSubfileType=1 (correct for label/thumbnail); the
+//     macro/overview image MUST be 9, or it is misread as a second label and the
+//     real label slot is clobbered.
+//   - generic-TIFF prefers the WSIImageType private tag (formats/generictiff/
+//     classifier.go) over dimension/codec heuristics; emit it so the type is
+//     authoritative (e.g. a JPEG-encoded "label" isn't guessed as a thumbnail).
+//     It is ignored by the SVS reader, so emitting it unconditionally is safe.
+func applyAssocMarkers(rep *edit.ReplacementIFD, format, typ string) {
+	if format == "svs" && (typ == "macro" || typ == "overview") {
+		b := make([]byte, 4)
+		binary.LittleEndian.PutUint32(b, 9)
+		for i := range rep.Tags {
+			if rep.Tags[i].Tag == edit.TagNewSubfileType {
+				rep.Tags[i].Bytes = b
+			}
+		}
+	}
+	wt := append([]byte(typ), 0)
+	rep.Tags = append(rep.Tags, edit.OutTag{
+		Tag: tagWSIImageType, Type: edit.TypeASCII, Count: uint64(len(wt)), Inline: false, Bytes: wt,
+	})
+	sortTags(rep.Tags)
 }
 
 // ---------- codec: LZW + predictor 2 ----------
