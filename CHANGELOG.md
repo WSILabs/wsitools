@@ -4,6 +4,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-06-06
+
 ### Added
 
 - **Associated-image editing** — four command groups, each with `remove` and
