@@ -95,6 +95,73 @@ func TestSpliceRemoveBigTIFF(t *testing.T) {
 	}
 }
 
+func makeReplacement(desc string) *ReplacementIFD {
+	strip := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	descBytes := append([]byte(desc), 0)
+	le := func(v uint16) []byte { return []byte{byte(v), byte(v >> 8)} }
+	le32 := func(v uint32) []byte { return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)} }
+	return &ReplacementIFD{
+		Tags: []OutTag{
+			{Tag: TagImageWidth, Type: TypeLong, Count: 1, Inline: true, Bytes: le32(2)},
+			{Tag: TagImageLength, Type: TypeLong, Count: 1, Inline: true, Bytes: le32(2)},
+			{Tag: TagImageDescription, Type: TypeASCII, Count: uint64(len(descBytes)), Inline: false, Bytes: descBytes},
+			{Tag: TagStripOffsets, Type: TypeLong, Count: 1, Inline: false, Bytes: make([]byte, 4), ResolvesToOffset: true, OffsetRefs: []int{0}},
+			{Tag: TagStripByteCounts, Type: TypeLong, Count: 1, Inline: true, Bytes: le32(uint32(len(strip)))},
+			{Tag: TagCompression, Type: TypeShort, Count: 1, Inline: true, Bytes: le(1)},
+		},
+		StripData: [][]byte{strip},
+	}
+}
+
+func TestSpliceReplace(t *testing.T) {
+	data, _ := buildClassicTIFF(t, []string{"Aperio\nimage", "Aperio\nlabel 4x4"})
+	in := writeTemp(t, data)
+	out := filepath.Join(filepath.Dir(in), "out.tiff")
+	f, _ := Parse(bytes.NewReader(data), int64(len(data)))
+	if err := Splice(SpliceParams{InPath: in, OutPath: out, File: f,
+		Mode: SpliceReplace, TargetIdx: 1, Replacement: makeReplacement("Aperio\nlabel NEW")}); err != nil {
+		t.Fatal(err)
+	}
+	outData, _ := os.ReadFile(out)
+	of, err := Parse(bytes.NewReader(outData), int64(len(outData)))
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if len(of.IFDs) != 2 {
+		t.Fatalf("got %d IFDs, want 2", len(of.IFDs))
+	}
+	if bytes.Contains(outData, []byte("label 4x4")) {
+		t.Errorf("old label bytes still present")
+	}
+	d1, _ := of.IFDs[1].StringValue(TagImageDescription)
+	if d1 != "Aperio\nlabel NEW" {
+		t.Errorf("replaced desc = %q", d1)
+	}
+}
+
+func TestSpliceAppend(t *testing.T) {
+	data, _ := buildClassicTIFF(t, []string{"Aperio\nimage"})
+	in := writeTemp(t, data)
+	out := filepath.Join(filepath.Dir(in), "out.tiff")
+	f, _ := Parse(bytes.NewReader(data), int64(len(data)))
+	if err := Splice(SpliceParams{InPath: in, OutPath: out, File: f,
+		Mode: SpliceAppend, TargetIdx: len(f.IFDs), Replacement: makeReplacement("Aperio\nlabel ADDED")}); err != nil {
+		t.Fatal(err)
+	}
+	outData, _ := os.ReadFile(out)
+	of, err := Parse(bytes.NewReader(outData), int64(len(outData)))
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if len(of.IFDs) != 2 {
+		t.Fatalf("got %d IFDs, want 2", len(of.IFDs))
+	}
+	d1, _ := of.IFDs[1].StringValue(TagImageDescription)
+	if d1 != "Aperio\nlabel ADDED" {
+		t.Errorf("appended desc = %q", d1)
+	}
+}
+
 // buildBigTIFF builds a minimal little-endian BigTIFF with one IFD per desc.
 // Per-IFD layout (sequential, non-interleaved):
 //

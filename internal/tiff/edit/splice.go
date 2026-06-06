@@ -326,11 +326,24 @@ func emitReplacementIFD(out *os.File, h *Header, rep *ReplacementIFD) (uint64, u
 		if t.Tag != TagStripOffsets {
 			continue
 		}
+		// Build the strip-offsets buffer in file byte order.
 		buf := make([]byte, 4*len(stripOffsets))
 		for j, so := range stripOffsets {
 			h.ByteOrder.PutUint32(buf[j*4:], uint32(so))
 		}
 		rep.Tags[i].Bytes = buf
+		if len(buf) <= valueFieldSize {
+			// Fits inline: store the actual offsets in the value field.
+			// convertInlineEndian expects LE bytes; re-encode buf in LE.
+			leBuf := make([]byte, len(buf))
+			for j, so := range stripOffsets {
+				binary.LittleEndian.PutUint32(leBuf[j*4:], uint32(so))
+			}
+			rep.Tags[i].Bytes = leBuf
+			rep.Tags[i].Inline = true
+			// No out-of-line blob; leave outlineOff[i] unset.
+			continue
+		}
 		outlineOff[i] = cur
 		if _, err := out.Write(buf); err != nil {
 			return 0, 0, err
