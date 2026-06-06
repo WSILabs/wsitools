@@ -45,7 +45,7 @@ jobs:
           fi
 
           TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
-          [ -z "$TITLE" ] && TITLE="$TAG"
+          if [ -z "$TITLE" ]; then TITLE="$TAG"; fi
           # Persist title across steps (may contain spaces/colons).
           {
             echo "tag=$TAG"
