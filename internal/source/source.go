@@ -67,6 +67,10 @@ type AssociatedImage interface {
 	Size() image.Point
 	Compression() Compression
 	Bytes() ([]byte, error) // self-contained encoded blob
+
+	// IFDOffset returns the byte offset of the backing TIFF IFD for
+	// TIFF-family slides; ok=false otherwise.
+	IFDOffset() (int64, bool)
 }
 
 // Compression mirrors opentile-go's Compression enum.

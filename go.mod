@@ -3,9 +3,10 @@ module github.com/wsilabs/wsitools
 go 1.26.2
 
 require (
+	github.com/hhrutter/lzw v1.0.0
 	github.com/spf13/cobra v1.10.2
 	github.com/vbauerster/mpb/v8 v8.12.0
-	github.com/wsilabs/opentile-go v0.35.0
+	github.com/wsilabs/opentile-go v0.36.0
 	golang.org/x/image v0.39.0
 	golang.org/x/sys v0.41.0
 )
