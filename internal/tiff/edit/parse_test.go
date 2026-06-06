@@ -3,6 +3,7 @@ package edit
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -64,6 +65,48 @@ func buildClassicTIFF(t *testing.T, descs []string) ([]byte, []uint64) {
 		le.PutUint32(out[nextPatches[i].at:], next)
 	}
 	return out, ifdOffsets
+}
+
+func TestParsePopulatesRanges(t *testing.T) {
+	data, offs := buildClassicTIFF(t, []string{"Aperio\nimage", "Aperio\nlabel 4x4"})
+	f, err := Parse(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Ranges == nil {
+		t.Fatal("Ranges not populated")
+	}
+	if got := f.Ranges.MinOffsetOfOwner(1); got > offs[1] {
+		t.Errorf("MinOffsetOfOwner(1) = %d, want <= %d (its record)", got, offs[1])
+	}
+	if _, ok := f.Ranges.AnyRangeOfOwnerAtOrAfter(0, offs[1]); ok {
+		t.Errorf("IFD0 owns bytes >= IFD1 record; expected clean layout")
+	}
+}
+
+func TestParseRejectsSubIFDs(t *testing.T) {
+	// Hand-build a 1-IFD classic TIFF whose single entry is SubIFDs (330).
+	var b bytes.Buffer
+	le := binary.LittleEndian
+	w16 := func(v uint16) { x := make([]byte, 2); le.PutUint16(x, v); b.Write(x) }
+	w32 := func(v uint32) { x := make([]byte, 4); le.PutUint32(x, v); b.Write(x) }
+	b.WriteString("II")
+	w16(42)
+	w32(8) // first IFD at offset 8
+	w16(1) // one entry
+	w16(330)
+	w16(4) // LONG
+	w32(1)
+	w32(0) // value
+	w32(0) // next IFD
+	data := b.Bytes()
+	_, err := Parse(bytes.NewReader(data), int64(len(data)))
+	if err == nil {
+		t.Fatal("expected ErrUnexpectedLayout for SubIFDs, got nil")
+	}
+	if !errors.Is(err, ErrUnexpectedLayout) {
+		t.Errorf("expected errors.Is(err, ErrUnexpectedLayout), got: %v", err)
+	}
 }
 
 func TestParseChainAndOffsets(t *testing.T) {
