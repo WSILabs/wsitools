@@ -69,7 +69,7 @@ func (s *opentileSource) Associated() []AssociatedImage {
 	src := s.t.Associated()
 	out := make([]AssociatedImage, 0, len(src))
 	for _, a := range src {
-		out = append(out, &opentileAssociated{a: a})
+		out = append(out, &opentileAssociated{a: a, slide: s.t})
 	}
 	return out
 }
@@ -132,7 +132,8 @@ func (l *opentileLevel) Compression() Compression {
 }
 
 type opentileAssociated struct {
-	a opentile.AssociatedImage
+	a     opentile.AssociatedImage
+	slide *opentile.Slide
 }
 
 func (a *opentileAssociated) Type() string {
@@ -145,6 +146,9 @@ func (a *opentileAssociated) Size() image.Point {
 func (a *opentileAssociated) Bytes() ([]byte, error) { return a.a.Bytes() }
 func (a *opentileAssociated) Compression() Compression {
 	return mapOpentileCompression(a.a.Compression())
+}
+func (a *opentileAssociated) IFDOffset() (int64, bool) {
+	return a.slide.AssociatedIFDOffset(a.a)
 }
 
 func mapOpentileCompression(c opentile.Compression) Compression {
