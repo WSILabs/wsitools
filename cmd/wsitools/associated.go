@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"image"
@@ -142,6 +141,27 @@ func deriveAssocPath(absInput string, overwrite bool) string {
 
 // ---------- run logic ----------
 
+// parseSlideFile parses the IFD structure of a TIFF slide without materializing
+// the whole file in memory: edit.Parse reads only IFD records and small tag
+// blobs via bounded ReadAt calls. The handle is closed before returning —
+// edit.Splice reopens the input itself for the prefix copy.
+func parseSlideFile(input string) (*edit.File, error) {
+	fh, err := os.Open(input)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", input, err)
+	}
+	defer fh.Close()
+	st, err := fh.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat %s: %w", input, err)
+	}
+	f, err := edit.Parse(fh, st.Size())
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", input, err)
+	}
+	return f, nil
+}
+
 func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 	src, err := source.Open(input)
 	if err != nil {
@@ -153,13 +173,9 @@ func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 		return err
 	}
 
-	data, err := os.ReadFile(input)
+	f, err := parseSlideFile(input)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", input, err)
-	}
-	f, err := edit.Parse(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return fmt.Errorf("parse %s: %w", input, err)
+		return err
 	}
 
 	idx, _, err := locateAssociated(src, f, typ)
@@ -198,13 +214,9 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 		return err
 	}
 
-	data, err := os.ReadFile(input)
+	f, err := parseSlideFile(input)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", input, err)
-	}
-	f, err := edit.Parse(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return fmt.Errorf("parse %s: %w", input, err)
+		return err
 	}
 
 	idx, existing, locErr := locateAssociated(src, f, typ)

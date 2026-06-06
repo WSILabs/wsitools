@@ -424,11 +424,6 @@ func emitReplacementIFD(out *os.File, h *Header, rep *ReplacementIFD) (uint64, u
 func convertInlineEndian(tp TagType, count uint64, leBytes []byte, order binary.ByteOrder, valueFieldSize int) []byte {
 	out := make([]byte, valueFieldSize)
 	sz := tp.Size()
-	total := int(count) * sz
-	if total > valueFieldSize {
-		total = valueFieldSize
-	}
-	_ = total
 	for i := 0; i < int(count); i++ {
 		b := leBytes[i*sz : (i+1)*sz]
 		var v uint64
@@ -496,6 +491,16 @@ func reemitIFD(out *os.File, in *os.File, file *File, idx int) (uint64, uint64, 
 	} else {
 		oldOffsets, ok = ifd.UintArray(TagTileOffsets, h.ByteOrder)
 		stripTag, countTag = TagTileOffsets, TagTileByteCounts
+	}
+	// Guard against silently dropping pixel data: if this IFD carries a
+	// Strip/TileOffsets tag whose offset array we could not load (e.g. an
+	// out-of-line array larger than the parser's inline cache), refuse to
+	// re-emit it rather than emit an IFD with no pixel pointers. In practice
+	// associated images are tiny and the L0 pyramid is never re-emitted (it
+	// lives in the verbatim-copied prefix), so this never fires — but a PHI
+	// tool must never silently corrupt.
+	if !ok && (findEntry(ifd, TagStripOffsets) != nil || findEntry(ifd, TagTileOffsets) != nil) {
+		return 0, 0, fmt.Errorf("%w: IFD %d Strip/TileOffsets could not be read for re-emit", ErrUnexpectedLayout, idx)
 	}
 	var newOffsetsBuf []byte
 	if ok {
