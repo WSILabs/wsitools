@@ -214,6 +214,15 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 		return err
 	}
 
+	// SVS replace is supported only for the label today. opentile-go reads
+	// Aperio thumbnail/macro/overview as abbreviated JPEG (tables in the
+	// JPEGTables tag, reassembled via ConcatenateScans), which a standalone
+	// re-encode does not yet satisfy — a replaced image would be unreadable.
+	// remove works for every type; generic-TIFF supports replacing any type.
+	if src.Format() == "svs" && typ != "label" {
+		return fmt.Errorf("%w: replacing the %s on SVS is not yet supported (only label); remove works for all types, and generic-TIFF supports replacing any type", ErrUnsupportedAssoc, typ)
+	}
+
 	f, err := parseSlideFile(input)
 	if err != nil {
 		return err
@@ -250,6 +259,7 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 
 	rep, err := buildReplacementIFD(img, replaceOpts{
 		typ:         typ,
+		format:      src.Format(),
 		compression: fl.compression,
 		desc:        "",
 		resize:      resize,

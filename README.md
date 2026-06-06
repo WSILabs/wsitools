@@ -56,7 +56,12 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   `--label-dims WxH` to override target dimensions.
 - `wsitools macro|thumbnail|overview remove|replace …` — same splice
   mechanics for the other associated-image types; `replace` defaults to
-  JPEG encoding.
+  JPEG encoding. **`remove` works for every type on both formats.**
+  **`replace`** is supported for all types on **generic-TIFF**, but on
+  **SVS** only the **label** can be replaced today — opentile-go reads
+  Aperio thumbnail/macro/overview as abbreviated JPEG (tables in the
+  `JPEGTables` tag), so re-encoding those is a Slice-2 item; SVS
+  thumbnail/macro/overview `replace` errors with a clear message.
 
 Other formats (DICOM, NDPI, Philips, BIF, IFE, Leica) are not supported
 for in-place editing — use `convert --to {svs,tiff} --no-associated` plus

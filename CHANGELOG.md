@@ -9,8 +9,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 - **Associated-image editing** — four command groups, each with `remove` and
   `replace` subcommands: `label`, `macro`, `thumbnail`, `overview`. Supported
   on SVS and generic-TIFF.
-  - `remove` strips the target associated image entirely (label PHI removal).
-  - `replace` swaps it with a new image file.
+  - `remove` strips the target associated image entirely (label PHI removal);
+    works for **every** type on both formats.
+  - `replace` swaps it with a new image file. Supported for **all** types on
+    generic-TIFF; on **SVS**, only **label** replace is supported today
+    (opentile-go reads Aperio thumbnail/macro/overview as abbreviated JPEG, so
+    re-encoding those is a Slice-2 item — SVS non-label `replace` errors
+    clearly). Replacements carry the reader's classification markers
+    (SVS `NewSubfileType=9` for macro/overview; `WSIImageType` private tag for
+    generic-TIFF) so a replaced image is read back as the intended type.
   - Pyramid tile bytes are **copied verbatim** (no decode, no re-encode); only
     the tail IFD is rewritten via a prefix-copy + tail-re-emit splice. Output
     contains no recoverable label PHI.

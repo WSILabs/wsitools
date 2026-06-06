@@ -90,6 +90,11 @@ queued, deferred, or under consideration.
     the `<Image>` block that corresponds to the target associated image).
   - COG-WSI: SubIFD splice preserving the COG-WSI ghost area and WSI extension
     tags.
+  - **SVS thumbnail/macro/overview `replace`** — emit Aperio-conformant
+    abbreviated JPEG (entropy-only strips + a shared `JPEGTables` tag + APP14)
+    so opentile-go's `ConcatenateScans` reader can decode the replacement. Slice
+    1 supports SVS **label** replace only and gates the others with a clear
+    error; `remove` already works for every type.
   - Additional flags deferred from Slice 1: `--rotate {90,180,270}` for label
     orientation correction; `--if-exists {remove,skip,error}` for idempotent
     scripted remove (default: `error` if already absent).
