@@ -376,6 +376,48 @@ func TestCOGWSILabelRemove(t *testing.T) {
 	}
 }
 
+func TestCOGWSIRemoveInPlacePreservesMeta(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	if _, _, ok := assocOfType(t, in, "label"); !ok {
+		t.Skip("no label")
+	}
+	mdBefore := func() (float64, float64) {
+		s, _ := source.Open(in)
+		defer s.Close()
+		m := s.Metadata()
+		return m.MPPX, m.Magnification
+	}
+	mppBefore, magBefore := mdBefore()
+	if err := runAssociatedRemoveForCOGWSI("label", in, in, removeFlags{assocCommonFlags{inPlace: true, fsync: true}}); err != nil {
+		t.Fatalf("in-place remove: %v", err)
+	}
+	if _, _, ok := assocOfType(t, in, "label"); ok {
+		t.Errorf("label still present after in-place remove")
+	}
+	s, _ := source.Open(in)
+	defer s.Close()
+	m := s.Metadata()
+	if m.MPPX != mppBefore || m.Magnification != magBefore {
+		t.Errorf("metadata changed: MPPX %v->%v, Mag %v->%v", mppBefore, m.MPPX, magBefore, m.Magnification)
+	}
+	// No leftover temp files.
+	ents, _ := os.ReadDir(filepath.Dir(in))
+	for _, e := range ents {
+		if bytes.Contains([]byte(e.Name()), []byte(".tmp")) {
+			t.Errorf("leftover temp: %s", e.Name())
+		}
+	}
+}
+
+func TestCOGWSIRemoveAbsentErrors(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	out := filepath.Join(t.TempDir(), "o.tiff")
+	err := runAssociatedRemoveForCOGWSI("no-such-type", in, out, removeFlags{assocCommonFlags{fsync: false}})
+	if err == nil {
+		t.Fatal("expected error for absent type")
+	}
+}
+
 func TestCOGWSIOverviewReplaceRoundTrips(t *testing.T) {
 	in := copyFile(t, cogwsiFixture(t))
 	ovSize, _, ok := assocOfType(t, in, "overview")
