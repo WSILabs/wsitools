@@ -44,7 +44,15 @@ jobs:
             printf 'Release %s\n' "$TAG" > release_notes.md
           fi
 
-          TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          # actions/checkout fetches the tag as a lightweight ref, so
+          # %(contents:subject) falls back to the commit subject. Re-fetch the
+          # annotated tag object explicitly, then read its subject only when the
+          # ref is genuinely an annotated tag; otherwise use the tag name.
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" 2>/dev/null || true
+          TITLE=""
+          if [ "$(git cat-file -t "$TAG" 2>/dev/null || true)" = "tag" ]; then
+            TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          fi
           if [ -z "$TITLE" ]; then TITLE="$TAG"; fi
           # Persist title across steps (may contain spaces/colons).
           {
