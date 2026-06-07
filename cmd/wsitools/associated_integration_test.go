@@ -335,3 +335,143 @@ func writeSolidPNG(t *testing.T, path string, w, h int, c color.RGBA) {
 		t.Fatal(err)
 	}
 }
+
+func cogwsiFixture(t *testing.T) string {
+	// Prefer a native cog-wsi fixture when present.
+	if p := firstExisting(t, "cog-wsi/CMU-1_cog-wsi.tiff", "cog-wsi/CMU-1-Small-Region_cog-wsi.tiff"); p != "" {
+		return p
+	}
+	// Otherwise synthesize one from an SVS fixture (present in CI), so the
+	// cog-wsi editing paths still run wherever the SVS fixture exists rather
+	// than silently skipping. rebuildCOGWSI with an empty plan is a faithful
+	// SVS→cog-wsi copy carrying the SVS's associated images (label/overview/…).
+	svs := firstExisting(t, "svs/CMU-1-Small-Region.svs", "svs/CMU-1.svs")
+	if svs == "" {
+		t.Skip("no cog-wsi or svs fixture")
+	}
+	src, err := source.Open(svs)
+	if err != nil {
+		t.Fatalf("open svs for cog-wsi synthesis: %v", err)
+	}
+	defer src.Close()
+	out := filepath.Join(t.TempDir(), "synth_cog-wsi.tiff")
+	if err := rebuildCOGWSI(src, out, assocEditPlan{}, false); err != nil {
+		t.Fatalf("synthesize cog-wsi fixture: %v", err)
+	}
+	return out
+}
+
+func TestCOGWSILabelRemove(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	if _, _, ok := assocOfType(t, in, "label"); !ok {
+		t.Skip("fixture has no label")
+	}
+	out := filepath.Join(t.TempDir(), "out.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedRemoveForCOGWSI("label", in, out, removeFlags{assocCommonFlags{fsync: false}}); err != nil {
+		t.Fatalf("cog-wsi label remove: %v", err)
+	}
+	// Output reopens as conformant cog-wsi.
+	osrc, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := osrc.Format(); got != "cog-wsi" {
+		t.Errorf("output format = %q, want cog-wsi", got)
+	}
+	osrc.Close()
+	// Label gone; other associated images survive.
+	if _, _, ok := assocOfType(t, out, "label"); ok {
+		t.Errorf("label still present")
+	}
+	if _, _, ok := assocOfType(t, out, "overview"); !ok {
+		t.Errorf("overview vanished (contract: only target changes)")
+	}
+	// Pyramid pixels identical.
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed")
+	}
+}
+
+func TestCOGWSIRemoveInPlacePreservesMeta(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	if _, _, ok := assocOfType(t, in, "label"); !ok {
+		t.Skip("no label")
+	}
+	mdBefore := func() (float64, float64) {
+		s, _ := source.Open(in)
+		defer s.Close()
+		m := s.Metadata()
+		return m.MPPX, m.Magnification
+	}
+	mppBefore, magBefore := mdBefore()
+	if err := runAssociatedRemoveForCOGWSI("label", in, in, removeFlags{assocCommonFlags{inPlace: true, fsync: true}}); err != nil {
+		t.Fatalf("in-place remove: %v", err)
+	}
+	if _, _, ok := assocOfType(t, in, "label"); ok {
+		t.Errorf("label still present after in-place remove")
+	}
+	s, _ := source.Open(in)
+	defer s.Close()
+	m := s.Metadata()
+	if m.MPPX != mppBefore || m.Magnification != magBefore {
+		t.Errorf("metadata changed: MPPX %v->%v, Mag %v->%v", mppBefore, m.MPPX, magBefore, m.Magnification)
+	}
+	// No leftover temp files.
+	ents, _ := os.ReadDir(filepath.Dir(in))
+	for _, e := range ents {
+		if bytes.Contains([]byte(e.Name()), []byte(".tmp")) {
+			t.Errorf("leftover temp: %s", e.Name())
+		}
+	}
+}
+
+func TestCOGWSIRemoveAbsentErrors(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	out := filepath.Join(t.TempDir(), "o.tiff")
+	err := runAssociatedRemoveForCOGWSI("no-such-type", in, out, removeFlags{assocCommonFlags{fsync: false}})
+	if err == nil {
+		t.Fatal("expected error for absent type")
+	}
+}
+
+func TestCOGWSIOverviewReplaceRoundTrips(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	ovSize, _, ok := assocOfType(t, in, "overview")
+	if !ok {
+		t.Skip("fixture has no overview")
+	}
+	png := filepath.Join(t.TempDir(), "x.png")
+	writeSolidPNG(t, png, ovSize.X, ovSize.Y, color.RGBA{200, 30, 40, 255})
+	out := filepath.Join(t.TempDir(), "out.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedReplaceForCOGWSI("overview", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, compression: "jpeg", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("cog-wsi overview replace: %v", err)
+	}
+	src, err := source.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	var decoded bool
+	for _, a := range src.Associated() {
+		if a.Type() == "overview" {
+			b, err := a.Bytes()
+			if err != nil {
+				t.Fatalf("overview bytes: %v", err)
+			}
+			if _, _, err := image.Decode(bytes.NewReader(b)); err != nil {
+				t.Fatalf("replaced overview does not decode: %v", err)
+			}
+			decoded = true
+		}
+	}
+	if !decoded {
+		t.Errorf("overview missing/not classified after replace")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed after replace")
+	}
+}

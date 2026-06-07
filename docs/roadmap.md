@@ -84,22 +84,25 @@ queued, deferred, or under consideration.
 - **`dump-tile`** — single tile's compressed bytes to file or stdout. Pure debug aid.
 
 ### Operations
-- **Associated-image editing — Slice 2 (OME-TIFF + COG-WSI + extras).** Extends
-  the Slice 1 splice engine to handle SubIFD-bearing layouts:
-  - OME-TIFF: SubIFD-range-aware splice + OME-XML `<Image>` sync (drop or swap
-    the `<Image>` block that corresponds to the target associated image).
-  - COG-WSI: SubIFD splice preserving the COG-WSI ghost area and WSI extension
-    tags.
-  - **SVS thumbnail/macro/overview `replace`** — emit Aperio-conformant
-    abbreviated JPEG (entropy-only strips + a shared `JPEGTables` tag + APP14)
-    so opentile-go's `ConcatenateScans` reader can decode the replacement. Slice
-    1 supports SVS **label** replace only and gates the others with a clear
-    error; `remove` already works for every type.
-  - Additional flags deferred from Slice 1: `--rotate {90,180,270}` for label
-    orientation correction; `--if-exists {remove,skip,error}` for idempotent
-    scripted remove (default: `error` if already absent).
-  - DICOM-WSI: associated-instance drop / swap (separate DICOM series logic,
-    not a TIFF splice).
+- ✅ **DONE (2026-06-07): Associated-image editing — Slice 2a (COG-WSI).** `remove`
+  and `replace` (all four types: label/macro/thumbnail/overview) now work on
+  COG-WSI via `cogwsiwriter` re-finalize. Engine: full-file rebuild — pyramid tile
+  bytes copied verbatim (no re-encode); all other associated images and
+  MPP/magnification/ICC preserved; only the target image changes. Replacements
+  round-trip cleanly (COG-WSI uses self-contained JPEG/LZW — no abbreviated-JPEG
+  limitation). NOT an in-place splice; the rebuilt file is written atomically.
+- **Associated-image editing — Slice 2b (OME-TIFF).** Extends the editing engine
+  to handle OME-TIFF's SubIFD-bearing layout:
+  - Raw IFD-graph re-serializer (SubIFD trees + offset aliasing).
+  - OME-XML `<Image>` surgery: drop or swap the `<Image>` block corresponding to
+    the target associated image; relocation when the removed image is IFD0.
+  - Verbatim vendor-tag carry.
+  - Currently errors with a "coming next" message.
+  - Additional deferred items (not blocked on Slice 2b): **SVS thumbnail/macro/
+    overview `replace`** (Aperio-conformant abbreviated JPEG — entropy-only strips
+    + shared `JPEGTables` + APP14); `--rotate {90,180,270}` for label orientation
+    correction; `--if-exists {remove,skip,error}` for idempotent scripted remove;
+    DICOM-WSI associated-instance drop/swap (separate DICOM series logic).
 - **`tagset`** — in-place TIFF tag edit (e.g. ImageDescription, Software). Useful for fixing one bad slide in a pool without full re-encode.
 - **`inventory`** — walk a directory; dump CSV/JSON of slide metadata for pool-management UIs.
 - **`verify`** — open every IFD, decode every tile, report errors. "fsck for WSI."

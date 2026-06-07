@@ -4,6 +4,10 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Added
+
+- Associated-image editing extended to **COG-WSI** — `label/macro/thumbnail/overview remove` and `replace` (all types) via `cogwsiwriter` re-finalize. Pyramid tile bytes are copied verbatim (no re-encode); all other associated images and MPP/magnification/ICC are preserved — only the target image changes. (OME-TIFF support remains pending.)
+
 ### Changed
 
 - opentile-go bumped to **v0.37.0** — JPEG 2000 decode is now optional. Build
