@@ -8,8 +8,10 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wsilabs/wsitools/internal/source"
@@ -473,5 +475,211 @@ func TestCOGWSIOverviewReplaceRoundTrips(t *testing.T) {
 	}
 	if level0Digest(t, out) != digestBefore {
 		t.Errorf("pyramid changed after replace")
+	}
+}
+
+func TestOMETIFFOverviewReplaceRoundTrips(t *testing.T) {
+	in := copyFile(t, ometiffFixture(t))
+	ovSize, _, ok := assocOfType(t, in, "overview")
+	if !ok {
+		t.Skip("fixture has no overview")
+	}
+	png := filepath.Join(t.TempDir(), "x.png")
+	writeSolidPNG(t, png, ovSize.X, ovSize.Y, color.RGBA{200, 30, 40, 255})
+	out := filepath.Join(t.TempDir(), "out.ome.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedReplaceForOMETIFF("overview", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, compression: "jpeg", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("ome-tiff overview replace: %v", err)
+	}
+	src, err := source.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	var decoded bool
+	for _, a := range src.Associated() {
+		if a.Type() == "overview" {
+			b, err := a.Bytes()
+			if err != nil {
+				t.Fatalf("overview bytes: %v", err)
+			}
+			if _, _, err := image.Decode(bytes.NewReader(b)); err != nil {
+				t.Fatalf("replaced overview does not decode: %v", err)
+			}
+			decoded = true
+		}
+	}
+	if !decoded {
+		t.Errorf("overview missing/not classified after replace")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed after replace")
+	}
+}
+
+// ometiffFixture returns an OME-TIFF fixture path, synthesizing a small one
+// from the SVS fixture (via rebuildOMETIFF) when no real OME-TIFF is present so
+// the OME-TIFF tests still run in CI.
+func ometiffFixture(t *testing.T) string {
+	if p := firstExisting(t, "ome-tiff/Leica-1.ome.tiff", "ome-tiff/Leica-2.ome.tiff"); p != "" {
+		return p
+	}
+	svs := firstExisting(t, "svs/CMU-1-Small-Region.svs", "svs/CMU-1.svs")
+	if svs == "" {
+		t.Skip("no ome-tiff or svs fixture")
+	}
+	src, err := source.Open(svs)
+	if err != nil {
+		t.Fatalf("open svs: %v", err)
+	}
+	defer src.Close()
+	out := filepath.Join(t.TempDir(), "synth.ome.tiff")
+	if err := rebuildOMETIFF(src, out, omeEditPlan{}, false); err != nil {
+		t.Fatalf("synthesize ome-tiff: %v", err)
+	}
+	return out
+}
+
+func TestOMETIFFLabelRemove(t *testing.T) {
+	in := copyFile(t, ometiffFixture(t))
+	if _, _, ok := assocOfType(t, in, "label"); !ok {
+		t.Skip("fixture has no label")
+	}
+	out := filepath.Join(t.TempDir(), "out.ome.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedRemoveForOMETIFF("label", in, out, removeFlags{assocCommonFlags{fsync: false}}); err != nil {
+		t.Fatalf("ome-tiff label remove: %v", err)
+	}
+	osrc, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if osrc.Format() != "ome-tiff" {
+		t.Errorf("output format = %q, want ome-tiff", osrc.Format())
+	}
+	osrc.Close()
+	if _, _, ok := assocOfType(t, out, "label"); ok {
+		t.Errorf("label still present")
+	}
+	if _, _, ok := assocOfType(t, out, "overview"); !ok {
+		t.Errorf("overview vanished (contract: only target changes)")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed")
+	}
+}
+
+// TestOMETIFFRemoveInPlace exercises the atomic in-place path for OME-TIFF:
+// the original is overwritten, the label is gone, the pyramid is unchanged, and
+// no temp files are left behind.
+func TestOMETIFFRemoveInPlace(t *testing.T) {
+	in := copyFile(t, ometiffFixture(t))
+	if _, _, ok := assocOfType(t, in, "label"); !ok {
+		t.Skip("fixture has no label")
+	}
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedRemoveForOMETIFF("label", in, in, removeFlags{assocCommonFlags{inPlace: true, fsync: true}}); err != nil {
+		t.Fatalf("in-place remove: %v", err)
+	}
+	if _, _, ok := assocOfType(t, in, "label"); ok {
+		t.Errorf("label present after in-place remove")
+	}
+	if level0Digest(t, in) != digestBefore {
+		t.Errorf("pyramid changed after in-place remove")
+	}
+	ents, _ := os.ReadDir(filepath.Dir(in))
+	for _, e := range ents {
+		if bytes.Contains([]byte(e.Name()), []byte(".tmp")) {
+			t.Errorf("leftover temp: %s", e.Name())
+		}
+	}
+}
+
+// TestOMETIFFRemoveAbsentErrors asserts that removing a type that is not
+// present in the OME-TIFF returns an error rather than silently succeeding.
+func TestOMETIFFRemoveAbsentErrors(t *testing.T) {
+	in := copyFile(t, ometiffFixture(t))
+	err := runAssociatedRemoveForOMETIFF("no-such-type", in, filepath.Join(t.TempDir(), "o.ome.tiff"), removeFlags{assocCommonFlags{fsync: false}})
+	if err == nil {
+		t.Fatal("expected error for absent type")
+	}
+}
+
+// TestOMETIFFEditWarnsLossy asserts that every OME-TIFF edit emits the lossy
+// rebuild warning via slog (the warning mentions "rudimentary" and "Bio-Formats").
+func TestOMETIFFEditWarnsLossy(t *testing.T) {
+	in := copyFile(t, ometiffFixture(t))
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	out := filepath.Join(t.TempDir(), "out.ome.tiff")
+	// Remove a type the fixture has (overview is present in both synth + Leica).
+	typ := "overview"
+	if _, _, ok := assocOfType(t, in, typ); !ok {
+		typ = "label"
+	}
+	if err := runAssociatedRemoveForOMETIFF(typ, in, out, removeFlags{assocCommonFlags{fsync: false}}); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "rudimentary") || !strings.Contains(got, "Bio-Formats") {
+		t.Errorf("lossy warning not emitted on remove; slog output:\n%s", got)
+	}
+
+	// The replace path must warn too.
+	buf.Reset()
+	png := filepath.Join(t.TempDir(), "x.png")
+	sz, _, _ := assocOfType(t, in, typ)
+	if sz.X == 0 {
+		sz.X, sz.Y = 64, 64
+	}
+	writeSolidPNG(t, png, sz.X, sz.Y, color.RGBA{1, 2, 3, 255})
+	out2 := filepath.Join(t.TempDir(), "out2.ome.tiff")
+	if err := runAssociatedReplaceForOMETIFF(typ, in, out2, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, compression: "jpeg", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, "rudimentary") || !strings.Contains(got, "Bio-Formats") {
+		t.Errorf("lossy warning not emitted on replace; slog output:\n%s", got)
+	}
+}
+
+// TestOMETIFFRealLeicaOverviewRemove exercises the multi-image real Leica
+// OME-TIFF path (macro-series + main-series). Self-skips in -short mode and
+// when the fixture is absent (e.g. CI).
+func TestOMETIFFRealLeicaOverviewRemove(t *testing.T) {
+	p := firstExisting(t, "ome-tiff/Leica-1.ome.tiff", "ome-tiff/Leica-2.ome.tiff")
+	if p == "" {
+		t.Skip("no real OME-TIFF fixture")
+	}
+	if testing.Short() {
+		t.Skip("large fixture; skipped in -short")
+	}
+	in := copyFile(t, p)
+	if _, _, ok := assocOfType(t, in, "overview"); !ok {
+		t.Skip("fixture has no overview")
+	}
+	out := filepath.Join(t.TempDir(), "out.ome.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedRemoveForOMETIFF("overview", in, out, removeFlags{assocCommonFlags{fsync: false}}); err != nil {
+		t.Fatalf("real-leica overview remove: %v", err)
+	}
+	osrc, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if osrc.Format() != "ome-tiff" {
+		t.Errorf("format = %q", osrc.Format())
+	}
+	osrc.Close()
+	if _, _, ok := assocOfType(t, out, "overview"); ok {
+		t.Errorf("overview still present")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed")
 	}
 }

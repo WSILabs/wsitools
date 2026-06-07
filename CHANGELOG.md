@@ -6,7 +6,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
-- Associated-image editing extended to **COG-WSI** — `label/macro/thumbnail/overview remove` and `replace` (all types) via `cogwsiwriter` re-finalize. Pyramid tile bytes are copied verbatim (no re-encode); all other associated images and MPP/magnification/ICC are preserved — only the target image changes. (OME-TIFF support remains pending.)
+- Associated-image editing extended to **COG-WSI** — `label/macro/thumbnail/overview remove` and `replace` (all types) via `cogwsiwriter` re-finalize. Pyramid tile bytes are copied verbatim (no re-encode); all other associated images and MPP/magnification/ICC are preserved — only the target image changes.
+- Associated-image editing extended to **OME-TIFF** (remove + replace, all types) via `streamwriter` rebuild — **lossy**: rebuilds the file and regenerates a minimal OME-XML (instrument/acquisition/channel/vendor `OriginalMetadata` and pyramid-resolution annotations not preserved; pyramid pixels, geometry/MPP/magnification, ICC, and the other associated images are). Always-on runtime warning on every OME-TIFF edit. Associated replacements are **JPEG-only** (opentile-go's OME-TIFF reader can only decode JPEG/uncompressed associated images; LZW/Deflate would be unreadable). wsitools' OME-TIFF support is rudimentary — use [Bio-Formats](https://www.openmicroscopy.org/bio-formats/) for serious OME-TIFF work; see [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). **This completes associated-image editing across all four editable formats: SVS, generic-TIFF, COG-WSI, and OME-TIFF.**
 
 ### Changed
 

@@ -56,14 +56,30 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   `--label-dims WxH` to override target dimensions.
 - `wsitools macro|thumbnail|overview remove|replace …` — same mechanics
   for the other associated-image types; `replace` defaults to JPEG
-  encoding. **`remove` works for every type on SVS, generic-TIFF, and
-  COG-WSI.** **`replace`** is supported for all types on **generic-TIFF**
-  and **COG-WSI** (COG-WSI uses a full-file rebuild via `cogwsiwriter`;
-  replacements round-trip cleanly — no abbreviated-JPEG limitation). On
+  encoding. **`remove` works for every type on SVS, generic-TIFF,
+  COG-WSI, and OME-TIFF.** **`replace`** is supported for all types on
+  **generic-TIFF**, **COG-WSI**, and **OME-TIFF** (all three use a
+  full-file rebuild; COG-WSI replacements round-trip cleanly — no
+  abbreviated-JPEG limitation; OME-TIFF replacements are JPEG-only).
+  **OME-TIFF editing is lossy**: the rebuild regenerates a minimal
+  OME-XML — instrument/acquisition/channel/vendor metadata are discarded
+  even for the surviving pyramid; an always-on runtime warning fires; see
+  [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). On
   **SVS** only the **label** can be replaced today — opentile-go reads
   Aperio thumbnail/macro/overview as abbreviated JPEG (tables in the
   `JPEGTables` tag), so re-encoding those is a Slice-2 item; SVS
   thumbnail/macro/overview `replace` errors with a clear message.
+
+> [!NOTE]
+> **OME-TIFF support in wsitools is rudimentary.** The writer models only
+> dimensions, MPP, and magnification — it does not carry instrument,
+> channel, acquisition, stage, or vendor metadata. Both `convert --to
+> ome-tiff` and associated-image editing regenerate a minimal OME-XML,
+> discarding richer OME annotations. For workflows that require the full
+> OME data model, use
+> [Bio-Formats](https://www.openmicroscopy.org/bio-formats/) (`bioformats2raw`
+> + `raw2ometiff`, or `bfconvert`). See
+> [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md).
 
 Other formats (DICOM, NDPI, Philips, BIF, IFE, Leica) are not supported
 for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
@@ -104,7 +120,7 @@ DICOM-WSI.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | SVS           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
 | Philips-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — | — |
-| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | —⁸ |
+| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓⁸ |
 | BIF           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — | — |
 | generic-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
 | NDPI          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
@@ -121,7 +137,7 @@ DICOM-WSI.
 ⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
 ⁶ DICOM-WSI **write** is planned (writer scoped, not yet built).
 ⁷ **label/macro remove|replace** — applies equally to `thumbnail` and `overview`. Pyramid tile bytes are copied verbatim (no decode/re-encode); only the tail IFD is rewritten.
-⁸ Planned (Slice 2b): SubIFD-range-aware splice for OME-TIFF + OME-XML `<Image>` sync; raw IFD-graph re-serializer (SubIFD trees + offset aliasing) + OME-XML `<Image>` surgery + verbatim vendor-tag carry.
+⁸ **OME-TIFF editing is lossy** — rebuilds the file via `streamwriter` and regenerates a minimal OME-XML (instrument/acquisition/channel/vendor `OriginalMetadata` not preserved; pyramid pixels, geometry/MPP/magnification, ICC, and the other associated images are). An always-on runtime warning fires on every OME-TIFF edit. Associated replacements are **JPEG-only** (opentile-go's OME-TIFF reader limitation — LZW/Deflate replacements would be unreadable). See [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). For faithful OME metadata carry-through, use [Bio-Formats](https://www.openmicroscopy.org/bio-formats/).
 
 `downsample` is **format-preserving** — it reduces a slide and emits the same
 container it read (the ✓ rows: SVS, OME-TIFF, generic-TIFF, COG-WSI). Other
@@ -253,12 +269,16 @@ wsitools thumbnail remove slide.svs
 wsitools overview remove slide.svs
 ```
 
-Supported for SVS, generic-TIFF, and COG-WSI. COG-WSI uses a full-file
-rebuild via `cogwsiwriter` (pyramid tile bytes copied verbatim; all other
-associated images and MPP/magnification/ICC preserved). OME-TIFF support
-is planned (Slice 2b — raw IFD-graph re-serializer + OME-XML surgery).
-Other formats (DICOM, NDPI, Philips, BIF, IFE, Leica) are not writable —
-convert first with `convert --to {svs,tiff}`.
+Supported for SVS, generic-TIFF, COG-WSI, and **OME-TIFF** (lossy — see
+footnote ⁸ and [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md)).
+COG-WSI and OME-TIFF both use a full-file rebuild (pyramid tile bytes copied
+verbatim; geometry/MPP/magnification/ICC and the other associated images
+preserved). OME-TIFF editing additionally regenerates a minimal OME-XML —
+instrument/acquisition/channel/vendor metadata are not carried through; an
+always-on runtime warning makes this explicit. Associated replacements on
+OME-TIFF are JPEG-only (reader limitation). Other formats (DICOM, NDPI,
+Philips, BIF, IFE, Leica) are not writable — convert first with
+`convert --to {svs,tiff}`.
 
 ### Conversion
 

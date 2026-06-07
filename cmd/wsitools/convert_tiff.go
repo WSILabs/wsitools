@@ -151,7 +151,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 			srcImageDesc = SyntheticOMEDescription(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				md.MPP, md.MPP, "Image", srcSoft,
-				omeAssociatedSpecs(src),
+				omeAssociatedSpecs(src, omeEditPlan{}),
 			)
 		}
 	default:
@@ -182,96 +182,10 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		return fmt.Errorf("create output: %w", err)
 	}
 
-	// Tile-copy: emit levels in source order (L0 first).
-	for _, lvl := range src.Levels() {
-		spec := streamwriter.LevelSpec{
-			ImageWidth:      uint32(lvl.Size().X),
-			ImageHeight:     uint32(lvl.Size().Y),
-			TileWidth:       uint32(lvl.TileSize().X),
-			TileHeight:      uint32(lvl.TileSize().Y),
-			Compression:     compressionTagFor(lvl.Compression()),
-			Photometric:     2, // RGB; lossless copy preserves source codec's colour model
-			SamplesPerPixel: 3,
-			BitsPerSample:   []uint16{8, 8, 8},
-			NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),
-			WSIImageType:    tiff.WSIImageTypePyramid,
-		}
-		// SVS / OME-TIFF: emit the container-shaped ImageDescription on L0.
-		// SVS needs the "Aperio" prefix; OME needs the "OME>" suffix; both
-		// are emitted as L0-only ExtraTags so other IFDs aren't tagged.
-		if lvl.Index() == 0 && srcImageDesc != "" && (container == "svs" || container == "ome-tiff") {
-			spec.ExtraTags = buildL0ImageDescriptionTag(srcImageDesc)
-		}
-
-		lh, err := w.AddLevel(spec)
-		if err != nil {
-			w.Abort()
-			return fmt.Errorf("add level %d: %w", lvl.Index(), err)
-		}
-
-		// Drain the reorder buffer concurrently with the submit loop. The
-		// buffer is bounded (capacity ~1024); without a concurrent drainer,
-		// WriteTile blocks forever once a level has more tiles than the
-		// capacity (deferring the drain to Close deadlocks the submit loop).
-		// Mirrors the re-encode path's drain in transcodePyramid.
-		drainErr := make(chan error, 1)
-		go func() {
-			for {
-				idx, bytes, ok, err := lh.NextReady()
-				if err != nil {
-					drainErr <- err
-					return
-				}
-				if !ok {
-					drainErr <- nil
-					return
-				}
-				if err := lh.WriteTileAtIndex(idx, bytes); err != nil {
-					lh.Abort(err)
-					drainErr <- err
-					return
-				}
-			}
-		}()
-
-		buf := make([]byte, lvl.TileMaxSize())
-		grid := lvl.Grid()
-		for ty := 0; ty < grid.Y; ty++ {
-			for tx := 0; tx < grid.X; tx++ {
-				n, err := lvl.TileInto(tx, ty, buf)
-				if err != nil {
-					lh.Abort(err)
-					<-drainErr
-					w.Abort()
-					return fmt.Errorf("read tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
-				}
-				// WriteTile submits asynchronously into a reorder buffer
-				// and may reference the slice past return; copy out of the
-				// reused tile-read buffer before handing off.
-				tile := append([]byte(nil), buf[:n]...)
-				if err := lh.WriteTile(uint32(tx), uint32(ty), tile); err != nil {
-					lh.Abort(err)
-					<-drainErr
-					w.Abort()
-					return fmt.Errorf("write tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
-				}
-			}
-		}
-		// Signal end of input; wait for the concurrent drain to finish
-		// writing all tiles for this level.
-		lh.CloseInput()
-		if err := <-drainErr; err != nil {
-			w.Abort()
-			return fmt.Errorf("drain level %d: %w", lvl.Index(), err)
-		}
-	}
-
-	if !cvNoAssociated {
-		omeSynthetic := container == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
-		if err := writeAssociatedImages(src, w, container, omeSynthetic); err != nil {
-			w.Abort()
-			return err
-		}
+	omeSynthetic := container == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
+	if err := writeTIFFTileCopy(w, src, container, srcImageDesc, omeSynthetic, omeEditPlan{dropAll: cvNoAssociated}); err != nil {
+		w.Abort()
+		return err
 	}
 
 	if err := w.Close(); err != nil {
@@ -401,7 +315,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			srcImageDesc = SyntheticOMEDescription(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				md.MPP, md.MPP, "Image", srcSoft,
-				omeAssociatedSpecs(src),
+				omeAssociatedSpecs(src, omeEditPlan{}),
 			)
 		}
 	default:
@@ -430,7 +344,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 
 	if !cvNoAssociated {
 		omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
-		if err := writeAssociatedImages(src, w, resolvedContainer, omeSynthetic); err != nil {
+		if err := writeAssociatedImages(src, w, resolvedContainer, omeSynthetic, omeEditPlan{}); err != nil {
 			w.Abort()
 			return err
 		}
@@ -677,6 +591,97 @@ func pickDecoder(c source.Compression) decoder.Factory {
 	return fac
 }
 
+// writeTIFFTileCopy copies src's pyramid into w (verbatim tiles, async drain)
+// and writes its associated images per plan. l0Desc is the L0 ImageDescription
+// (OME-XML / Aperio header) emitted as an L0-only ExtraTag for svs/ome-tiff.
+// Caller owns Create/Close/Abort. Does NOT call w.Abort() on error — returns it.
+func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0Desc string, omeSynthetic bool, plan omeEditPlan) error {
+	// Tile-copy: emit levels in source order (L0 first).
+	for _, lvl := range src.Levels() {
+		spec := streamwriter.LevelSpec{
+			ImageWidth:      uint32(lvl.Size().X),
+			ImageHeight:     uint32(lvl.Size().Y),
+			TileWidth:       uint32(lvl.TileSize().X),
+			TileHeight:      uint32(lvl.TileSize().Y),
+			Compression:     compressionTagFor(lvl.Compression()),
+			Photometric:     2, // RGB; lossless copy preserves source codec's colour model
+			SamplesPerPixel: 3,
+			BitsPerSample:   []uint16{8, 8, 8},
+			NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),
+			WSIImageType:    tiff.WSIImageTypePyramid,
+		}
+		// SVS / OME-TIFF: emit the container-shaped ImageDescription on L0.
+		// SVS needs the "Aperio" prefix; OME needs the "OME>" suffix; both
+		// are emitted as L0-only ExtraTags so other IFDs aren't tagged.
+		if lvl.Index() == 0 && l0Desc != "" && (container == "svs" || container == "ome-tiff") {
+			spec.ExtraTags = buildL0ImageDescriptionTag(l0Desc)
+		}
+
+		lh, err := w.AddLevel(spec)
+		if err != nil {
+			return fmt.Errorf("add level %d: %w", lvl.Index(), err)
+		}
+
+		// Drain the reorder buffer concurrently with the submit loop. The
+		// buffer is bounded (capacity ~1024); without a concurrent drainer,
+		// WriteTile blocks forever once a level has more tiles than the
+		// capacity (deferring the drain to Close deadlocks the submit loop).
+		// Mirrors the re-encode path's drain in transcodePyramid.
+		drainErr := make(chan error, 1)
+		go func() {
+			for {
+				idx, bytes, ok, err := lh.NextReady()
+				if err != nil {
+					drainErr <- err
+					return
+				}
+				if !ok {
+					drainErr <- nil
+					return
+				}
+				if err := lh.WriteTileAtIndex(idx, bytes); err != nil {
+					lh.Abort(err)
+					drainErr <- err
+					return
+				}
+			}
+		}()
+
+		buf := make([]byte, lvl.TileMaxSize())
+		grid := lvl.Grid()
+		for ty := 0; ty < grid.Y; ty++ {
+			for tx := 0; tx < grid.X; tx++ {
+				n, err := lvl.TileInto(tx, ty, buf)
+				if err != nil {
+					lh.Abort(err)
+					<-drainErr
+					return fmt.Errorf("read tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
+				}
+				// WriteTile submits asynchronously into a reorder buffer
+				// and may reference the slice past return; copy out of the
+				// reused tile-read buffer before handing off.
+				tile := append([]byte(nil), buf[:n]...)
+				if err := lh.WriteTile(uint32(tx), uint32(ty), tile); err != nil {
+					lh.Abort(err)
+					<-drainErr
+					return fmt.Errorf("write tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
+				}
+			}
+		}
+		// Signal end of input; wait for the concurrent drain to finish
+		// writing all tiles for this level.
+		lh.CloseInput()
+		if err := <-drainErr; err != nil {
+			return fmt.Errorf("drain level %d: %w", lvl.Index(), err)
+		}
+	}
+
+	if err := writeAssociatedImages(src, w, container, omeSynthetic, plan); err != nil {
+		return err
+	}
+	return nil
+}
+
 // omeAssocName maps a wsitools associated-image type to the OME-XML Image Name
 // the reader recognizes ("label"/"macro"/"thumbnail"), or "" if the type has
 // no OME equivalent and must be omitted from OME output (otherwise the reader
@@ -695,10 +700,29 @@ func omeAssocName(typ string) string {
 
 // omeAssociatedSpecs returns the recognized associated images for OME output,
 // in src.Associated() order — the SAME order writeAssociatedImages writes them,
-// so OME-XML <Image> positions line up with top-level IFD positions.
-func omeAssociatedSpecs(src source.Source) []OMEAssoc {
+// so OME-XML <Image> positions line up with top-level IFD positions. The plan
+// applies the same edit as writeAssociatedImages: skip plan.remove, substitute
+// (or upsert) plan.replace, or emit nothing when plan.dropAll.
+func omeAssociatedSpecs(src source.Source, plan omeEditPlan) []OMEAssoc {
+	if plan.dropAll {
+		return nil
+	}
 	var out []OMEAssoc
+	replaced := false
 	for _, a := range src.Associated() {
+		if plan.remove != "" && a.Type() == plan.remove {
+			continue
+		}
+		if plan.replace != "" && a.Type() == plan.replace {
+			name := omeAssocName(plan.replace)
+			if name == "" {
+				slog.Debug("ome: dropping associated image with no OME mapping", "type", plan.replace)
+				continue
+			}
+			out = append(out, OMEAssoc{Name: name, W: plan.spec.Width, H: plan.spec.Height})
+			replaced = true
+			continue
+		}
 		name := omeAssocName(a.Type())
 		if name == "" {
 			slog.Debug("ome: dropping associated image with no OME mapping", "type", a.Type())
@@ -706,11 +730,40 @@ func omeAssociatedSpecs(src source.Source) []OMEAssoc {
 		}
 		out = append(out, OMEAssoc{Name: name, W: uint32(a.Size().X), H: uint32(a.Size().Y)})
 	}
+	// Upsert: plan.replace was not present in the source set.
+	if plan.replace != "" && !replaced {
+		if name := omeAssocName(plan.replace); name != "" {
+			out = append(out, OMEAssoc{Name: name, W: plan.spec.Width, H: plan.spec.Height})
+		} else {
+			slog.Debug("ome: dropping associated image with no OME mapping", "type", plan.replace)
+		}
+	}
 	return out
 }
 
-func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool) error {
+func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool, plan omeEditPlan) error {
+	if plan.dropAll {
+		return nil
+	}
+	replaced := false
 	for _, a := range src.Associated() {
+		if plan.remove != "" && a.Type() == plan.remove {
+			continue
+		}
+		if plan.replace != "" && a.Type() == plan.replace {
+			// Keep IFDs in lockstep with omeAssociatedSpecs: under synthetic
+			// OME output, a type with no OME mapping emits no <Image>, so it
+			// must emit no IFD either (else OME-XML and IFDs desync).
+			if container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "" {
+				replaced = true
+				continue
+			}
+			if err := w.AddStripped(*plan.spec); err != nil {
+				return fmt.Errorf("write associated %s: %w", a.Type(), err)
+			}
+			replaced = true
+			continue
+		}
 		// Synthetic OME path only: keep the written associated IFDs in sync
 		// with the <Image> entries omeAssociatedSpecs emitted (recognized
 		// types, same order). The native ome→ome path keeps the verbatim
@@ -751,6 +804,14 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 		}
 		if err := w.AddStripped(spec); err != nil {
 			return fmt.Errorf("write associated %s: %w", a.Type(), err)
+		}
+	}
+	// Upsert: plan.replace was not present in the source set. Skip the IFD for
+	// an OME-unmapped type under synthetic output (omeAssociatedSpecs omits its
+	// <Image> too), keeping OME-XML and IFDs in sync.
+	if plan.replace != "" && !replaced && !(container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "") {
+		if err := w.AddStripped(*plan.spec); err != nil {
+			return fmt.Errorf("write associated %s: %w", plan.replace, err)
 		}
 	}
 	return nil

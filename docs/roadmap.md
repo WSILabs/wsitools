@@ -91,14 +91,25 @@ queued, deferred, or under consideration.
   MPP/magnification/ICC preserved; only the target image changes. Replacements
   round-trip cleanly (COG-WSI uses self-contained JPEG/LZW — no abbreviated-JPEG
   limitation). NOT an in-place splice; the rebuilt file is written atomically.
-- **Associated-image editing — Slice 2b (OME-TIFF).** Extends the editing engine
-  to handle OME-TIFF's SubIFD-bearing layout:
-  - Raw IFD-graph re-serializer (SubIFD trees + offset aliasing).
-  - OME-XML `<Image>` surgery: drop or swap the `<Image>` block corresponding to
-    the target associated image; relocation when the removed image is IFD0.
-  - Verbatim vendor-tag carry.
-  - Currently errors with a "coming next" message.
-  - Additional deferred items (not blocked on Slice 2b): **SVS thumbnail/macro/
+- ✅ **DONE (2026-06-07): Associated-image editing — Slice 2b (OME-TIFF, lossy).**
+  `label/macro/thumbnail/overview remove` and `replace` (all four types) now work
+  on OME-TIFF via `streamwriter` full-file rebuild. **Explicitly lossy**: the
+  rebuild regenerates a minimal OME-XML (dimensions, MPP, magnification, one
+  `<Image>` per remaining image) — instrument/objective, acquisition dates, stage
+  positions, channel details, and all vendor `OriginalMetadata` + pyramid-resolution
+  annotations are discarded, even for the surviving pyramid. Pyramid pixels are
+  copied verbatim (no re-encode); geometry/MPP/magnification, ICC, and the other
+  associated images are preserved. Always-on runtime warning on every edit.
+  Associated replacements are JPEG-only (opentile-go OME-TIFF reader limitation).
+  See `docs/ome-tiff-limitations.md`. **This completes associated-image editing
+  across all four editable formats: SVS, generic-TIFF, COG-WSI, and OME-TIFF.**
+  - **Deferred indefinitely: faithful OME-TIFF engine.** A conformant implementation
+    would require a raw IFD-graph re-serializer (SubIFD trees + offset aliasing) +
+    OME-XML `<Image>` surgery that carries instrument/channel/acquisition/vendor
+    metadata verbatim. This is a substantial undertaking; [Bio-Formats](https://www.openmicroscopy.org/bio-formats/)
+    (`bioformats2raw` + `raw2ometiff`) is the recommended interim answer for
+    workflows that need full OME metadata fidelity.
+  - Additional deferred items (independent of the above): **SVS thumbnail/macro/
     overview `replace`** (Aperio-conformant abbreviated JPEG — entropy-only strips
     + shared `JPEGTables` + APP14); `--rotate {90,180,270}` for label orientation
     correction; `--if-exists {remove,skip,error}` for idempotent scripted remove;
