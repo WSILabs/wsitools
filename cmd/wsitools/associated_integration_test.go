@@ -626,7 +626,25 @@ func TestOMETIFFEditWarnsLossy(t *testing.T) {
 	}
 	got := buf.String()
 	if !strings.Contains(got, "rudimentary") || !strings.Contains(got, "Bio-Formats") {
-		t.Errorf("lossy warning not emitted; slog output:\n%s", got)
+		t.Errorf("lossy warning not emitted on remove; slog output:\n%s", got)
+	}
+
+	// The replace path must warn too.
+	buf.Reset()
+	png := filepath.Join(t.TempDir(), "x.png")
+	sz, _, _ := assocOfType(t, in, typ)
+	if sz.X == 0 {
+		sz.X, sz.Y = 64, 64
+	}
+	writeSolidPNG(t, png, sz.X, sz.Y, color.RGBA{1, 2, 3, 255})
+	out2 := filepath.Join(t.TempDir(), "out2.ome.tiff")
+	if err := runAssociatedReplaceForOMETIFF(typ, in, out2, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, compression: "jpeg", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, "rudimentary") || !strings.Contains(got, "Bio-Formats") {
+		t.Errorf("lossy warning not emitted on replace; slog output:\n%s", got)
 	}
 }
 

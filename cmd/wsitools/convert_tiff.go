@@ -751,6 +751,13 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 			continue
 		}
 		if plan.replace != "" && a.Type() == plan.replace {
+			// Keep IFDs in lockstep with omeAssociatedSpecs: under synthetic
+			// OME output, a type with no OME mapping emits no <Image>, so it
+			// must emit no IFD either (else OME-XML and IFDs desync).
+			if container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "" {
+				replaced = true
+				continue
+			}
 			if err := w.AddStripped(*plan.spec); err != nil {
 				return fmt.Errorf("write associated %s: %w", a.Type(), err)
 			}
@@ -799,8 +806,10 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 			return fmt.Errorf("write associated %s: %w", a.Type(), err)
 		}
 	}
-	// Upsert: plan.replace was not present in the source set.
-	if plan.replace != "" && !replaced {
+	// Upsert: plan.replace was not present in the source set. Skip the IFD for
+	// an OME-unmapped type under synthetic output (omeAssociatedSpecs omits its
+	// <Image> too), keeping OME-XML and IFDs in sync.
+	if plan.replace != "" && !replaced && !(container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "") {
 		if err := w.AddStripped(*plan.spec); err != nil {
 			return fmt.Errorf("write associated %s: %w", plan.replace, err)
 		}

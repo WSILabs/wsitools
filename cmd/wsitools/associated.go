@@ -237,7 +237,7 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 	}
 	// OME-TIFF can't be Slice-1-spliced; rebuild through the ome-tiff streamwriter
 	// (lossy — regenerates a minimal OME-XML). Close our handle first.
-	if src.Format() == "ome-tiff" {
+	if src.Format() == string(opentile.FormatOMETIFF) {
 		src.Close()
 		return runAssociatedReplaceForOMETIFF(typ, input, outPath, fl)
 	}
