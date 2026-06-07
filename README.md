@@ -179,9 +179,18 @@ go build -tags 'nojxl noavif nowebp nohtj2k' ./cmd/wsitools   # only JPEG
 
 ## Install
 
+wsitools builds from source; its image codecs are C libraries linked via cgo, so
+install those first. With **Go 1.26+** and the codec libraries present:
+
 ```sh
 go install github.com/wsilabs/wsitools/cmd/wsitools@latest
 ```
+
+**Step-by-step, full-codec instructions for macOS, Linux, and Windows are in
+[docs/INSTALL.md](docs/INSTALL.md)** — including how to skip individual codecs
+(`-tags no<codec>`). The required codecs (JPEG, JPEG 2000) cover Aperio SVS, the
+TIFF family, and DICOM JPEG/JPEG2000; JPEG XL, AVIF, WebP, and HTJ2K are
+optional.
 
 ## Usage
 
