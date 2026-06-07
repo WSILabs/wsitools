@@ -130,3 +130,71 @@ func runAssociatedRemoveForOMETIFF(typ, input, outPath string, fl removeFlags) e
 	}
 	return nil
 }
+
+// runAssociatedReplaceForOMETIFF replaces (or adds) the typ associated image on
+// an OME-TIFF: decode the user's image, resize/encode it into a StrippedSpec, and
+// rebuild the file with that spec substituted/appended (lossy — see
+// warnOMETIFFLossy). OME-TIFF associated images are self-contained JPEG/LZW, so a
+// replacement round-trips on read-back.
+func runAssociatedReplaceForOMETIFF(typ, input, outPath string, fl replaceFlags) error {
+	src, err := source.Open(input)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	var existing source.AssociatedImage
+	for _, a := range src.Associated() {
+		if a.Type() == typ {
+			existing = a
+		}
+	}
+	img, err := decodeReplacementImage(fl.image)
+	if err != nil {
+		return err
+	}
+	tw, th, err := resolveTargetDims(typ, img, existing, existing != nil, fl.labelDims)
+	if err != nil {
+		return err
+	}
+	bg, err := parseHexColor(fl.bgHex)
+	if err != nil {
+		return err
+	}
+	// opentile-go's OME-TIFF associated reader decodes only JPEG (7) and none (1);
+	// an explicit LZW/Deflate associated image is written faithfully but reads back
+	// as CompressionUnknown (not decodable). Warn rather than silently override.
+	if c := strings.ToLower(fl.compression); c == "lzw" || c == "deflate" {
+		slog.Warn("OME-TIFF associated images only round-trip with jpeg or none compression; "+
+			"the chosen codec will be written but is not decodable on read-back by opentile-go",
+			"compression", c)
+	}
+	resize := fl.resize
+	if resize == "" {
+		resize = "fit"
+	}
+	spec, err := buildReplacementStrippedSpec(img, replaceOpts{
+		typ:         typ,
+		compression: fl.compression,
+		resize:      resize,
+		bg:          bg,
+		targetW:     tw,
+		targetH:     th,
+		force:       fl.force,
+	})
+	if err != nil {
+		return err
+	}
+	warnOMETIFFLossy()
+	if err := rebuildOMETIFF(src, outPath, omeEditPlan{replace: typ, spec: spec}, fl.fsync); err != nil {
+		return err
+	}
+	if !fl.quiet {
+		verb := "replaced"
+		if existing == nil {
+			verb = "added"
+		}
+		fmt.Printf("wsitools: %s %s: %s -> %s\n", verb, typ, input, outPath)
+	}
+	return nil
+}

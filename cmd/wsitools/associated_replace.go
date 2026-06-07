@@ -16,6 +16,7 @@ import (
 	"github.com/hhrutter/lzw"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/edit"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
 const rowsPerStrip = 2
@@ -291,6 +292,68 @@ func buildReplacementAssocSpec(img image.Image, o replaceOpts) (*cogwsiwriter.As
 		SamplesPerPixel: 3,
 		BitsPerSample:   []uint16{8, 8, 8},
 		Bytes:           payload,
+	}, nil
+}
+
+// buildReplacementStrippedSpec encodes img as a streamwriter.StrippedSpec for an
+// OME-TIFF associated image. Like the COG-WSI analog, OME-TIFF associated images
+// are single-strip self-contained payloads (JPEG = full JFIF; LZW/deflate/none =
+// one whole-image strip), so the spec carries the whole image in one strip. The
+// IFD shape (Photometric=2, BitsPerSample {8,8,8}, SamplesPerPixel=3, RowsPerStrip
+// = height, NewSubfileType via newSubfileTypeForAssoc, WSIImageType) matches the
+// verbatim associated specs writeAssociatedImages emits.
+func buildReplacementStrippedSpec(img image.Image, o replaceOpts) (*streamwriter.StrippedSpec, error) {
+	// Default to JPEG for ALL types (including label). opentile-go's OME-TIFF
+	// associated reader recognizes only Compression 7 (JPEG) and 1 (none) —
+	// LZW/Deflate associated images read back as CompressionUnknown and are not
+	// decodable (formats/ometiff/tiled.go tiffCompressionToOpentile). This is
+	// unlike the SVS/COG-WSI/generic-TIFF readers, which DO decode LZW associated
+	// images (so those paths keep the label→LZW default). An explicit
+	// --compression lzw|deflate is honored but warns it won't round-trip on read.
+	codec := o.compression
+	if codec == "" {
+		codec = "jpeg"
+	}
+	if o.targetW != 0 || o.targetH != 0 {
+		prepared, err := fitImage(img, o)
+		if err != nil {
+			return nil, err
+		}
+		img = prepared
+	}
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+
+	var payload []byte
+	var compTag uint16
+	switch codec {
+	case "jpeg":
+		buf, err := encodeJPEGWhole(img)
+		if err != nil {
+			return nil, err
+		}
+		payload, compTag = buf, 7
+	case "lzw":
+		payload, compTag = encodeLZWWhole(img), 5
+	case "deflate":
+		payload, compTag = encodeDeflateWhole(img), 8
+	case "none":
+		payload, compTag = rgbStripBytes(img), 1
+	default:
+		return nil, fmt.Errorf("unknown compression %q (want jpeg, lzw, deflate, none)", codec)
+	}
+
+	return &streamwriter.StrippedSpec{
+		Width:           uint32(w),
+		Height:          uint32(h),
+		RowsPerStrip:    uint32(h),
+		BitsPerSample:   []uint16{8, 8, 8},
+		SamplesPerPixel: 3,
+		Photometric:     2,
+		Compression:     compTag,
+		StripBytes:      payload,
+		NewSubfileType:  newSubfileTypeForAssoc("ome-tiff", o.typ),
+		WSIImageType:    o.typ,
 	}, nil
 }
 

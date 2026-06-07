@@ -476,6 +476,47 @@ func TestCOGWSIOverviewReplaceRoundTrips(t *testing.T) {
 	}
 }
 
+func TestOMETIFFOverviewReplaceRoundTrips(t *testing.T) {
+	in := copyFile(t, ometiffFixture(t))
+	ovSize, _, ok := assocOfType(t, in, "overview")
+	if !ok {
+		t.Skip("fixture has no overview")
+	}
+	png := filepath.Join(t.TempDir(), "x.png")
+	writeSolidPNG(t, png, ovSize.X, ovSize.Y, color.RGBA{200, 30, 40, 255})
+	out := filepath.Join(t.TempDir(), "out.ome.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedReplaceForOMETIFF("overview", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, compression: "jpeg", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("ome-tiff overview replace: %v", err)
+	}
+	src, err := source.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	var decoded bool
+	for _, a := range src.Associated() {
+		if a.Type() == "overview" {
+			b, err := a.Bytes()
+			if err != nil {
+				t.Fatalf("overview bytes: %v", err)
+			}
+			if _, _, err := image.Decode(bytes.NewReader(b)); err != nil {
+				t.Fatalf("replaced overview does not decode: %v", err)
+			}
+			decoded = true
+		}
+	}
+	if !decoded {
+		t.Errorf("overview missing/not classified after replace")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed after replace")
+	}
+}
+
 // ometiffFixture returns an OME-TIFF fixture path, synthesizing a small one
 // from the SVS fixture (via rebuildOMETIFF) when no real OME-TIFF is present so
 // the OME-TIFF tests still run in CI.

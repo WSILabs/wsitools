@@ -235,6 +235,12 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 		src.Close()
 		return runAssociatedReplaceForCOGWSI(typ, input, outPath, fl)
 	}
+	// OME-TIFF can't be Slice-1-spliced; rebuild through the ome-tiff streamwriter
+	// (lossy — regenerates a minimal OME-XML). Close our handle first.
+	if src.Format() == "ome-tiff" {
+		src.Close()
+		return runAssociatedReplaceForOMETIFF(typ, input, outPath, fl)
+	}
 	defer src.Close()
 
 	// SVS replace is supported only for the label today. opentile-go reads
