@@ -187,10 +187,10 @@ go install github.com/wsilabs/wsitools/cmd/wsitools@latest
 ```
 
 **Step-by-step, full-codec instructions for macOS, Linux, and Windows are in
-[docs/INSTALL.md](docs/INSTALL.md)** — including how to skip individual codecs
-(`-tags no<codec>`). The required codecs (JPEG, JPEG 2000) cover Aperio SVS, the
-TIFF family, and DICOM JPEG/JPEG2000; JPEG XL, AVIF, WebP, and HTJ2K are
-optional.
+[docs/INSTALL.md](docs/INSTALL.md)** — including a JPEG-only minimal install and
+how to skip individual codecs (`-tags no<codec>`). **JPEG (libjpeg-turbo) is the
+only required codec** — it covers Aperio SVS, the TIFF family, and DICOM JPEG.
+JPEG 2000 (legacy Aperio), JPEG XL, AVIF, WebP, and HTJ2K are all optional.
 
 ## Usage
 

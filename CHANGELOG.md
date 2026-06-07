@@ -6,6 +6,11 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Changed
 
+- opentile-go bumped to **v0.37.0** — JPEG 2000 decode is now optional. Build
+  with `-tags nojp2k` to drop the OpenJPEG dependency; **libjpeg-turbo is now the
+  only required codec library**. See [docs/INSTALL.md](docs/INSTALL.md) for a
+  JPEG-only minimal install. JPEG 2000 is a legacy Aperio codec, no longer
+  marketed as required.
 - CI: a `Release` workflow now auto-creates the GitHub Release on `v*` tag push,
   with notes pulled from the matching `CHANGELOG.md` section and the title from
   the annotated tag's subject (notes-only; no binary artifacts).

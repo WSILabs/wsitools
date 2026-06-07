@@ -21,17 +21,20 @@ Linux, and Windows.
   | Codec | pkg-config module(s) | Required? | Opt-out build tag |
   |---|---|---|---|
   | JPEG (libjpeg-turbo) | `libturbojpeg`, `libjpeg` | **yes** | — |
-  | JPEG 2000 (OpenJPEG) | `libopenjp2` | **yes** | — |
+  | JPEG 2000 (OpenJPEG) | `libopenjp2` | optional | `nojp2k` |
   | JPEG XL | `libjxl`, `libjxl_threads` | optional | `nojxl` |
   | AVIF | `libavif` | optional | `noavif` |
   | WebP | `libwebp` | optional | `nowebp` |
   | HTJ2K (OpenJPH) | `openjph` | optional | `nohtj2k` |
 
-The two required codecs cover Aperio SVS, the TIFF family, and DICOM
-JPEG/JPEG2000 — i.e. most real-world WSI. The optional codecs are **opt-out**:
-by default the build expects all of them, so install everything below for a
-full build, or skip a library and pass its `-tags no<codec>` flag (see
-[Skipping a codec](#skipping-a-codec)).
+**JPEG (libjpeg-turbo) is the only required codec** — it covers Aperio SVS, the
+TIFF family, and DICOM JPEG, i.e. the overwhelming majority of real-world WSI.
+Everything else, including **JPEG 2000** (a legacy Aperio codec rarely seen
+today), is optional and **opt-out**: by default the build expects all of them, so
+install everything below for a full build, or skip a library and pass its
+`-tags no<codec>` flag (see [Skipping a codec](#skipping-a-codec)). For a
+JPEG-only minimal install you need just libjpeg-turbo — see
+[Minimal install](#minimal-install).
 
 ---
 
@@ -149,12 +152,29 @@ The optional codecs are opt-out. To build without one, omit its library and add
 its tag (tags combine with commas):
 
 ```sh
-# JPEG + JPEG2000 only (no jxl/avif/webp/htj2k) — needs just jpeg-turbo + openjpeg:
-go build -tags nojxl,noavif,nowebp,nohtj2k -o wsitools ./cmd/wsitools
+# Drop HTJ2K only (skip building OpenJPH):
+go build -tags nohtj2k -o wsitools ./cmd/wsitools
 ```
 
 A binary built without a codec cannot use it at runtime even if the library is
 later installed — codec support is fixed at build time.
+
+## Minimal install
+
+For a **JPEG-only** build you need just the Go toolchain, pkg-config, and
+**libjpeg-turbo** — no OpenJPEG, JXL, AVIF, WebP, or OpenJPH. Disable the rest
+with their tags:
+
+```sh
+# macOS
+brew install go pkg-config jpeg-turbo
+go install -tags nojp2k,nojxl,noavif,nowebp,nohtj2k \
+  github.com/wsilabs/wsitools/cmd/wsitools@latest
+```
+
+This handles Aperio SVS, the TIFF family, and DICOM JPEG — most real-world WSI.
+It cannot read JPEG 2000 (legacy Aperio), JPEG XL, AVIF, WebP, or HTJ2K tiles;
+those return a clear "codec unavailable" error.
 
 ## Verify
 
