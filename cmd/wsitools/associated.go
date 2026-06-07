@@ -61,7 +61,7 @@ type replaceFlags struct {
 // for the given source format string. Only SVS and generic-TIFF are supported.
 func assocFormatSupported(format string) bool {
 	switch format {
-	case string(opentile.FormatSVS), string(opentile.FormatGenericTIFF):
+	case string(opentile.FormatSVS), string(opentile.FormatGenericTIFF), string(opentile.FormatCOGWSI):
 		return true
 	default:
 		return false
@@ -167,11 +167,20 @@ func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 	if err != nil {
 		return err
 	}
-	defer src.Close()
 
 	if err := gateFormat(src); err != nil {
+		src.Close()
 		return err
 	}
+
+	// COG-WSI can't be Slice-1-spliced (it would break COG ghost-area/alignment
+	// invariants); re-finalize through cogwsiwriter instead. Close our handle
+	// first — the cog-wsi engine opens its own.
+	if src.Format() == string(opentile.FormatCOGWSI) {
+		src.Close()
+		return runAssociatedRemoveForCOGWSI(typ, input, outPath, fl)
+	}
+	defer src.Close()
 
 	f, err := parseSlideFile(input)
 	if err != nil {

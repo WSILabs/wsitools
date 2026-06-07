@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
@@ -95,6 +96,83 @@ func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) 
 		if err := w.AddAssociated(*plan.spec); err != nil {
 			return fmt.Errorf("add new %s: %w", plan.replace, err)
 		}
+	}
+	return nil
+}
+
+// rebuildCOGWSI re-finalizes src as a COG-WSI at outPath with plan applied. It
+// writes to a sibling temp file then atomically renames over outPath, so both
+// -o and --in-place (outPath == input) are crash-safe.
+func rebuildCOGWSI(src source.Source, outPath string, plan assocEditPlan, fsync bool) error {
+	if len(src.Levels()) == 0 {
+		return fmt.Errorf("source has no pyramid levels")
+	}
+	md := src.Metadata()
+	tmp := fmt.Sprintf("%s.tmp-%d", outPath, os.Getpid())
+	opts := cogwsiwriter.Options{
+		BigTIFF:      cogwsiwriter.BigTIFFAuto,
+		ToolsVersion: Version,
+		Metadata: cogwsiwriter.Metadata{
+			MPPX:                md.MPPX,
+			MPPY:                md.MPPY,
+			Magnification:       md.Magnification,
+			ICCProfile:          md.ICCProfile,
+			Make:                md.Make,
+			Model:               md.Model,
+			Software:            md.Software,
+			AcquisitionDateTime: md.AcquisitionDateTime,
+			SourceFormat:        src.Format(),
+			SourceImageDesc:     fmt.Sprintf("wsitools/%s %s source=%s", Version, "associated-edit", src.Format()),
+		},
+	}
+	w, err := cogwsiwriter.Create(tmp, opts)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+	if err := writeCOGWSI(w, src, plan); err != nil {
+		w.Abort()
+		os.Remove(tmp)
+		return err
+	}
+	if err := w.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("finalize output: %w", err)
+	}
+	if fsync {
+		if f, e := os.Open(tmp); e == nil {
+			_ = f.Sync()
+			_ = f.Close()
+		}
+	}
+	if err := os.Rename(tmp, outPath); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// runAssociatedRemoveForCOGWSI removes the typ associated image from a COG-WSI.
+func runAssociatedRemoveForCOGWSI(typ, input, outPath string, fl removeFlags) error {
+	src, err := source.Open(input)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	// Confirm the type is present (contract: removing an absent image is an error).
+	found := false
+	for _, a := range src.Associated() {
+		if a.Type() == typ {
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("no %s image in slide", typ)
+	}
+	if err := rebuildCOGWSI(src, outPath, assocEditPlan{remove: typ}, fl.fsync); err != nil {
+		return err
+	}
+	if !fl.quiet {
+		fmt.Printf("wsitools: removed %s: %s -> %s\n", typ, input, outPath)
 	}
 	return nil
 }

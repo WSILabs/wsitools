@@ -335,3 +335,43 @@ func writeSolidPNG(t *testing.T, path string, w, h int, c color.RGBA) {
 		t.Fatal(err)
 	}
 }
+
+func cogwsiFixture(t *testing.T) string {
+	p := firstExisting(t, "cog-wsi/CMU-1_cog-wsi.tiff", "cog-wsi/CMU-1-Small-Region_cog-wsi.tiff")
+	if p == "" {
+		t.Skip("no cog-wsi fixture")
+	}
+	return p
+}
+
+func TestCOGWSILabelRemove(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	if _, _, ok := assocOfType(t, in, "label"); !ok {
+		t.Skip("fixture has no label")
+	}
+	out := filepath.Join(t.TempDir(), "out.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedRemoveForCOGWSI("label", in, out, removeFlags{assocCommonFlags{fsync: false}}); err != nil {
+		t.Fatalf("cog-wsi label remove: %v", err)
+	}
+	// Output reopens as conformant cog-wsi.
+	osrc, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := osrc.Format(); got != "cog-wsi" {
+		t.Errorf("output format = %q, want cog-wsi", got)
+	}
+	osrc.Close()
+	// Label gone; other associated images survive.
+	if _, _, ok := assocOfType(t, out, "label"); ok {
+		t.Errorf("label still present")
+	}
+	if _, _, ok := assocOfType(t, out, "overview"); !ok {
+		t.Errorf("overview vanished (contract: only target changes)")
+	}
+	// Pyramid pixels identical.
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed")
+	}
+}
