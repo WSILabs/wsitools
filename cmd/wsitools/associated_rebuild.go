@@ -61,7 +61,7 @@ func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) 
 
 	replaced := false
 	for _, a := range src.Associated() {
-		if a.Type() == plan.remove {
+		if plan.remove != "" && a.Type() == plan.remove {
 			continue
 		}
 		if plan.replace != "" && a.Type() == plan.replace {
@@ -139,9 +139,20 @@ func rebuildCOGWSI(src source.Source, outPath string, plan assocEditPlan, fsync 
 		return fmt.Errorf("finalize output: %w", err)
 	}
 	if fsync {
-		if f, e := os.Open(tmp); e == nil {
-			_ = f.Sync()
-			_ = f.Close()
+		f, e := os.Open(tmp)
+		if e != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("fsync open: %w", e)
+		}
+		syncErr := f.Sync()
+		closeErr := f.Close()
+		if syncErr != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("fsync: %w", syncErr)
+		}
+		if closeErr != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("fsync close: %w", closeErr)
 		}
 	}
 	if err := os.Rename(tmp, outPath); err != nil {

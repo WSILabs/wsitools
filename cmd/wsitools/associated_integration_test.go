@@ -337,11 +337,28 @@ func writeSolidPNG(t *testing.T, path string, w, h int, c color.RGBA) {
 }
 
 func cogwsiFixture(t *testing.T) string {
-	p := firstExisting(t, "cog-wsi/CMU-1_cog-wsi.tiff", "cog-wsi/CMU-1-Small-Region_cog-wsi.tiff")
-	if p == "" {
-		t.Skip("no cog-wsi fixture")
+	// Prefer a native cog-wsi fixture when present.
+	if p := firstExisting(t, "cog-wsi/CMU-1_cog-wsi.tiff", "cog-wsi/CMU-1-Small-Region_cog-wsi.tiff"); p != "" {
+		return p
 	}
-	return p
+	// Otherwise synthesize one from an SVS fixture (present in CI), so the
+	// cog-wsi editing paths still run wherever the SVS fixture exists rather
+	// than silently skipping. rebuildCOGWSI with an empty plan is a faithful
+	// SVS→cog-wsi copy carrying the SVS's associated images (label/overview/…).
+	svs := firstExisting(t, "svs/CMU-1-Small-Region.svs", "svs/CMU-1.svs")
+	if svs == "" {
+		t.Skip("no cog-wsi or svs fixture")
+	}
+	src, err := source.Open(svs)
+	if err != nil {
+		t.Fatalf("open svs for cog-wsi synthesis: %v", err)
+	}
+	defer src.Close()
+	out := filepath.Join(t.TempDir(), "synth_cog-wsi.tiff")
+	if err := rebuildCOGWSI(src, out, assocEditPlan{}, false); err != nil {
+		t.Fatalf("synthesize cog-wsi fixture: %v", err)
+	}
+	return out
 }
 
 func TestCOGWSILabelRemove(t *testing.T) {
