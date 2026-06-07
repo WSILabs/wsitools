@@ -176,3 +176,60 @@ func runAssociatedRemoveForCOGWSI(typ, input, outPath string, fl removeFlags) er
 	}
 	return nil
 }
+
+// runAssociatedReplaceForCOGWSI replaces (or adds) the typ associated image on a
+// COG-WSI: decode the user's image, resize/encode it into an AssociatedSpec, and
+// re-finalize the slide with that spec substituted/appended.
+func runAssociatedReplaceForCOGWSI(typ, input, outPath string, fl replaceFlags) error {
+	src, err := source.Open(input)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	var existing source.AssociatedImage
+	for _, a := range src.Associated() {
+		if a.Type() == typ {
+			existing = a
+		}
+	}
+	img, err := decodeReplacementImage(fl.image)
+	if err != nil {
+		return err
+	}
+	tw, th, err := resolveTargetDims(typ, img, existing, existing != nil, fl.labelDims)
+	if err != nil {
+		return err
+	}
+	bg, err := parseHexColor(fl.bgHex)
+	if err != nil {
+		return err
+	}
+	resize := fl.resize
+	if resize == "" {
+		resize = "fit"
+	}
+	spec, err := buildReplacementAssocSpec(img, replaceOpts{
+		typ:         typ,
+		compression: fl.compression,
+		resize:      resize,
+		bg:          bg,
+		targetW:     tw,
+		targetH:     th,
+		force:       fl.force,
+	})
+	if err != nil {
+		return err
+	}
+	if err := rebuildCOGWSI(src, outPath, assocEditPlan{replace: typ, spec: spec}, fl.fsync); err != nil {
+		return err
+	}
+	if !fl.quiet {
+		verb := "replaced"
+		if existing == nil {
+			verb = "added"
+		}
+		fmt.Printf("wsitools: %s %s: %s -> %s\n", verb, typ, input, outPath)
+	}
+	return nil
+}

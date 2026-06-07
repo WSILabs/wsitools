@@ -217,11 +217,19 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 	if err != nil {
 		return err
 	}
-	defer src.Close()
 
 	if err := gateFormat(src); err != nil {
+		src.Close()
 		return err
 	}
+
+	// COG-WSI can't be Slice-1-spliced; re-finalize through cogwsiwriter instead.
+	// Close our handle first — the cog-wsi engine opens its own.
+	if src.Format() == string(opentile.FormatCOGWSI) {
+		src.Close()
+		return runAssociatedReplaceForCOGWSI(typ, input, outPath, fl)
+	}
+	defer src.Close()
 
 	// SVS replace is supported only for the label today. opentile-go reads
 	// Aperio thumbnail/macro/overview as abbreviated JPEG (tables in the

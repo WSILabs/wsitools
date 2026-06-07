@@ -375,3 +375,44 @@ func TestCOGWSILabelRemove(t *testing.T) {
 		t.Errorf("pyramid changed")
 	}
 }
+
+func TestCOGWSIOverviewReplaceRoundTrips(t *testing.T) {
+	in := copyFile(t, cogwsiFixture(t))
+	ovSize, _, ok := assocOfType(t, in, "overview")
+	if !ok {
+		t.Skip("fixture has no overview")
+	}
+	png := filepath.Join(t.TempDir(), "x.png")
+	writeSolidPNG(t, png, ovSize.X, ovSize.Y, color.RGBA{200, 30, 40, 255})
+	out := filepath.Join(t.TempDir(), "out.tiff")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedReplaceForCOGWSI("overview", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, compression: "jpeg", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("cog-wsi overview replace: %v", err)
+	}
+	src, err := source.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	var decoded bool
+	for _, a := range src.Associated() {
+		if a.Type() == "overview" {
+			b, err := a.Bytes()
+			if err != nil {
+				t.Fatalf("overview bytes: %v", err)
+			}
+			if _, _, err := image.Decode(bytes.NewReader(b)); err != nil {
+				t.Fatalf("replaced overview does not decode: %v", err)
+			}
+			decoded = true
+		}
+	}
+	if !decoded {
+		t.Errorf("overview missing/not classified after replace")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed after replace")
+	}
+}

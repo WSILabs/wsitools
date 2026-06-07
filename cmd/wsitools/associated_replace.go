@@ -14,6 +14,7 @@ import (
 	xdraw "golang.org/x/image/draw"
 
 	"github.com/hhrutter/lzw"
+	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/edit"
 )
 
@@ -157,11 +158,11 @@ func encodeLZWStrips(img image.Image) [][]byte {
 // ---------- codec: JPEG ----------
 
 func buildJPEGReplacementIFD(img image.Image, width, height int, desc string) (*edit.ReplacementIFD, error) {
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
-		return nil, fmt.Errorf("jpeg encode: %w", err)
+	jfif, err := encodeJPEGWhole(img)
+	if err != nil {
+		return nil, err
 	}
-	strips := [][]byte{buf.Bytes()}
+	strips := [][]byte{jfif}
 
 	shortLE := func(v uint16) []byte {
 		b := make([]byte, 4)
@@ -200,6 +201,97 @@ func buildJPEGReplacementIFD(img image.Image, width, height int, desc string) (*
 	sortTags(tags)
 
 	return &edit.ReplacementIFD{Tags: tags, StripData: strips}, nil
+}
+
+// ---------- COG-WSI single-blob encoders + AssociatedSpec packaging ----------
+//
+// COG-WSI associated images are single-strip self-contained payloads (unlike the
+// SVS Slice-1 splice, which uses 2-row strips). JPEG is a full JFIF; LZW/deflate/
+// none is ONE whole-image strip.
+
+// encodeJPEGWhole encodes img as a full baseline JFIF (quality 90). Shared by the
+// SVS Slice-1 buildJPEGReplacementIFD and the COG-WSI AssociatedSpec packager.
+func encodeJPEGWhole(img image.Image) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		return nil, fmt.Errorf("jpeg encode: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// encodeLZWWhole returns a single whole-image LZW stream (no predictor).
+//
+// The COG-WSI associated-image IFD written by cogwsiwriter.populateAssocIFD does
+// NOT emit a Predictor (317) tag, and the opentile-go reader does not apply
+// horizontal differencing on read-back — so the bytes must be LZW-compressed RGB
+// WITHOUT predictor, matching how convert --to cog-wsi writes LZW associated
+// images. (This differs from the SVS Slice-1 path, where the IFD does carry
+// Predictor=2.)
+func encodeLZWWhole(img image.Image) []byte {
+	return encodeLZW(rgbStripBytes(img))
+}
+
+// encodeDeflateWhole returns a single whole-image zlib stream (no predictor); see
+// encodeLZWWhole for why predictor is omitted.
+func encodeDeflateWhole(img image.Image) []byte {
+	var buf bytes.Buffer
+	zw, _ := zlib.NewWriterLevel(&buf, zlib.BestCompression)
+	_, _ = zw.Write(rgbStripBytes(img))
+	_ = zw.Close()
+	return buf.Bytes()
+}
+
+// buildReplacementAssocSpec encodes img as a cogwsiwriter.AssociatedSpec for the
+// given type/options. COG-WSI associated images are single-strip self-contained
+// payloads, so JPEG is a full JFIF and LZW/deflate/none is one whole-image strip.
+func buildReplacementAssocSpec(img image.Image, o replaceOpts) (*cogwsiwriter.AssociatedSpec, error) {
+	codec := o.compression
+	if codec == "" {
+		if o.typ == "label" {
+			codec = "lzw"
+		} else {
+			codec = "jpeg"
+		}
+	}
+	if o.targetW != 0 || o.targetH != 0 {
+		prepared, err := fitImage(img, o)
+		if err != nil {
+			return nil, err
+		}
+		img = prepared
+	}
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+
+	var payload []byte
+	var compTag uint16
+	switch codec {
+	case "jpeg":
+		buf, err := encodeJPEGWhole(img)
+		if err != nil {
+			return nil, err
+		}
+		payload, compTag = buf, 7
+	case "lzw":
+		payload, compTag = encodeLZWWhole(img), 5
+	case "deflate":
+		payload, compTag = encodeDeflateWhole(img), 8
+	case "none":
+		payload, compTag = rgbStripBytes(img), 1
+	default:
+		return nil, fmt.Errorf("unknown compression %q (want jpeg, lzw, deflate, none)", codec)
+	}
+
+	return &cogwsiwriter.AssociatedSpec{
+		Type:            o.typ,
+		Width:           uint32(w),
+		Height:          uint32(h),
+		Compression:     compTag,
+		Photometric:     2,
+		SamplesPerPixel: 3,
+		BitsPerSample:   []uint16{8, 8, 8},
+		Bytes:           payload,
+	}, nil
 }
 
 // ---------- codec: deflate ----------
