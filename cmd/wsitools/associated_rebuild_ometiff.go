@@ -1,6 +1,14 @@
 package main
 
-import "github.com/wsilabs/wsitools/internal/tiff/streamwriter"
+import (
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/wsilabs/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
+)
 
 // omeEditPlan parameterizes associated-image output. At most one of
 // remove/replace is set; empty plan writes all verbatim; dropAll writes none.
@@ -9,4 +17,116 @@ type omeEditPlan struct {
 	replace string
 	spec    *streamwriter.StrippedSpec
 	dropAll bool
+}
+
+// omeTIFFLossyWarning is emitted on EVERY OME-TIFF edit, regardless of flags.
+const omeTIFFLossyWarning = "OME-TIFF editing rebuilds the file with a regenerated, minimal OME-XML — instrument, acquisition, channel, and vendor annotations are NOT preserved (pixels, geometry/MPP/magnification, and the other associated images are). wsitools' OME-TIFF support is rudimentary; for serious OME-TIFF work use Bio-Formats. See docs/ome-tiff-limitations.md."
+
+func warnOMETIFFLossy() { slog.Warn(omeTIFFLossyWarning) }
+
+// rebuildOMETIFF re-finalizes src as an OME-TIFF at outPath with plan applied,
+// forcing a synthetic (minimal) OME-XML built from the plan-edited associated
+// set. Writes a sibling temp then atomically renames (safe for --in-place).
+func rebuildOMETIFF(src source.Source, outPath string, plan omeEditPlan, fsync bool) error {
+	if len(src.Levels()) == 0 {
+		return fmt.Errorf("source has no pyramid levels")
+	}
+	md := src.Metadata()
+	l0 := src.Levels()[0]
+	srcSoft := strings.TrimSpace(md.Make + " " + md.Model)
+	// Forced synthetic OME-XML reflecting the edit. arg order:
+	// SyntheticOMEDescription(l0W, l0H uint32, mppX, mppY float64,
+	//   name, srcSoftware string, assoc []OMEAssoc).
+	l0Desc := SyntheticOMEDescription(
+		uint32(l0.Size().X), uint32(l0.Size().Y),
+		md.MPP, md.MPP, "Image", srcSoft,
+		omeAssociatedSpecs(src, plan),
+	)
+	opts := streamwriter.Options{
+		BigTIFF:              resolveBigTIFFMode("auto", src),
+		ToolsVersion:         Version,
+		SourceFormat:         src.Format(),
+		FormatName:           "ome-tiff",
+		SubResolutionPyramid: true,
+		SampleFormat:         1,
+		MPPX:                 md.MPPX,
+		MPPY:                 md.MPPY,
+		Magnification:        md.Magnification,
+		ICCProfile:           md.ICCProfile,
+	}
+	if md.Make != "" {
+		opts.Make = md.Make
+	}
+	if md.Model != "" {
+		opts.Model = md.Model
+	}
+	if md.Software != "" {
+		opts.Software = md.Software
+	}
+	if !md.AcquisitionDateTime.IsZero() {
+		opts.DateTime = md.AcquisitionDateTime
+	}
+	tmp := fmt.Sprintf("%s.tmp-%d", outPath, os.Getpid())
+	w, err := streamwriter.Create(tmp, opts)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+	if err := writeTIFFTileCopy(w, src, "ome-tiff", l0Desc, true /*omeSynthetic*/, plan); err != nil {
+		w.Abort()
+		os.Remove(tmp)
+		return err
+	}
+	if err := w.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("finalize output: %w", err)
+	}
+	if fsync {
+		f, e := os.Open(tmp)
+		if e != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("fsync open: %w", e)
+		}
+		syncErr := f.Sync()
+		closeErr := f.Close()
+		if syncErr != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("fsync: %w", syncErr)
+		}
+		if closeErr != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("fsync close: %w", closeErr)
+		}
+	}
+	if err := os.Rename(tmp, outPath); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// runAssociatedRemoveForOMETIFF removes the typ associated image from an
+// OME-TIFF by rebuilding the file (lossy — see warnOMETIFFLossy).
+func runAssociatedRemoveForOMETIFF(typ, input, outPath string, fl removeFlags) error {
+	src, err := source.Open(input)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	found := false
+	for _, a := range src.Associated() {
+		if a.Type() == typ {
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("no %s image in slide", typ)
+	}
+	warnOMETIFFLossy()
+	if err := rebuildOMETIFF(src, outPath, omeEditPlan{remove: typ}, fl.fsync); err != nil {
+		return err
+	}
+	if !fl.quiet {
+		fmt.Printf("wsitools: removed %s: %s -> %s\n", typ, input, outPath)
+	}
+	return nil
 }

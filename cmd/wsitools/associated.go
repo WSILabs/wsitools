@@ -61,7 +61,7 @@ type replaceFlags struct {
 // for the given source format string. Only SVS and generic-TIFF are supported.
 func assocFormatSupported(format string) bool {
 	switch format {
-	case string(opentile.FormatSVS), string(opentile.FormatGenericTIFF), string(opentile.FormatCOGWSI):
+	case string(opentile.FormatSVS), string(opentile.FormatGenericTIFF), string(opentile.FormatCOGWSI), string(opentile.FormatOMETIFF):
 		return true
 	default:
 		return false
@@ -72,7 +72,7 @@ func gateFormat(src source.Source) error {
 	f := src.Format()
 	if !assocFormatSupported(f) {
 		return fmt.Errorf("%w: associated editing not yet supported for %s "+
-			"(SVS + generic-TIFF only; OME-TIFF/COG-WSI coming next — "+
+			"(SVS, generic-TIFF, COG-WSI, and OME-TIFF only — "+
 			"for other transforms use 'wsitools convert')", ErrUnsupportedAssoc, f)
 	}
 	return nil
@@ -179,6 +179,12 @@ func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 	if src.Format() == string(opentile.FormatCOGWSI) {
 		src.Close()
 		return runAssociatedRemoveForCOGWSI(typ, input, outPath, fl)
+	}
+	// OME-TIFF can't be Slice-1-spliced; rebuild through the ome-tiff streamwriter
+	// (lossy — regenerates a minimal OME-XML). Close our handle first.
+	if src.Format() == string(opentile.FormatOMETIFF) {
+		src.Close()
+		return runAssociatedRemoveForOMETIFF(typ, input, outPath, fl)
 	}
 	defer src.Close()
 
