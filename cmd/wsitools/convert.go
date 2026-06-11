@@ -62,7 +62,7 @@ Examples:
 
 func init() {
 	convertCmd.Flags().StringVarP(&cvOutput, "output", "o", "", "output file path (required)")
-	convertCmd.Flags().StringVar(&cvTo, "to", "", "conversion target (cog-wsi|svs|tiff|ome-tiff|dzi|szi)")
+	convertCmd.Flags().StringVar(&cvTo, "to", "", "conversion target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom)")
 	convertCmd.Flags().BoolVarP(&cvForce, "force", "f", false, "overwrite output if it exists")
 	convertCmd.Flags().StringVar(&cvBigTIFFFlag, "bigtiff", "auto", "auto|on|off")
 	convertCmd.Flags().BoolVar(&cvNoAssociated, "no-associated", false, "skip label/macro/thumbnail/overview")
@@ -89,7 +89,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 
 	if cvFactor != 1 || cvTargetMag != 0 {
-		if cvTo == "dzi" || cvTo == "szi" {
+		if cvTo == "dzi" || cvTo == "szi" || cvTo == "dicom" {
 			return fmt.Errorf("--factor/--target-mag not supported for --to %s (yet)", cvTo)
 		}
 		if cvFactor != 1 && !isValidFactor(cvFactor) {
@@ -113,10 +113,12 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		return runConvertDZI(cmd, input, start)
 	case "szi":
 		return runConvertSZI(cmd, input, start)
+	case "dicom":
+		return runConvertDICOM(cmd, input, start)
 	case "":
 		return fmt.Errorf("--to is required")
 	default:
-		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi)", cvTo)
+		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom)", cvTo)
 	}
 }
 

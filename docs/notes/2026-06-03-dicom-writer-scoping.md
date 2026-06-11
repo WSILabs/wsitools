@@ -75,6 +75,50 @@ large foreign-shaped C++-style codebase. Port the *logic and values*, but in
 - **Phase 3:** multi-channel / z-stack (fluorescence) — multiple optical paths
   and focal planes; large, separate.
 
+## Phase 0 outcome (2026-06-11)
+
+**DONE — and tractable (NOT a swamp).** `convert --to dicom -o out.dcm --level N
+<input.dcm>` emits ONE conformant WSM **VOLUME** instance from a **DICOM source**:
+source JPEG frames copied **verbatim** (byte-identical), re-encapsulated as
+TILED_FULL multi-frame PixelData; one level per invocation (`--level`, default
+`0`). `dciodvfy` (dicom3tools) reports **0 errors** on both L0 (65536²,
+16384 frames) and reduced L2 instances — the sole residual is a benign "Study ID"
+DICOMDIR warning (anonymous re-emission has no study identifier). The dataset
+mirrors a real Grundium WSM golden; output round-trips through opentile-go
+(`source.Open` → `Format: dicom`, frames byte-identical). Built on
+`github.com/suyashkumar/dicom` **v1.1.0** (pure Go, now a direct dep).
+
+### `suyashkumar/dicom` v1.1.0 construction patterns de-risked
+
+These are the non-obvious library mechanics the spike pinned down — they're the
+"port" gotchas Phase 1 inherits:
+
+- **Encapsulated PixelData must be a HAND-BUILT `*dicom.Element`** — not via
+  `dicom.NewElement`. Construct it directly: `Tag` = PixelData,
+  `ValueRepresentation` = `tag.VRPixelData`, `RawValueRepresentation` = `"OB"`,
+  `ValueLength` = `tag.VLUndefinedLength`, `Value` =
+  `dicom.NewValue(dicom.PixelDataInfo{...})`. Calling
+  `dicom.NewElement(tag.PixelData, info)` **SIGSEGVs** (it forces the OW/native
+  branch).
+- **SQ construction:** `dicom.NewElement(seqTag, [][]*dicom.Element{ {item-elems...} })`;
+  an empty sequence is `[][]*dicom.Element{}`.
+- **The library does NOT sort elements on write** — emit them in **ascending tag
+  order manually** or the output is non-conformant.
+- **JPEG Baseline transfer syntax has no exported const** — use the literal
+  `"1.2.840.10008.1.2.4.50"`. `NumberOfFrames` VR is **IS**, so its value is a
+  `[]string`, not an int.
+- **The 8 WSM IOD attributes `dciodvfy` required:** `StudyDate`/`StudyTime`,
+  `ContentDate`/`ContentTime`, `AcquisitionDateTime`, `DeviceSerialNumber`,
+  `LossyImageCompressionRatio`, and `ICCProfile` (in the Optical Path sequence).
+
+**Known P0 limitation:** a source lacking an embedded ICC profile would
+reintroduce a Type 1C conformance gap (`ICCProfile` in Optical Path) — fine for
+P0 (DICOM input carries ICC in practice).
+
+**Conclusion:** the Go port is "a few hundred lines," not a swamp. **Phase 1
+(full pyramid + non-DICOM sources + colorspace reconciliation) is the clear next
+step.**
+
 ## Open questions for the eventual spec
 
 - Transfer syntax policy: tile-copy (reuse source JPEG) vs. re-encode; which
