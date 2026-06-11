@@ -4,6 +4,23 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Added
+
+- Experimental `convert --to dicom` — **DICOM-WSI writer, Phase 0 spike.** Emits
+  one conformant DICOM VL Whole Slide Microscopy (WSM) **VOLUME** instance from a
+  **DICOM source**: the source's compressed JPEG frames are copied **verbatim**
+  (byte-identical, no decode/re-encode) and re-encapsulated as TILED_FULL
+  multi-frame PixelData. One pyramid level per invocation (`--level`, default
+  `0` = full resolution). Validated with David Clunie's `dciodvfy`
+  (dicom3tools) — **0 errors** on both full-resolution (L0, 65536², 16384
+  frames) and reduced (L2) instances — and round-trips through opentile-go
+  (read back as `Format: dicom`, frames byte-identical to source). New
+  `make dicom-validate` target emits + validates against the Grundium fixture
+  (needs `dciodvfy` on PATH, `DCIODVFY=` override; gated on `WSI_TOOLS_TESTDIR`).
+  Built on `github.com/suyashkumar/dicom` (pure Go, promoted to a direct dep).
+  **DICOM→DICOM only** — full pyramid (instance per level), non-DICOM sources,
+  and colorspace/photometric reconciliation are later phases.
+
 ## [0.22.0] — 2026-06-07
 
 ### Added

@@ -132,6 +132,22 @@ queued, deferred, or under consideration.
   foreign code shape. Largest single target; phased (P0 TILED_FULL brightfield
   spike → P1 full pyramid + tile-copy → P2 sparse/label/concatenation → P3
   fluorescence). Rough scoping: `docs/notes/2026-06-03-dicom-writer-scoping.md`.
+  - ✅ **DONE (2026-06-11): Phase 0 spike.** `convert --to dicom -o out.dcm
+    --level N <input.dcm>` emits ONE conformant WSM **VOLUME** instance from a
+    **DICOM source**: the source's compressed JPEG frames are copied **verbatim**
+    (byte-identical, no decode/re-encode), re-encapsulated as TILED_FULL
+    multi-frame PixelData; one level per invocation (`--level`, default `0`).
+    **De-risk result: positive** — `dciodvfy` (dicom3tools) reports **0 errors**
+    on both L0 (65536², 16384 frames) and reduced L2 instances, and the output
+    round-trips through opentile-go (read back as `Format: dicom`, frames
+    byte-identical). Built on `github.com/suyashkumar/dicom` v1.1.0 (pure Go,
+    now a direct dep); new `make dicom-validate` target. The Go port is "a few
+    hundred lines," **not a swamp.** Known P0 limitation: a source lacking an
+    embedded ICC profile would reintroduce a Type 1C gap (ICCProfile in
+    OpticalPath) — fine for P0 (DICOM input carries ICC in practice).
+  - **Next — Phase 1:** full pyramid (instance per level), **non-DICOM sources**,
+    and colorspace/photometric reconciliation; then P2 (TILED_SPARSE,
+    label/overview instances, Concatenations) and P3 (fluorescence).
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
 - ✅ **DONE (2026-06-05): unify downsample/convert scaling.** `convert --factor N`
   / `--target-mag M` ships for `svs|tiff|ome-tiff|cog-wsi` (reduce-then-rebuild
