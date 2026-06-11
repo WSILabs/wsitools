@@ -30,11 +30,23 @@ func WriteVolumeInstance(w io.Writer, src source.Source, level int, _ Options) e
 		FrameOfReference: NewUID(),
 		DimensionOrg:     NewUID(),
 	}
-	ds, err := assembleWSMDataset(src, level, uids)
+	// Encapsulate first: the compressed byte total feeds the lossy compression
+	// ratio that the dataset advertises (LossyImageCompressionRatio is Type 1C,
+	// required when LossyImageCompression is "01").
+	pd, compressedBytes, err := encapsulatePixelData(src, level)
 	if err != nil {
 		return err
 	}
-	pd, err := encapsulatePixelData(src, level)
+	lvl := src.Levels()[level]
+	tileSize := lvl.TileSize()
+	grid := lvl.Grid()
+	// Uncompressed size of the stored frames = frames × tile pixels × samples.
+	uncompressed := int64(grid.X) * int64(grid.Y) * int64(tileSize.X) * int64(tileSize.Y) * 3
+	lossyRatio := 1.0
+	if compressedBytes > 0 {
+		lossyRatio = float64(uncompressed) / float64(compressedBytes)
+	}
+	ds, err := assembleWSMDataset(src, level, uids, lossyRatio)
 	if err != nil {
 		return err
 	}

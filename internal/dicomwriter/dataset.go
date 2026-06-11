@@ -2,6 +2,7 @@ package dicomwriter
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/suyashkumar/dicom"
 	"github.com/suyashkumar/dicom/pkg/tag"
@@ -43,12 +44,37 @@ type UIDSet struct {
 // Most geometry is DERIVED from the source level/metadata; structural constants
 // (ImageType, Modality, photometric/bit-depth fields, orientation, TILED_FULL,
 // anonymous identity, coded-sequence codes) are MIRRORED from the golden.
-func assembleWSMDataset(src source.Source, level int, uids UIDSet) (dicom.Dataset, error) {
+func assembleWSMDataset(src source.Source, level int, uids UIDSet, lossyRatio float64) (dicom.Dataset, error) {
 	if level < 0 || level >= len(src.Levels()) {
 		return dicom.Dataset{}, fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
 	}
 	lvl := src.Levels()[level]
 	md := src.Metadata()
+
+	// Date/time attributes. The opentile DICOM reader does not currently surface
+	// the source's acquisition timestamp, so ContentDate/Time (Type 1, "when this
+	// instance was created") use now; AcquisitionDateTime (Type 1) uses the source
+	// value when present, else now. StudyDate/Time (Type 2) mirror the content
+	// date/time so a DICOMDIR can index the instance (StudyID stays empty — we
+	// have no real study identifier for an anonymous re-emission).
+	now := time.Now().UTC()
+	acq := md.AcquisitionDateTime
+	if acq.IsZero() {
+		acq = now
+	}
+	contentDA := now.Format("20060102")
+	contentTM := now.Format("150405")
+	acqDT := acq.Format("20060102150405")
+
+	// DeviceSerialNumber is Type 1 (must be non-empty). Carry the source serial
+	// when available, else identify the synthesizing writer.
+	serial := md.SerialNumber
+	if serial == "" {
+		serial = writerSoftware
+	}
+
+	// LossyImageCompressionRatio (Type 1C, DS, ≤16 chars) — %.4g keeps it compact.
+	ratioStr := fmt.Sprintf("%.4g", lossyRatio)
 
 	grid := lvl.Grid()
 	size := lvl.Size()
@@ -98,6 +124,27 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet) (dicom.Datase
 		model = writerSoftware
 	}
 
+	// OpticalPath item (tag-ordered within the item). ICCProfile (0028,2000) is
+	// Type 1C — required for color images; carry the source's embedded profile
+	// when present (placed after IlluminationTypeCodeSequence 0022,0016 and before
+	// OpticalPathIdentifier 0048,0106). LIMITATION: a source without an embedded
+	// profile reintroduces the Type 1C conformance gap (dciodvfy error) — accepted
+	// for Phase 0 (DICOM-only input, which carries an ICC profile in practice).
+	opticalPathItem := []*dicom.Element{
+		mk(tag.IlluminationTypeCodeSequence, [][]*dicom.Element{
+			codeItem("111744", "DCM", "Brightfield illumination"),
+		}),
+	}
+	if len(md.ICCProfile) > 0 {
+		opticalPathItem = append(opticalPathItem, mk(tag.ICCProfile, md.ICCProfile))
+	}
+	opticalPathItem = append(opticalPathItem,
+		mk(tag.OpticalPathIdentifier, []string{"0"}),
+		mk(tag.IlluminationColorCodeSequence, [][]*dicom.Element{
+			codeItem("414298005", "SCT", "Full Spectrum"),
+		}),
+	)
+
 	elems := []*dicom.Element{
 		// ---- File-meta (group 0002) ----
 		mk(tag.FileMetaInformationVersion, []byte{0x00, 0x01}),
@@ -111,6 +158,13 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet) (dicom.Datase
 		mk(tag.ImageType, []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}),
 		mk(tag.SOPClassUID, []string{wsmSOPClassUID}),
 		mk(tag.SOPInstanceUID, []string{uids.SOP}),
+		// Dates/times (tag-ordered: StudyDate 0020, ContentDate 0023,
+		// AcquisitionDateTime 002A, StudyTime 0030, ContentTime 0033).
+		mk(tag.StudyDate, []string{contentDA}),
+		mk(tag.ContentDate, []string{contentDA}),
+		mk(tag.AcquisitionDateTime, []string{acqDT}),
+		mk(tag.StudyTime, []string{contentTM}),
+		mk(tag.ContentTime, []string{contentTM}),
 		mk(tag.AccessionNumber, []string{}),
 		mk(tag.Modality, []string{"SM"}),
 		mk(tag.Manufacturer, []string{manufacturer}),
@@ -125,6 +179,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet) (dicom.Datase
 		mk(tag.PatientSex, []string{}),
 
 		// ---- Equipment (group 0018) ----
+		mk(tag.DeviceSerialNumber, []string{serial}),
 		mk(tag.SoftwareVersions, []string{writerSoftware}),
 
 		// ---- General Study / Series / FrameOfReference (group 0020) ----
@@ -155,6 +210,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet) (dicom.Datase
 		mk(tag.PixelRepresentation, []int{0}),
 		mk(tag.BurnedInAnnotation, []string{"NO"}),
 		mk(tag.LossyImageCompression, []string{"01"}),
+		mk(tag.LossyImageCompressionRatio, []string{ratioStr}),
 		mk(tag.LossyImageCompressionMethod, []string{"ISO_10918_1"}),
 
 		// ---- Specimen (group 0040) ----
@@ -190,17 +246,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet) (dicom.Datase
 		mk(tag.FocusMethod, []string{"AUTO"}),
 		mk(tag.ExtendedDepthOfField, []string{"NO"}),
 		mk(tag.ImageOrientationSlide, []string{"0", "1", "0", "1", "0", "0"}),
-		mk(tag.OpticalPathSequence, [][]*dicom.Element{
-			{
-				mk(tag.IlluminationTypeCodeSequence, [][]*dicom.Element{
-					codeItem("111744", "DCM", "Brightfield illumination"),
-				}),
-				mk(tag.OpticalPathIdentifier, []string{"0"}),
-				mk(tag.IlluminationColorCodeSequence, [][]*dicom.Element{
-					codeItem("414298005", "SCT", "Full Spectrum"),
-				}),
-			},
-		}),
+		mk(tag.OpticalPathSequence, [][]*dicom.Element{opticalPathItem}),
 		mk(tag.NumberOfOpticalPaths, []int{1}),
 		mk(tag.TotalPixelMatrixFocalPlanes, []int{1}),
 

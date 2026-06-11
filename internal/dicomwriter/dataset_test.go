@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/suyashkumar/dicom"
 	"github.com/suyashkumar/dicom/pkg/tag"
 
 	"github.com/wsilabs/wsitools/internal/source"
@@ -42,7 +43,7 @@ func TestAssembleWSMDataset(t *testing.T) {
 		FrameOfReference: NewUID(),
 		DimensionOrg:     NewUID(),
 	}
-	ds, err := assembleWSMDataset(src, level, uids)
+	ds, err := assembleWSMDataset(src, level, uids, 10.0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,5 +115,44 @@ func TestAssembleWSMDataset(t *testing.T) {
 	}
 	if _, err := ds.FindElementByTag(tag.SharedFunctionalGroupsSequence); err != nil {
 		t.Errorf("SharedFunctionalGroupsSequence missing: %v", err)
+	}
+
+	// Conformance attributes added for dciodvfy (regression net for the values
+	// the validator checks but no other unit test would catch).
+	if got := strVal(tag.LossyImageCompressionRatio); got != "10" {
+		t.Errorf("LossyImageCompressionRatio = %q, want %q (from ratio 10.0)", got, "10")
+	}
+	if got := strVal(tag.DeviceSerialNumber); got == "" {
+		t.Error("DeviceSerialNumber empty (Type 1 must be non-empty)")
+	}
+	// AcquisitionDateTime + ContentDate are Type 1 (must be present, non-empty).
+	if got := strVal(tag.AcquisitionDateTime); got == "" {
+		t.Error("AcquisitionDateTime empty (Type 1)")
+	}
+	if got := strVal(tag.ContentDate); got == "" {
+		t.Error("ContentDate empty (Type 1)")
+	}
+
+	// ICCProfile is carried into the OpticalPathSequence item when the source
+	// has one; the Grundium fixture does, so assert it survives into the item.
+	if len(src.Metadata().ICCProfile) > 0 {
+		opSeq, err := ds.FindElementByTag(tag.OpticalPathSequence)
+		if err != nil {
+			t.Fatalf("OpticalPathSequence missing: %v", err)
+		}
+		items, ok := opSeq.Value.GetValue().([]*dicom.SequenceItemValue)
+		if !ok || len(items) == 0 {
+			t.Fatalf("OpticalPathSequence value is %T (want non-empty items)", opSeq.Value.GetValue())
+		}
+		var foundICC bool
+		for _, el := range items[0].GetValue().([]*dicom.Element) {
+			if el.Tag == tag.ICCProfile {
+				foundICC = true
+				break
+			}
+		}
+		if !foundICC {
+			t.Error("ICCProfile not carried into OpticalPathSequence item")
+		}
 	}
 }

@@ -1,7 +1,12 @@
-.PHONY: test vet cover bench install clean goldens-byte-stable bench-dzi
+.PHONY: test vet cover bench install clean goldens-byte-stable bench-dzi dicom-validate
 
 GO ?= go
 BIN = bin/wsitools
+# DICOM conformance validator. dciodvfy ships in David Clunie's dicom3tools
+# (https://www.dclunie.com/dicom3tools.html — precompiled macOS/Windows binaries
+# under workinprogress/, or build from source). Override if it is not on PATH,
+# e.g. `make dicom-validate DCIODVFY=/tmp/dciodvfy`.
+DCIODVFY ?= dciodvfy
 
 test:
 	$(GO) test ./... -race -count=1
@@ -55,3 +60,22 @@ goldens-byte-stable: build
 
 bench-dzi: $(BIN)
 	@scripts/bench-dzi.sh
+
+# Emits a WSM VOLUME instance from a DICOM fixture and runs dciodvfy conformance
+# validation (Phase 0 de-risk). Requires WSI_TOOLS_TESTDIR to point at a dir
+# containing dicom/scan_621_grundium_dicom, and dciodvfy on PATH (see DCIODVFY).
+# Success bar: 0 Errors (Study ID DICOMDIR warning is expected/benign).
+dicom-validate: build
+	@if [ -z "$$WSI_TOOLS_TESTDIR" ]; then \
+		echo "WSI_TOOLS_TESTDIR not set; skipping dicom-validate"; \
+		exit 0; \
+	fi
+	@SM="$$WSI_TOOLS_TESTDIR/dicom/scan_621_grundium_dicom"; \
+	[ -d "$$SM" ] || { echo "missing $$SM; skipping"; exit 0; }; \
+	command -v "$(DCIODVFY)" >/dev/null 2>&1 || { echo "$(DCIODVFY) not found; see Makefile DCIODVFY note"; exit 1; }; \
+	OUT=$$(mktemp -t wsm.XXXXXX).dcm; \
+	./bin/wsitools convert --to dicom --level 0 -f -o "$$OUT" "$$SM"; \
+	echo "=== dciodvfy $$OUT ==="; \
+	"$(DCIODVFY)" "$$OUT"; RC=$$?; \
+	rm -f "$$OUT"; \
+	exit $$RC

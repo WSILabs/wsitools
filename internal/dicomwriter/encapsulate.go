@@ -22,23 +22,28 @@ import (
 // constructed via dicom.NewElement(tag.PixelData, ...): NewElement forces
 // VR "OW" with ValueLength=0, which sends dicom.Write down the native branch
 // and SIGSEGVs on a nil NativeData. See smoke_test.go.
-func encapsulatePixelData(src source.Source, level int) (*dicom.Element, error) {
+//
+// The second return value is the total compressed byte count across all frames,
+// used by the caller to compute LossyImageCompressionRatio.
+func encapsulatePixelData(src source.Source, level int) (*dicom.Element, int64, error) {
 	if level < 0 || level >= len(src.Levels()) {
-		return nil, fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
+		return nil, 0, fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
 	}
 	lvl := src.Levels()[level]
 	grid := lvl.Grid()
 
 	buf := make([]byte, lvl.TileMaxSize())
 	frames := make([]*frame.Frame, 0, grid.X*grid.Y)
+	var totalBytes int64
 	for ty := 0; ty < grid.Y; ty++ {
 		for tx := 0; tx < grid.X; tx++ {
 			n, err := lvl.TileInto(tx, ty, buf)
 			if err != nil {
-				return nil, fmt.Errorf("read tile (%d,%d): %w", tx, ty, err)
+				return nil, 0, fmt.Errorf("read tile (%d,%d): %w", tx, ty, err)
 			}
 			// Copy out of the reused buffer before the next iteration overwrites it.
 			data := append([]byte(nil), buf[:n]...)
+			totalBytes += int64(n)
 			frames = append(frames, &frame.Frame{
 				Encapsulated:     true,
 				EncapsulatedData: frame.EncapsulatedFrame{Data: data},
@@ -55,7 +60,7 @@ func encapsulatePixelData(src source.Source, level int) (*dicom.Element, error) 
 		Frames:         frames,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("build PixelData value: %w", err)
+		return nil, 0, fmt.Errorf("build PixelData value: %w", err)
 	}
 	elem := &dicom.Element{
 		Tag:                    tag.PixelData,
@@ -64,5 +69,5 @@ func encapsulatePixelData(src source.Source, level int) (*dicom.Element, error) 
 		ValueLength:            tag.VLUndefinedLength, // 0xffffffff => encapsulated branch
 		Value:                  pdValue,
 	}
-	return elem, nil
+	return elem, totalBytes, nil
 }
