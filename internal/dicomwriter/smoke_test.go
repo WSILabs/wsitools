@@ -16,15 +16,19 @@ import (
 // here drive Tasks 2-3.
 //
 // VERIFIED API FACTS (suyashkumar/dicom v1.1.0):
+//
 //   - JPEG Baseline transfer syntax: there is NO exported named const in
 //     pkg/uid (only ImplicitVR/ExplicitVR vars + a string-keyed map). Use the
 //     literal "1.2.840.10008.1.2.4.50". dicom.Write reads this element to pick
 //     the body byte-order/implicitness; for any 1.2.840.10008.1.2.4.* JPEG
 //     transfer syntax the body is explicit-VR little-endian.
+//
 //   - dicom.NewElement(tag, data) infers VR from the tag dictionary; `data`
 //     type must match the VR kind: UI/IS -> []string, US (Rows/Columns) ->
 //     []int, PixelData -> dicom.PixelDataInfo.
+//
 //   - NumberOfFrames is VR "IS" -> pass []string{"1"} (NOT []int).
+//
 //   - Encapsulated PixelData: dicom.NewElement(tag.PixelData, ...) does NOT
 //     work for the encapsulated case — it forces VR "OW" and leaves
 //     ValueLength=0, so the writer takes the NATIVE branch and dereferences a
@@ -32,26 +36,28 @@ import (
 //     (matching the library's own write_test.go "encapsulated PixelData" case)
 //     is to hand-build the Element with VR "OB" and an UNDEFINED length:
 //
-//       &dicom.Element{
-//         Tag: tag.PixelData,
-//         ValueRepresentation:    tag.VRPixelData,
-//         RawValueRepresentation: "OB",          // encapsulated => OB, not OW
-//         ValueLength:            tag.VLUndefinedLength, // 0xffffffff -> encapsulated branch
-//         Value: <dicom.NewValue(dicom.PixelDataInfo{...})>, // exported, returns (Value,error)
-//           IsEncapsulated: true,
-//           Offsets:        []uint32{...},
-//           Frames:         []*frame.Frame{ {Encapsulated:true, EncapsulatedData: frame.EncapsulatedFrame{Data: jpegBytes}}, ... },
-//         }),
-//       }
+//     &dicom.Element{
+//     Tag: tag.PixelData,
+//     ValueRepresentation:    tag.VRPixelData,
+//     RawValueRepresentation: "OB",          // encapsulated => OB, not OW
+//     ValueLength:            tag.VLUndefinedLength, // 0xffffffff -> encapsulated branch
+//     Value: <dicom.NewValue(dicom.PixelDataInfo{...})>, // exported, returns (Value,error)
+//     IsEncapsulated: true,
+//     Offsets:        []uint32{...},
+//     Frames:         []*frame.Frame{ {Encapsulated:true, EncapsulatedData: frame.EncapsulatedFrame{Data: jpegBytes}}, ... },
+//     }),
+//     }
 //
 //     The library then writes the Basic Offset Table + per-frame item
 //     fragments + a SequenceDelimitationItem.
+//
 //   - File-meta (group 0002): dicom.Write only writes the group-0002 elements
 //     that are PRESENT in ds.Elements (MediaStorageSOPClassUID,
 //     MediaStorageSOPInstanceUID, TransferSyntaxUID, FileMetaInformationVersion,
 //     plus any other group-0002 elements). It computes
 //     FileMetaInformationGroupLength itself. ImplementationClassUID is NOT
 //     required by Write; the preamble + "DICM" magic are emitted automatically.
+//
 //   - Read-back: element.Value.GetValue().(dicom.PixelDataInfo).Frames[0] is a
 //     *frame.Frame; its bytes are GetEncapsulatedFrame().Data.
 func TestEncapsulatedWriteRoundTrip(t *testing.T) {
