@@ -158,9 +158,23 @@ queued, deferred, or under consideration.
     emitted DICOM honoring its photometric → byte-identical RGB). `make
     dicom-validate` extended to both the DICOM→DICOM and SVS→DICOM paths; DICOM→DICOM
     output unchanged.
-  - **Next — Phase 1, remaining slices:** **full pyramid** (one instance per level
-    in a Series), then **JPEG 2000** (and other) codec support. Then P2
-    (TILED_SPARSE, label/overview instances, Concatenations) and P3 (fluorescence).
+  - ✅ **DONE (2026-06-11): Phase 1 slice 2 — full pyramid.** `convert --to dicom
+    -o <dir> <input>` now emits the **full resolution pyramid by default** as a
+    multi-instance Series: one WSM VOLUME instance per source level written as
+    `<dir>/level-<n>.dcm` (n=0 = full resolution), all sharing Study / Series /
+    FrameOfReference UIDs with per-instance SOPInstanceUID and
+    `InstanceNumber = level+1` (no Pyramid UID, matching the Grundium golden).
+    `--level N` still selects the single-instance path. Directory output is
+    **atomic** (temp sibling dir → rename on success; failure removes it, never a
+    partial pyramid). Per-level **spatial-metadata fix**: `PixelSpacing` scales by
+    each level's downsample factor while `ImagedVolumeWidth/Height` stays the
+    constant L0-derived physical extent, so levels co-register (also fixes a latent
+    base-MPP/shrunken-extent bug in the single-level non-L0 path). `dciodvfy`
+    reports **0 errors** on **every** level of the Grundium full pyramid (L0/L1/L2)
+    and on the SVS instance.
+  - **Next — Phase 1, remaining slice:** **JPEG 2000** (and other) codec support.
+    Then P2 (TILED_SPARSE, label/overview/thumbnail as separate instances,
+    Concatenations) and P3 (fluorescence).
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
 - ✅ **DONE (2026-06-05): unify downsample/convert scaling.** `convert --factor N`
   / `--target-mag M` ships for `svs|tiff|ome-tiff|cog-wsi` (reduce-then-rebuild

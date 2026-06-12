@@ -35,9 +35,25 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   DICOM honoring its photometric, compare to the source's decode) confirms
   byte-identical RGB — the colorspace is correct, not merely structurally valid.
   `make dicom-validate` now exercises both the DICOM→DICOM and SVS→DICOM paths.
-  DICOM→DICOM output is unchanged (byte-identical). Still pending: **full pyramid**
-  (one instance per level in a Series) and **JPEG 2000 / other codecs** —
-  later slices.
+  DICOM→DICOM output is unchanged (byte-identical).
+  **Phase 1, second slice:** `convert --to dicom` now emits the **full resolution
+  pyramid by default**. `convert --to dicom -o <dir> <input>` writes one WSM
+  VOLUME instance **per source level** as `<dir>/level-<n>.dcm` (n=0 = full
+  resolution) — a classic multi-instance Series: all instances share Study /
+  Series / FrameOfReference / DimensionOrganization UIDs, each carries its own
+  SOPInstanceUID and `InstanceNumber = level+1` (no Pyramid UID, matching the
+  Grundium golden). `--level N` selects the single-instance path (unchanged).
+  Directory output is **atomic** — the pyramid is built in a temp sibling
+  directory and renamed into place on success; any failure removes the temp dir,
+  never leaving a partial pyramid. Per-level **spatial-metadata fix**:
+  `PixelSpacing` now scales by each level's downsample factor and
+  `ImagedVolumeWidth/Height` is the constant L0-derived physical extent, so the
+  pyramid levels co-register (this also fixes a latent bug in the single-level
+  non-L0 path, which previously emitted base-MPP spacing and a shrunken extent).
+  `dciodvfy` reports **0 errors** on **every** level of the Grundium full pyramid
+  (L0/L1/L2) and on the SVS instance; `make dicom-validate` now emits + validates
+  the whole pyramid. Still pending: **JPEG 2000 / other codecs**, and
+  label/overview/thumbnail as separate DICOM instances — later slices.
 
 ## [0.22.0] — 2026-06-07
 

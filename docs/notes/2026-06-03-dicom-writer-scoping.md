@@ -178,6 +178,54 @@ YCbCr, `YBR_FULL` for 4:4:4 YCbCr. The marker probe rejects non-8-bit precision.
   know provenance from the pyramid alone.
 - **Identity is anonymous/synthetic** (carried over from Phase 0).
 
+## Phase 1 — slice 2 outcome (2026-06-11)
+
+**DONE — full pyramid SHIPPED.** `convert --to dicom -o <dir> <input>` now emits
+the **full resolution pyramid by default** as a multi-instance DICOM Series: one
+WSM VOLUME instance **per source level** written as `<dir>/level-<n>.dcm` (n=0 =
+full resolution). `--level N -o <file>` still selects the single-instance path
+(unchanged from slice 1). Source compatibility unchanged: DICOM or non-DICOM
+**JPEG-baseline** sources only; a non-JPEG level fails the whole conversion (no
+partial pyramid).
+
+### The classic shared-Series / FrameOfReference pyramid model (no Pyramid UID)
+
+All instances share Study / Series / FrameOfReference / DimensionOrganization
+UIDs; each carries its own SOPInstanceUID and `InstanceNumber = level+1`. There
+is **no Pyramid UID** — this is the classic multi-instance pyramid model,
+**confirmed against the Grundium golden**, which groups its levels by shared
+Series + FrameOfReference and emits no Pyramid UID. Multi-instance correctness
+(shared vs. distinct UIDs, InstanceNumber 1..N, per-level dims) is covered by a
+`dicomwriter` unit test on the multi-level Grundium fixture.
+
+### Latent per-level spatial-metadata bug — found and fixed
+
+The slice surfaced a latent bug: reduced levels were emitting **base-MPP
+`PixelSpacing`** and a **shrunken `ImagedVolumeWidth/Height`**, so pyramid levels
+would not co-register. Fixed: `PixelSpacing` now scales by each level's
+downsample factor, and `ImagedVolumeWidth/Height` is the **constant L0-derived
+physical extent** across every level. This also fixed the single-level non-L0
+path (`--level N` for N>0), which had the same defect. `dciodvfy` 0 errors on the
+reduced Grundium levels confirms the scaled spacing is conformant.
+
+### Mechanics this slice pinned down
+
+- **Writer-factory API:** the per-level emission was refactored into a
+  `WritePyramid` entry point that takes a **per-level writer callback** and is
+  **io-agnostic** (the caller supplies the per-level sink), keeping the writer
+  package decoupled from filesystem layout.
+- **Atomicity via temp-dir → rename:** the pyramid is built into a temp sibling
+  directory and renamed into place on success; any failure removes the temp dir —
+  never a partially-written pyramid.
+- **dciodvfy 0 errors on every Grundium level** (L0/L1/L2) + on the SVS instance;
+  `make dicom-validate` now emits + validates the whole pyramid. This de-risks
+  reduced-level conformance (the open question of whether scaled `PixelSpacing` on
+  reduced levels would validate).
+
+**Remaining:** **JPEG 2000** (and other) codec support; **associated-image
+instances** (label/overview/thumbnail as separate DICOM instances — P2);
+TILED_SPARSE / Concatenations (P2); fluorescence (P3).
+
 ## Open questions for the eventual spec
 
 - Transfer syntax policy: tile-copy (reuse source JPEG) vs. re-encode; which
