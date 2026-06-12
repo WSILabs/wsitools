@@ -3,6 +3,7 @@ package dicomwriter
 import (
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"log/slog"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/suyashkumar/dicom/pkg/frame"
 	"github.com/suyashkumar/dicom/pkg/tag"
 
+	"github.com/wsilabs/opentile-go/decoder"
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
@@ -84,13 +86,6 @@ func WritePyramid(src source.Source, opts Options, newWriter func(name string) (
 	instanceNumber := len(levels) + 1
 	for _, a := range src.Associated() {
 		name := a.Type()
-		// Codec-gate before opening the writer so an unsupported associated image
-		// (e.g. an LZW label) leaves no empty <type>.dcm behind.
-		if !associatedSupported(a.Compression()) {
-			slog.Warn("skipping associated image", "type", name,
-				"reason", fmt.Sprintf("%v: codec %s", errSkipAssociated, a.Compression()))
-			continue
-		}
 		w, err := newWriter(name)
 		if err != nil {
 			return fmt.Errorf("open writer for %s: %w", name, err)
@@ -126,36 +121,17 @@ func associatedFlavor(t string) (imageType []string, specimenLabel string) {
 }
 
 // writeAssociated emits one associated image as a single-frame WSM instance.
+// A tile-copyable codec (JPEG / JPEG 2000) is stored verbatim-encapsulated; any
+// other codec (e.g. an LZW label — not a DICOM transfer syntax) is decoded via
+// opentile and stored as uncompressed native RGB (lossless).
 func writeAssociated(w io.Writer, src source.Source, a source.AssociatedImage, shared sharedUIDs, instanceNumber int) error {
-	comp := a.Compression()
-	if !associatedSupported(comp) {
-		return fmt.Errorf("%w: codec %s", errSkipAssociated, comp)
-	}
-	body, err := a.Bytes()
-	if err != nil {
-		return fmt.Errorf("%w: %s bytes: %v", errSkipAssociated, a.Type(), err)
-	}
 	md := src.Metadata()
 	icc := md.ICCProfile
 	if len(icc) == 0 {
 		icc = srgbICCProfile
 	}
-	uncompressed := int64(a.Size().X) * int64(a.Size().Y) * 3
-	lossyRatio := 1.0
-	if len(body) > 0 {
-		lossyRatio = float64(uncompressed) / float64(len(body))
-	}
-	// codecColor probes the image bytes directly (codec-driven) — associated
-	// images always derive their photometric from the codestream, never the
-	// DICOM-source hardcode that buildDescriptor applies to pyramid levels.
-	desc, err := codecColor(body, comp, icc, lossyRatio)
-	if err != nil {
-		return fmt.Errorf("%w: %s codec probe: %v", errSkipAssociated, a.Type(), err)
-	}
-
 	imageType, specimenLabel := associatedFlavor(a.Type())
 	mppX, mppY := baseMPP(md)
-	psX, psY, imgW, imgH := levelSpatial(src.Levels()[0].Size(), a.Size(), mppX, mppY)
 
 	spec := instanceSpec{
 		Size:                 a.Size(),
@@ -164,12 +140,58 @@ func writeAssociated(w io.Writer, src source.Source, a source.AssociatedImage, s
 		ImageType:            imageType,
 		SpecimenLabelInImage: specimenLabel,
 		InstanceNumber:       instanceNumber,
-		PixelSpacingX:        psX,
-		PixelSpacingY:        psY,
-		ImagedVolumeW:        imgW,
-		ImagedVolumeH:        imgH,
-		ImageDescriptor:      desc,
 	}
+
+	var pd *dicom.Element
+	if associatedSupported(a.Compression()) {
+		// Verbatim encapsulated tile-copy (JPEG / JPEG 2000).
+		body, err := a.Bytes()
+		if err != nil {
+			return fmt.Errorf("%w: %s bytes: %v", errSkipAssociated, a.Type(), err)
+		}
+		uncompressed := int64(a.Size().X) * int64(a.Size().Y) * 3
+		lossyRatio := 1.0
+		if len(body) > 0 {
+			lossyRatio = float64(uncompressed) / float64(len(body))
+		}
+		// codecColor probes the image bytes directly (codec-driven) — associated
+		// images always derive their photometric from the codestream, never the
+		// DICOM-source hardcode that buildDescriptor applies to pyramid levels.
+		desc, err := codecColor(body, a.Compression(), icc, lossyRatio)
+		if err != nil {
+			return fmt.Errorf("%w: %s codec probe: %v", errSkipAssociated, a.Type(), err)
+		}
+		spec.ImageDescriptor = desc
+		if pd, err = encapsulateOneFrame(body); err != nil {
+			return err
+		}
+	} else {
+		// Decode (opentile owns codec/predictor) → store uncompressed native RGB.
+		di, err := a.Decode(decoder.DecodeOptions{Format: decoder.PixelFormatRGB})
+		if err != nil {
+			return fmt.Errorf("%w: %s decode: %v", errSkipAssociated, a.Type(), err)
+		}
+		spec.ImageDescriptor = ImageDescriptor{
+			TransferSyntax:  explicitVRLE,
+			Photometric:     "RGB",
+			SamplesPerPixel: 3,
+			ICCProfile:      icc,
+			Lossy:           false,
+			LossyMethod:     "",
+			LossyRatio:      1.0,
+		}
+		// Decoded image dimensions are authoritative for geometry.
+		spec.Size = image.Point{X: di.Width, Y: di.Height}
+		spec.TileSize = spec.Size
+		if pd, err = nativePixelData(tightRGB(di), di.Height, di.Width, 3); err != nil {
+			return err
+		}
+	}
+
+	// Spatial attributes derive from the final spec.Size (authoritative for the
+	// decoded branch; identical to a.Size() for the encapsulated branch).
+	spec.PixelSpacingX, spec.PixelSpacingY, spec.ImagedVolumeW, spec.ImagedVolumeH =
+		levelSpatial(src.Levels()[0].Size(), spec.Size, mppX, mppY)
 
 	uids := UIDSet{
 		SOP:              NewUID(),
@@ -182,12 +204,22 @@ func writeAssociated(w io.Writer, src source.Source, a source.AssociatedImage, s
 	if err != nil {
 		return err
 	}
-	pd, err := encapsulateOneFrame(body)
-	if err != nil {
-		return err
-	}
 	ds.Elements = append(ds.Elements, pd)
 	return dicom.Write(w, ds)
+}
+
+// tightRGB returns a tightly-packed Height*Width*3 RGB buffer from a decoder.Image,
+// stripping any row stride padding (decoder may over-allocate Stride for SIMD).
+func tightRGB(di *decoder.Image) []byte {
+	rowBytes := di.Width * 3
+	if di.Stride == rowBytes {
+		return di.Pix[:di.Height*rowBytes]
+	}
+	out := make([]byte, di.Height*rowBytes)
+	for y := 0; y < di.Height; y++ {
+		copy(out[y*rowBytes:(y+1)*rowBytes], di.Pix[y*di.Stride:y*di.Stride+rowBytes])
+	}
+	return out
 }
 
 // writeInstance assembles + writes one WSM VOLUME instance for src level `level`

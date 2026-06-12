@@ -136,6 +136,52 @@ func TestWritePyramidWithAssociated(t *testing.T) {
 	}
 }
 
+func TestWriteAssociatedLZWLabelNative(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	p := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(p); err != nil {
+		t.Skip("no CMU SVS fixture")
+	}
+	src, err := source.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	var label source.AssociatedImage
+	for _, a := range src.Associated() {
+		if a.Type() == "label" {
+			label = a
+		}
+	}
+	if label == nil || associatedSupported(label.Compression()) {
+		t.Skip("no non-tile-copyable label in fixture")
+	}
+	var buf bytes.Buffer
+	if err := writeAssociated(&buf, src, label, newSharedUIDs(), 5); err != nil {
+		t.Fatalf("writeAssociated(label): %v", err)
+	}
+	ds, err := dicom.Parse(bytes.NewReader(buf.Bytes()), int64(buf.Len()), nil)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if ts := firstStrA(t, ds, tag.TransferSyntaxUID); ts != explicitVRLE {
+		t.Errorf("TransferSyntaxUID = %q, want %q (native uncompressed)", ts, explicitVRLE)
+	}
+	if ph := firstStrA(t, ds, tag.PhotometricInterpretation); ph != "RGB" {
+		t.Errorf("PhotometricInterpretation = %q, want RGB", ph)
+	}
+	if lc := firstStrA(t, ds, tag.LossyImageCompression); lc != "00" {
+		t.Errorf("LossyImageCompression = %q, want 00 (lossless)", lc)
+	}
+	it, _ := ds.FindElementByTag(tag.ImageType)
+	if got := it.Value.GetValue().([]string); len(got) < 3 || got[2] != "LABEL" {
+		t.Errorf("ImageType[2] = %v, want LABEL", got)
+	}
+}
+
 func firstStrA(t *testing.T, ds dicom.Dataset, tg tag.Tag) string {
 	t.Helper()
 	e, err := ds.FindElementByTag(tg)

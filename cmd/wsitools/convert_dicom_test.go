@@ -195,20 +195,15 @@ func TestConvertDICOMPyramidAssociated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only JPEG/JPEG2000 associated images are emitted; others (e.g. CMU's LZW
-	// label) are skipped. Collect the types that should produce a <type>.dcm.
-	var wantTypes, skipTypes []string
+	// Every associated image is now emitted: tile-copyable codecs (JPEG/JP2K)
+	// verbatim-encapsulated, others (e.g. CMU's LZW label) decoded → native RGB.
+	var wantTypes []string
 	for _, a := range src.Associated() {
-		c := a.Compression()
-		if c == source.CompressionJPEG || c == source.CompressionJPEG2000 {
-			wantTypes = append(wantTypes, a.Type())
-		} else {
-			skipTypes = append(skipTypes, a.Type())
-		}
+		wantTypes = append(wantTypes, a.Type())
 	}
 	src.Close()
 	if len(wantTypes) == 0 {
-		t.Skip("fixture has no JPEG/JP2K associated images")
+		t.Skip("fixture has no associated images")
 	}
 
 	out := filepath.Join(t.TempDir(), "pyr")
@@ -236,13 +231,6 @@ func TestConvertDICOMPyramidAssociated(t *testing.T) {
 		}
 		s.Close()
 	}
-	// Skipped (non-JPEG) associated images leave no file.
-	for _, typ := range skipTypes {
-		if _, err := os.Stat(filepath.Join(out, typ+".dcm")); err == nil {
-			t.Errorf("skipped associated %s left a %s.dcm file", typ, typ)
-		}
-	}
-
 	// --no-associated: only level-<n>.dcm, no associated files at all.
 	out2 := filepath.Join(t.TempDir(), "pyr2")
 	convertCmd.Flags().Lookup("level").Changed = false
@@ -251,7 +239,7 @@ func TestConvertDICOMPyramidAssociated(t *testing.T) {
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("convert --no-associated: %v", err)
 	}
-	for _, typ := range append(wantTypes, skipTypes...) {
+	for _, typ := range wantTypes {
 		if _, err := os.Stat(filepath.Join(out2, typ+".dcm")); err == nil {
 			t.Errorf("--no-associated still wrote %s.dcm", typ)
 		}
