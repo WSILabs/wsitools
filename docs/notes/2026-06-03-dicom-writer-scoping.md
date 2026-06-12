@@ -119,6 +119,65 @@ P0 (DICOM input carries ICC in practice).
 (full pyramid + non-DICOM sources + colorspace reconciliation) is the clear next
 step.**
 
+## Phase 1 — slice 1 outcome (2026-06-11)
+
+**DONE — non-DICOM single-level SHIPPED.** `convert --to dicom --level N
+<input.svs>` emits ONE conformant WSM **VOLUME** instance from a **non-DICOM
+source** for one pyramid level. The source level's JPEG-baseline tiles are
+copied **verbatim** (no decode/re-encode); non-JPEG codecs (JPEG 2000 etc.)
+error clearly (`Phase 1 supports JPEG-baseline tile-copy only`).
+
+### Key de-risk result: dciodvfy accepts RGB photometric with JPEG Baseline
+
+The central uncertainty going into the slice was whether DICOM's photometric
+expectations could be reconciled with the Aperio APP14/RGB colorspace quirk
+(an open question logged below). The answer: **dciodvfy reports 0 errors on an
+RGB-`PhotometricInterpretation` instance carrying JPEG Baseline frames.** No
+forced YCbCr re-encode is needed; the verbatim Aperio RGB tiles are emitted
+as-is with `PhotometricInterpretation = RGB`. This is the result that unblocks
+the whole non-DICOM path.
+
+`PhotometricInterpretation` is **marker-driven**: the writer probes the first
+tile's JPEG markers (Adobe APP14 ColorTransform + chroma subsampling) and sets
+**RGB** for the Aperio APP14 raw-RGB variant, `YBR_FULL_422` for subsampled
+YCbCr, `YBR_FULL` for 4:4:4 YCbCr. The marker probe rejects non-8-bit precision.
+
+### CMU-1-Small-Region.svs findings (the probe target)
+
+- **Adobe APP14, ColorTransform = 0 → raw RGB** (the classic Aperio variant).
+- **4:4:4** (no chroma subsampling).
+- **Marker order: SOF appears BEFORE APP14** — the probe must not assume APP14
+  precedes the frame header; it scans for both.
+- **No embedded ICC profile** — so the **sRGB-synthesis** path is the one
+  exercised on the CI fixture. ICC carried-or-synthesized closes the P0 Type 1C
+  `ICCProfile` gap: source ICC is carried when present, a canonical sRGB profile
+  is embedded when absent.
+
+### Fixes / mechanics this slice pinned down
+
+- **Odd-length frame even-length padding.** A source JPEG frame of odd byte
+  length gets a trailing `0x00` pad to satisfy DICOM's even-length
+  encapsulated-fragment rule. Pixel content is unchanged — decoders stop at EOI.
+- **Pixel round-trip safety net.** Beyond `dciodvfy` (structural), a test
+  decodes the emitted DICOM honoring its `PhotometricInterpretation` and compares
+  to the source's decode — confirms **byte-identical RGB**, i.e. the colorspace
+  is correct, not just structurally valid. `make dicom-validate` now runs both
+  the DICOM→DICOM and SVS→DICOM paths; DICOM→DICOM output is byte-identical to P0.
+
+### Phase-1 limitations / remaining slices
+
+- **Single level per invocation** — **full pyramid** (one instance per level in
+  a Series) is the next slice, not yet built.
+- **JPEG-baseline only** — JPEG 2000 / other codecs are a later slice. Caveat:
+  the gate keys on the *codec* (JPEG); a *progressive*-JPEG source would pass the
+  gate but is not baseline (not expected for WSI tiles, not separately rejected —
+  the marker probe does reject non-8-bit precision).
+- **ImageType ORIGINAL on level 0.** Level 0 of a non-DICOM source is labelled
+  `ImageType ORIGINAL` (assumes the level is the native acquisition); a source
+  whose level 0 is itself a derivative would be mislabelled — no general way to
+  know provenance from the pyramid alone.
+- **Identity is anonymous/synthetic** (carried over from Phase 0).
+
 ## Open questions for the eventual spec
 
 - Transfer syntax policy: tile-copy (reuse source JPEG) vs. re-encode; which

@@ -18,8 +18,26 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   `make dicom-validate` target emits + validates against the Grundium fixture
   (needs `dciodvfy` on PATH, `DCIODVFY=` override; gated on `WSI_TOOLS_TESTDIR`).
   Built on `github.com/suyashkumar/dicom` (pure Go, promoted to a direct dep).
-  **DICOM→DICOM only** — full pyramid (instance per level), non-DICOM sources,
-  and colorspace/photometric reconciliation are later phases.
+  **Phase 1, first slice:** `convert --to dicom` now also accepts a **non-DICOM
+  source** (SVS etc.) and emits ONE conformant WSM VOLUME instance from a single
+  pyramid level (`--level`, default `0`). The source level's JPEG-baseline tiles
+  are copied **verbatim** (no decode/re-encode); non-JPEG codecs (JPEG 2000 etc.)
+  error clearly (`Phase 1 supports JPEG-baseline tile-copy only`). The writer
+  inspects the first tile's JPEG markers (Adobe APP14 ColorTransform + chroma
+  subsampling) and sets `PhotometricInterpretation` to match — **RGB** for the
+  classic Aperio APP14 raw-RGB variant (which CMU-1-Small-Region.svs uses),
+  `YBR_FULL_422` for subsampled YCbCr, `YBR_FULL` for 4:4:4 YCbCr. The source's
+  embedded ICC profile is carried through when present, or a canonical **sRGB**
+  profile is synthesized when absent (CMU SVS has none), satisfying DICOM's
+  Type 1C `ICCProfile` requirement for color. Validated two ways: `dciodvfy`
+  reports **0 errors** on the RGB-photometric SVS→DICOM instance (only a benign
+  Study-ID DICOMDIR warning), and a **pixel round-trip** test (decode the emitted
+  DICOM honoring its photometric, compare to the source's decode) confirms
+  byte-identical RGB — the colorspace is correct, not merely structurally valid.
+  `make dicom-validate` now exercises both the DICOM→DICOM and SVS→DICOM paths.
+  DICOM→DICOM output is unchanged (byte-identical). Still pending: **full pyramid**
+  (one instance per level in a Series) and **JPEG 2000 / other codecs** —
+  later slices.
 
 ## [0.22.0] — 2026-06-07
 
