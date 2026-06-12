@@ -2,6 +2,7 @@ package dicomwriter
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/suyashkumar/dicom"
@@ -9,6 +10,24 @@ import (
 
 	"github.com/wsilabs/wsitools/internal/source"
 )
+
+// formatDS formats a float64 as a DICOM DS (Decimal String) value guaranteed to
+// fit the VR's 16-character limit. It uses the shortest round-tripping form, then
+// reduces significant digits until it fits — non-integer per-level downsample
+// ratios (e.g. an SVS whose level sizes aren't exact powers of two) can otherwise
+// yield 20+ char PixelSpacing values that dciodvfy rejects.
+func formatDS(v float64) string {
+	s := strconv.FormatFloat(v, 'g', -1, 64)
+	if len(s) <= 16 {
+		return s
+	}
+	for prec := 15; prec >= 1; prec-- {
+		if s = strconv.FormatFloat(v, 'g', prec, 64); len(s) <= 16 {
+			return s
+		}
+	}
+	return s[:16]
+}
 
 // writerSoftware is the value emitted for Manufacturer / SoftwareVersions.
 // dicomwriter is an internal/ package and cannot import package main (the
@@ -289,10 +308,10 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 				mk(tag.PixelMeasuresSequence, [][]*dicom.Element{
 					{
 						mk(tag.SliceThickness, []string{"0.001"}),
-						// PixelSpacing is row\col == Y\X (DS).
+						// PixelSpacing is row\col == Y\X (DS, ≤16 chars).
 						mk(tag.PixelSpacing, []string{
-							fmt.Sprintf("%g", psY),
-							fmt.Sprintf("%g", psX),
+							formatDS(psY),
+							formatDS(psX),
 						}),
 					},
 				}),

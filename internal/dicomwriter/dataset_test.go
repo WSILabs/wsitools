@@ -354,3 +354,24 @@ func TestAssembleWSMDatasetMonoOmitsPlanarConfiguration(t *testing.T) {
 		t.Error("PlanarConfiguration present on a SamplesPerPixel=1 instance (Type 1C: must be omitted)")
 	}
 }
+
+func TestFormatDS(t *testing.T) {
+	cases := []float64{
+		0.0009992571101966163, // the JP2K-fixture value dciodvfy rejected (21 chars at %g)
+		0.0002498, 0.000251, 0.004016, 12.5, 0, 1.0 / 3.0, 1e-7, 123456789.0,
+	}
+	for _, v := range cases {
+		s := formatDS(v)
+		if len(s) > 16 {
+			t.Errorf("formatDS(%v) = %q (%d chars), want ≤16", v, s, len(s))
+		}
+		// Must remain a parseable decimal that's close to the input.
+		got, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			t.Errorf("formatDS(%v) = %q is not a valid float: %v", v, s, err)
+		}
+		if v != 0 && (got/v < 0.999 || got/v > 1.001) {
+			t.Errorf("formatDS(%v) = %q parses to %v (>0.1%% off)", v, s, got)
+		}
+	}
+}

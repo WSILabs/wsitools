@@ -93,4 +93,14 @@ dicom-validate: build
 		"$(DCIODVFY)" "$$OUT2" || RC=$$?; \
 		rm -f "$$OUT2"; \
 	else echo "missing $$SVS; skipping SVS->DICOM"; fi; \
+	JP2K="$$WSI_TOOLS_TESTDIR/svs/JP2K-33003-1.svs"; \
+	if [ -f "$$JP2K" ]; then \
+		DIR2=$$(mktemp -d -t wsm-jp2k.XXXXXX); \
+		./bin/wsitools convert --to dicom -f -o "$$DIR2/pyr" "$$JP2K"; \
+		for L in "$$DIR2"/pyr/level-*.dcm; do \
+			echo "=== dciodvfy (JP2K pyramid) $$L ==="; \
+			"$(DCIODVFY)" "$$L" || RC=$$?; \
+		done; \
+		rm -rf "$$DIR2"; \
+	else echo "missing $$JP2K; skipping JP2K pyramid"; fi; \
 	exit $$RC
