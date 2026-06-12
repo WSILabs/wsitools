@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wsilabs/opentile-go/decoder"
 	dicom "github.com/wsilabs/opentile-go/formats/dicom"
 )
 
@@ -67,6 +68,10 @@ type AssociatedImage interface {
 	Size() image.Point
 	Compression() Compression
 	Bytes() ([]byte, error) // self-contained encoded blob
+
+	// Decode returns the faithfully-decoded pixels (delegates to opentile-go,
+	// which owns all codec / LZW-predictor / TIFF-strip handling).
+	Decode(opts decoder.DecodeOptions) (*decoder.Image, error)
 
 	// IFDOffset returns the byte offset of the backing TIFF IFD for
 	// TIFF-family slides; ok=false otherwise.

@@ -359,3 +359,34 @@ golden's rotated label `ImageOrientationSlide` and faithful label `PixelSpacing`
 - DICOM Part 3 (IOD modules), Part 5 (encapsulation), Supplement 145.
 - opentile-go `formats/dicom/*` — our existing read model (TILED_FULL/SPARSE,
   encapsulated frame walking, PixelSpacing→MPP).
+
+## Associated-image transcode (2026-06-12)
+
+Phase 2 emitted JPEG/JP2K associated images as verbatim-encapsulated instances
+but **skipped** any other codec — dropping the **LZW label present on every
+Aperio SVS** (the barcode/specimen ID). LZW is not a DICOM transfer syntax, so it
+can't be tile-copied. The follow-on **decodes** such images and stores them as
+**uncompressed native pixel data** (Explicit VR Little Endian, VR `OB`,
+`LossyImageCompression "00"` — lossless, barcode stays scannable). JPEG/JP2K
+stay verbatim-encapsulated.
+
+- **Decode is the reader's job.** opentile-go **v0.38.0** added
+  `AssociatedImage.Decode` (opentile-go#20, faithful decode for every type/codec
+  incl. LZW+Predictor=2); wsitools consumes it and its old `extract`
+  TIFF-reparse workaround is deleted. The native PixelData writer uses
+  `frame.NativeFrame` + `dicom.NewElement`, with the VR forced to **`OB`** —
+  `dicom.NewElement` hardcodes `OW` for PixelData, and `OW` on 8-bit data makes a
+  conformant reader read it as 16-bit and collapse RGB to grayscale.
+- **Read-back fix.** Verifying the round-trip surfaced opentile-go#21 (the
+  reader's native-RGB associated decode read interleaved RGB as grayscale because
+  an even-length pad byte broke its `SamplesPerPixel` inference). Fixed in
+  **v0.38.1**; wsitools bumped to it. The emitted `label.dcm` then
+  pixel-round-trips byte-identically to the source label decode.
+- **Read path for the round-trip oracle:** open the emitted **pyramid
+  directory** as a DICOM series and decode the `label` **associated image**
+  (`AssociatedImage.Decode`) — a lone `LABEL` `.dcm` is not a readable slide (no
+  VOLUME level).
+- **Validation:** `make dicom-validate` now emits the full SVS pyramid so the
+  native `label.dcm` is covered; `dciodvfy` reports 0 errors on it.
+- Spec/plan:
+  `docs/superpowers/{specs,plans}/2026-06-12-dicom-writer-associated-transcode*`.

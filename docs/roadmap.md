@@ -199,6 +199,20 @@ queued, deferred, or under consideration.
     **skipped with a logged warning** — no partial file, the pyramid still
     completes. `dciodvfy` reports **0 errors** across all instances (pyramid levels
     + associated); `make dicom-validate` now validates every `<dir>/*.dcm`.
+  - ✅ **DONE (2026-06-12): Phase 2 follow-on — associated transcode.** An
+    associated image whose codec is **not** a DICOM transfer syntax (e.g. the
+    **LZW label** on every Aperio SVS) is no longer skipped — it is **decoded and
+    stored as an uncompressed native RGB instance** (Explicit VR LE, VR `OB`,
+    `LossyImageCompression "00"`, lossless — keeps the barcode scannable); JPEG /
+    JPEG 2000 still tile-copy verbatim-encapsulated. Decode delegated to
+    **opentile-go v0.38.1** (`AssociatedImage.Decode`, opentile-go#20); the
+    `extract` TIFF-reparse workaround is deleted. The native `label.dcm`
+    pixel-round-trips byte-identically to the source decode and passes `dciodvfy`
+    (0 errors); `make dicom-validate` emits the full SVS pyramid so the native
+    label is covered. Fixed en route: the writer must use VR `OB` (not `OW`) for
+    8-bit native pixel data, and **opentile-go#21** (reader's native-RGB
+    associated decode — an even-length pad byte broke `SamplesPerPixel`
+    inference). Spec/plan: `docs/superpowers/{specs,plans}/2026-06-12-dicom-writer-associated-transcode*`.
   - **Next:** **HTJ2K** / **16-bit** support, the pre-existing DICOM-source
     codec-mislabel bug, and the golden's rotated label
     `ImageOrientationSlide` / faithful label `PixelSpacing` (`.jp2`-boxed

@@ -87,11 +87,13 @@ dicom-validate: build
 	else echo "missing $$SM; skipping DICOM pyramid"; fi; \
 	SVS="$$WSI_TOOLS_TESTDIR/svs/CMU-1-Small-Region.svs"; \
 	if [ -f "$$SVS" ]; then \
-		OUT2=$$(mktemp -t wsm-svs.XXXXXX).dcm; \
-		./bin/wsitools convert --to dicom --level 0 -f -o "$$OUT2" "$$SVS"; \
-		echo "=== dciodvfy (SVS->DICOM) $$OUT2 ==="; \
-		"$(DCIODVFY)" "$$OUT2" || RC=$$?; \
-		rm -f "$$OUT2"; \
+		DIR3=$$(mktemp -d -t wsm-svs.XXXXXX); \
+		./bin/wsitools convert --to dicom -f -o "$$DIR3/pyr" "$$SVS"; \
+		for L in "$$DIR3"/pyr/*.dcm; do \
+			echo "=== dciodvfy (SVS pyramid+assoc) $$L ==="; \
+			"$(DCIODVFY)" "$$L" || RC=$$?; \
+		done; \
+		rm -rf "$$DIR3"; \
 	else echo "missing $$SVS; skipping SVS->DICOM"; fi; \
 	JP2K="$$WSI_TOOLS_TESTDIR/svs/JP2K-33003-1.svs"; \
 	if [ -f "$$JP2K" ]; then \
