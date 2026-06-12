@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/opentile-go/decoder"
 	dicom "github.com/wsilabs/opentile-go/formats/dicom"
 )
@@ -72,6 +73,12 @@ type AssociatedImage interface {
 	// Decode returns the faithfully-decoded pixels (delegates to opentile-go,
 	// which owns all codec / LZW-predictor / TIFF-strip handling).
 	Decode(opts decoder.DecodeOptions) (*decoder.Image, error)
+
+	// Source returns the faithful on-disk source form (verbatim strips + TIFF
+	// tags) for byte-identical re-emission into a new standalone TIFF; ok=false
+	// for synthesized / tiled / non-TIFF associated images. Delegates to
+	// opentile-go's Slide.AssociatedSourceOf (GH opentile-go#22).
+	Source() (opentile.AssociatedSource, bool)
 
 	// IFDOffset returns the byte offset of the backing TIFF IFD for
 	// TIFF-family slides; ok=false otherwise.

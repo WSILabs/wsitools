@@ -7,7 +7,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/suyashkumar/dicom v1.1.0
 	github.com/vbauerster/mpb/v8 v8.12.0
-	github.com/wsilabs/opentile-go v0.38.1
+	github.com/wsilabs/opentile-go v0.39.0
 	golang.org/x/image v0.39.0
 	golang.org/x/sys v0.41.0
 )
