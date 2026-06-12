@@ -84,10 +84,10 @@ func writeDICOMPyramid(src source.Source, start time.Time) error {
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
-	factory := func(level int) (io.WriteCloser, error) {
-		return os.Create(filepath.Join(tmp, fmt.Sprintf("level-%d.dcm", level)))
+	factory := func(name string) (io.WriteCloser, error) {
+		return os.Create(filepath.Join(tmp, name+".dcm"))
 	}
-	if err := dicomwriter.WritePyramid(src, dicomwriter.Options{}, factory); err != nil {
+	if err := dicomwriter.WritePyramid(src, dicomwriter.Options{Associated: !cvNoAssociated}, factory); err != nil {
 		_ = os.RemoveAll(tmp)
 		return fmt.Errorf("write DICOM pyramid: %w", err)
 	}
@@ -102,10 +102,12 @@ func writeDICOMPyramid(src source.Source, start time.Time) error {
 		return fmt.Errorf("finalize %s: %w", cvOutput, err)
 	}
 
-	n := len(src.Levels())
+	entries, _ := os.ReadDir(cvOutput)
+	n := 0
 	var total int64
-	if entries, err := os.ReadDir(cvOutput); err == nil {
-		for _, e := range entries {
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".dcm" {
+			n++
 			if info, err := e.Info(); err == nil {
 				total += info.Size()
 			}

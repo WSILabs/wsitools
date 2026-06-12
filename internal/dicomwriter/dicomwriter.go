@@ -1,16 +1,33 @@
 package dicomwriter
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/suyashkumar/dicom"
+	"github.com/suyashkumar/dicom/pkg/frame"
+	"github.com/suyashkumar/dicom/pkg/tag"
 
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
-// Options is reserved for future write-side knobs (P0/P1: empty).
-type Options struct{}
+// Options controls the DICOM write. Associated enables emitting the slide's
+// associated images (label/overview/thumbnail/…) as separate instances.
+type Options struct {
+	Associated bool
+}
+
+// errSkipAssociated marks an associated image that can't be tile-copied (e.g. an
+// unsupported codec); WritePyramid logs and skips it rather than failing.
+var errSkipAssociated = errors.New("associated image skipped")
+
+// associatedSupported reports whether an associated image's codec can be
+// tile-copied into DICOM (the single source of truth for the codec gate).
+func associatedSupported(c source.Compression) bool {
+	return c == source.CompressionJPEG || c == source.CompressionJPEG2000
+}
 
 // sharedUIDs are the UIDs shared by every instance in a pyramid Series: the
 // Study, Series, FrameOfReference, and DimensionOrganization. Each instance still
@@ -38,27 +55,139 @@ func WriteVolumeInstance(w io.Writer, src source.Source, level int, _ Options) e
 	return writeInstance(w, src, level, newSharedUIDs())
 }
 
-// WritePyramid emits the full resolution pyramid as a multi-instance Series: one
-// WSM VOLUME instance per source level, all sharing the Study/Series/
-// FrameOfReference/DimensionOrganization UIDs. newWriter supplies the destination
-// writer for each level (0-based); WritePyramid closes each writer after writing.
-func WritePyramid(src source.Source, _ Options, newWriter func(level int) (io.WriteCloser, error)) error {
+// WritePyramid emits the full resolution pyramid (one WSM VOLUME instance per
+// level) and, when opts.Associated, the slide's associated images — all sharing
+// the Study/Series/FrameOfReference/DimensionOrganization UIDs, with InstanceNumber
+// continuing across levels then associated images. newWriter supplies a writer per
+// instance, keyed by a name ("level-0", "label", …); WritePyramid closes each.
+func WritePyramid(src source.Source, opts Options, newWriter func(name string) (io.WriteCloser, error)) error {
 	shared := newSharedUIDs()
-	for level := range src.Levels() {
-		w, err := newWriter(level)
+	levels := src.Levels()
+	for level := range levels {
+		name := fmt.Sprintf("level-%d", level)
+		w, err := newWriter(name)
 		if err != nil {
-			return fmt.Errorf("open writer for level %d: %w", level, err)
+			return fmt.Errorf("open writer for %s: %w", name, err)
 		}
 		werr := writeInstance(w, src, level, shared)
 		cerr := w.Close()
 		if werr != nil {
-			return fmt.Errorf("write level %d: %w", level, werr)
+			return fmt.Errorf("write %s: %w", name, werr)
 		}
 		if cerr != nil {
-			return fmt.Errorf("close level %d: %w", level, cerr)
+			return fmt.Errorf("close %s: %w", name, cerr)
 		}
 	}
+	if !opts.Associated {
+		return nil
+	}
+	instanceNumber := len(levels) + 1
+	for _, a := range src.Associated() {
+		name := a.Type()
+		// Codec-gate before opening the writer so an unsupported associated image
+		// (e.g. an LZW label) leaves no empty <type>.dcm behind.
+		if !associatedSupported(a.Compression()) {
+			slog.Warn("skipping associated image", "type", name,
+				"reason", fmt.Sprintf("%v: codec %s", errSkipAssociated, a.Compression()))
+			continue
+		}
+		w, err := newWriter(name)
+		if err != nil {
+			return fmt.Errorf("open writer for %s: %w", name, err)
+		}
+		werr := writeAssociated(w, src, a, shared, instanceNumber)
+		cerr := w.Close()
+		if werr != nil {
+			if errors.Is(werr, errSkipAssociated) {
+				slog.Warn("skipping associated image", "type", name, "reason", werr)
+				continue
+			}
+			return fmt.Errorf("write associated %s: %w", name, werr)
+		}
+		if cerr != nil {
+			return fmt.Errorf("close associated %s: %w", name, cerr)
+		}
+		instanceNumber++
+	}
 	return nil
+}
+
+// associatedFlavor maps a source associated-image type to its DICOM ImageType[2]
+// flavor and [3] value, plus SpecimenLabelInImage.
+func associatedFlavor(t string) (imageType []string, specimenLabel string) {
+	switch t {
+	case "label":
+		return []string{"DERIVED", "PRIMARY", "LABEL", "NONE"}, "YES"
+	case "thumbnail":
+		return []string{"DERIVED", "PRIMARY", "THUMBNAIL", "RESAMPLED"}, "NO"
+	default: // overview, macro, and any other → OVERVIEW
+		return []string{"DERIVED", "PRIMARY", "OVERVIEW", "NONE"}, "YES"
+	}
+}
+
+// writeAssociated emits one associated image as a single-frame WSM instance.
+func writeAssociated(w io.Writer, src source.Source, a source.AssociatedImage, shared sharedUIDs, instanceNumber int) error {
+	comp := a.Compression()
+	if !associatedSupported(comp) {
+		return fmt.Errorf("%w: codec %s", errSkipAssociated, comp)
+	}
+	body, err := a.Bytes()
+	if err != nil {
+		return fmt.Errorf("%w: %s bytes: %v", errSkipAssociated, a.Type(), err)
+	}
+	md := src.Metadata()
+	icc := md.ICCProfile
+	if len(icc) == 0 {
+		icc = srgbICCProfile
+	}
+	uncompressed := int64(a.Size().X) * int64(a.Size().Y) * 3
+	lossyRatio := 1.0
+	if len(body) > 0 {
+		lossyRatio = float64(uncompressed) / float64(len(body))
+	}
+	// codecColor probes the image bytes directly (codec-driven) — associated
+	// images always derive their photometric from the codestream, never the
+	// DICOM-source hardcode that buildDescriptor applies to pyramid levels.
+	desc, err := codecColor(body, comp, icc, lossyRatio)
+	if err != nil {
+		return fmt.Errorf("%w: %s codec probe: %v", errSkipAssociated, a.Type(), err)
+	}
+
+	imageType, specimenLabel := associatedFlavor(a.Type())
+	mppX, mppY := baseMPP(md)
+	psX, psY, imgW, imgH := levelSpatial(src.Levels()[0].Size(), a.Size(), mppX, mppY)
+
+	spec := instanceSpec{
+		Size:                 a.Size(),
+		TileSize:             a.Size(), // single frame = whole image
+		NumFrames:            1,
+		ImageType:            imageType,
+		SpecimenLabelInImage: specimenLabel,
+		InstanceNumber:       instanceNumber,
+		PixelSpacingX:        psX,
+		PixelSpacingY:        psY,
+		ImagedVolumeW:        imgW,
+		ImagedVolumeH:        imgH,
+		ImageDescriptor:      desc,
+	}
+
+	uids := UIDSet{
+		SOP:              NewUID(),
+		Study:            shared.Study,
+		Series:           shared.Series,
+		FrameOfReference: shared.FrameOfReference,
+		DimensionOrg:     shared.DimensionOrg,
+	}
+	ds, err := assembleWSMDataset(src, uids, spec)
+	if err != nil {
+		return err
+	}
+	pd, err := encapsulateOneFrame(body)
+	if err != nil {
+		return err
+	}
+	ds.Elements = append(ds.Elements, pd)
+	return dicom.Write(w, ds)
 }
 
 // writeInstance assembles + writes one WSM VOLUME instance for src level `level`
@@ -100,13 +229,7 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs)
 	}
 
 	md := src.Metadata()
-	mppX, mppY := md.MPPX, md.MPPY
-	if mppX == 0 {
-		mppX = md.MPP
-	}
-	if mppY == 0 {
-		mppY = md.MPP
-	}
+	mppX, mppY := baseMPP(md)
 	psX, psY, imgW, imgH := levelSpatial(src.Levels()[0].Size(), size, mppX, mppY)
 
 	spec := instanceSpec{
@@ -136,6 +259,19 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs)
 	}
 	ds.Elements = append(ds.Elements, pd)
 	return dicom.Write(w, ds)
+}
+
+// baseMPP returns the source's base (level-0) microns-per-pixel with the per-axis
+// → symmetric fallback.
+func baseMPP(md source.Metadata) (mppX, mppY float64) {
+	mppX, mppY = md.MPPX, md.MPPY
+	if mppX == 0 {
+		mppX = md.MPP
+	}
+	if mppY == 0 {
+		mppY = md.MPP
+	}
+	return mppX, mppY
 }
 
 // codecColor derives the codec/colorspace attributes from a tile/frame's
@@ -217,4 +353,30 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 		return ImageDescriptor{}, fmt.Errorf("read tile (0,0) for codec probe: %w", err)
 	}
 	return codecColor(buf[:n], comp, icc, lossyRatio)
+}
+
+// encapsulateOneFrame builds an encapsulated single-frame PixelData element from
+// one compressed image (an associated image's whole-image codestream). Mirrors
+// encapsulatePixelData's hand-built OB/undefined-length element; odd-length frames
+// are padded to even per DICOM's fragment rule.
+func encapsulateOneFrame(body []byte) (*dicom.Element, error) {
+	data := append([]byte(nil), body...)
+	if len(data)%2 != 0 {
+		data = append(data, 0x00)
+	}
+	pdValue, err := dicom.NewValue(dicom.PixelDataInfo{
+		IsEncapsulated: true,
+		Offsets:        []uint32{0},
+		Frames:         []*frame.Frame{{Encapsulated: true, EncapsulatedData: frame.EncapsulatedFrame{Data: data}}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build associated PixelData value: %w", err)
+	}
+	return &dicom.Element{
+		Tag:                    tag.PixelData,
+		ValueRepresentation:    tag.VRPixelData,
+		RawValueRepresentation: "OB",
+		ValueLength:            tag.VLUndefinedLength,
+		Value:                  pdValue,
+	}, nil
 }
