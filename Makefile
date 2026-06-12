@@ -62,11 +62,12 @@ bench-dzi: $(BIN)
 	@scripts/bench-dzi.sh
 
 # Emits WSM VOLUME instances and runs dciodvfy conformance validation
-# (Phase 0/1 de-risk): a DICOM->DICOM instance from the Grundium fixture, and a
+# (Phase 0/1 de-risk): the FULL multi-instance pyramid from the Grundium fixture
+# (every level-<n>.dcm — exercises reduced-level spatial metadata), and a
 # non-DICOM SVS->DICOM instance from CMU-1-Small-Region.svs (RGB photometric +
 # synthesized sRGB ICC path). Requires WSI_TOOLS_TESTDIR and dciodvfy (see
-# DCIODVFY). Success bar: 0 Errors (Study ID DICOMDIR warning is expected/benign);
-# a non-zero exit from either instance fails the target.
+# DCIODVFY). Success bar: 0 Errors per instance (Study ID DICOMDIR warning is
+# expected/benign); a non-zero exit from any instance fails the target.
 dicom-validate: build
 	@if [ -z "$$WSI_TOOLS_TESTDIR" ]; then \
 		echo "WSI_TOOLS_TESTDIR not set; skipping dicom-validate"; \
@@ -76,12 +77,14 @@ dicom-validate: build
 	RC=0; \
 	SM="$$WSI_TOOLS_TESTDIR/dicom/scan_621_grundium_dicom"; \
 	if [ -d "$$SM" ]; then \
-		OUT=$$(mktemp -t wsm.XXXXXX).dcm; \
-		./bin/wsitools convert --to dicom --level 0 -f -o "$$OUT" "$$SM"; \
-		echo "=== dciodvfy (DICOM->DICOM) $$OUT ==="; \
-		"$(DCIODVFY)" "$$OUT" || RC=$$?; \
-		rm -f "$$OUT"; \
-	else echo "missing $$SM; skipping DICOM->DICOM"; fi; \
+		DIR=$$(mktemp -d -t wsm-pyr.XXXXXX); \
+		./bin/wsitools convert --to dicom -f -o "$$DIR/pyr" "$$SM"; \
+		for L in "$$DIR"/pyr/level-*.dcm; do \
+			echo "=== dciodvfy (DICOM pyramid) $$L ==="; \
+			"$(DCIODVFY)" "$$L" || RC=$$?; \
+		done; \
+		rm -rf "$$DIR"; \
+	else echo "missing $$SM; skipping DICOM pyramid"; fi; \
 	SVS="$$WSI_TOOLS_TESTDIR/svs/CMU-1-Small-Region.svs"; \
 	if [ -f "$$SVS" ]; then \
 		OUT2=$$(mktemp -t wsm-svs.XXXXXX).dcm; \
