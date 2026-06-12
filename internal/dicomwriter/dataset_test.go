@@ -46,10 +46,14 @@ func TestAssembleWSMDataset(t *testing.T) {
 		DimensionOrg:     NewUID(),
 	}
 	ds, err := assembleWSMDataset(src, level, uids, ImageDescriptor{
-		Photometric: "YBR_FULL_422",
-		ImageType:   []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-		ICCProfile:  src.Metadata().ICCProfile, // Grundium fixture carries an ICC profile
-		LossyRatio:  10.0,
+		TransferSyntax:  jpegBaselineTS,
+		Photometric:     "YBR_FULL_422",
+		SamplesPerPixel: 3,
+		ImageType:       []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+		ICCProfile:      src.Metadata().ICCProfile, // Grundium fixture carries an ICC profile
+		Lossy:           true,
+		LossyMethod:     "ISO_10918_1",
+		LossyRatio:      10.0,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -225,10 +229,14 @@ func TestPerLevelSpatialMetadata(t *testing.T) {
 	last := len(src.Levels()) - 1
 
 	desc := ImageDescriptor{
-		Photometric: "YBR_FULL_422",
-		ImageType:   []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-		ICCProfile:  src.Metadata().ICCProfile,
-		LossyRatio:  10.0,
+		TransferSyntax:  jpegBaselineTS,
+		Photometric:     "YBR_FULL_422",
+		SamplesPerPixel: 3,
+		ImageType:       []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+		ICCProfile:      src.Metadata().ICCProfile,
+		Lossy:           true,
+		LossyMethod:     "ISO_10918_1",
+		LossyRatio:      10.0,
 	}
 	uids := UIDSet{SOP: NewUID(), Study: NewUID(), Series: NewUID(), FrameOfReference: NewUID(), DimensionOrg: NewUID()}
 
@@ -258,5 +266,91 @@ func TestPerLevelSpatialMetadata(t *testing.T) {
 	want := ps0 * downsample
 	if math.Abs(psN-want) > want*0.01 {
 		t.Errorf("L%d PixelSpacing(X)=%g, want ~%g (L0 %g × downsample %g)", last, psN, want, ps0, downsample)
+	}
+}
+
+func TestAssembleWSMDatasetLosslessOmitsLossyTags(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	p := filepath.Join(dir, "dicom", "scan_621_grundium_dicom")
+	if _, err := os.Stat(p); err != nil {
+		t.Skip("no dicom fixture")
+	}
+	src, err := source.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	uids := UIDSet{SOP: NewUID(), Study: NewUID(), Series: NewUID(), FrameOfReference: NewUID(), DimensionOrg: NewUID()}
+	ds, err := assembleWSMDataset(src, 0, uids, ImageDescriptor{
+		TransferSyntax:  jp2kLosslessTS,
+		Photometric:     "RGB",
+		SamplesPerPixel: 3,
+		ImageType:       []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"},
+		ICCProfile:      src.Metadata().ICCProfile,
+		Lossy:           false, // lossless → ratio + method must be omitted
+		LossyMethod:     "",
+		LossyRatio:      1.0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, err := ds.FindElementByTag(tag.LossyImageCompression); err != nil {
+		t.Errorf("LossyImageCompression missing: %v", err)
+	} else if v := e.Value.GetValue().([]string); len(v) == 0 || v[0] != "00" {
+		t.Errorf("LossyImageCompression = %v, want 00", e.Value.GetValue())
+	}
+	if _, err := ds.FindElementByTag(tag.LossyImageCompressionRatio); err == nil {
+		t.Error("LossyImageCompressionRatio present on a lossless instance (must be omitted)")
+	}
+	if _, err := ds.FindElementByTag(tag.LossyImageCompressionMethod); err == nil {
+		t.Error("LossyImageCompressionMethod present on a lossless instance (must be omitted)")
+	}
+	if e, err := ds.FindElementByTag(tag.TransferSyntaxUID); err != nil {
+		t.Errorf("TransferSyntaxUID missing: %v", err)
+	} else if v := e.Value.GetValue().([]string); v[0] != jp2kLosslessTS {
+		t.Errorf("TransferSyntaxUID = %v, want %s", e.Value.GetValue(), jp2kLosslessTS)
+	}
+}
+
+func TestAssembleWSMDatasetMonoOmitsPlanarConfiguration(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	p := filepath.Join(dir, "dicom", "scan_621_grundium_dicom")
+	if _, err := os.Stat(p); err != nil {
+		t.Skip("no dicom fixture")
+	}
+	src, err := source.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	uids := UIDSet{SOP: NewUID(), Study: NewUID(), Series: NewUID(), FrameOfReference: NewUID(), DimensionOrg: NewUID()}
+	ds, err := assembleWSMDataset(src, 0, uids, ImageDescriptor{
+		TransferSyntax:  jpegBaselineTS,
+		Photometric:     "MONOCHROME2",
+		SamplesPerPixel: 1, // mono → PlanarConfiguration (Type 1C) must be omitted
+		ImageType:       []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"},
+		ICCProfile:      src.Metadata().ICCProfile,
+		Lossy:           true,
+		LossyMethod:     "ISO_10918_1",
+		LossyRatio:      10.0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, err := ds.FindElementByTag(tag.SamplesPerPixel); err != nil {
+		t.Errorf("SamplesPerPixel missing: %v", err)
+	} else if v := e.Value.GetValue().([]int); len(v) == 0 || v[0] != 1 {
+		t.Errorf("SamplesPerPixel = %v, want 1", e.Value.GetValue())
+	}
+	if _, err := ds.FindElementByTag(tag.PlanarConfiguration); err == nil {
+		t.Error("PlanarConfiguration present on a SamplesPerPixel=1 instance (Type 1C: must be omitted)")
 	}
 }

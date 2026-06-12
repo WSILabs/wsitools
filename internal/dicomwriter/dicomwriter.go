@@ -105,10 +105,9 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs)
 }
 
 // buildDescriptor derives the codec/colorspace-dependent attributes for src
-// level `level`. DICOM sources reuse P0's fixed values (preserving byte-identical
-// output); non-DICOM sources are gated to JPEG-baseline tiles and their
-// PhotometricInterpretation is derived by inspecting the first tile's markers.
-// ICC is carried from the source, or synthesized as sRGB when absent.
+// level `level`. DICOM sources reuse P0's fixed values; non-DICOM sources are
+// gated to JPEG-baseline or JPEG 2000 tiles and their photometric + transfer
+// syntax are derived from the tile's codestream. ICC is carried, or sRGB-synthesized.
 func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDescriptor, error) {
 	md := src.Metadata()
 	icc := md.ICCProfile
@@ -117,44 +116,77 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 	}
 
 	if src.Format() == "dicom" {
-		// P0 path: Grundium-mirrored values, unchanged.
+		// P0 path: Grundium-mirrored values, unchanged output.
 		return ImageDescriptor{
-			Photometric: "YBR_FULL_422",
-			ImageType:   []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-			ICCProfile:  icc,
-			LossyRatio:  lossyRatio,
+			TransferSyntax:  jpegBaselineTS,
+			Photometric:     "YBR_FULL_422",
+			SamplesPerPixel: 3,
+			ImageType:       []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+			ICCProfile:      icc,
+			Lossy:           true,
+			LossyMethod:     "ISO_10918_1",
+			LossyRatio:      lossyRatio,
 		}, nil
 	}
 
 	lvl := src.Levels()[level]
-	if lvl.Compression() != source.CompressionJPEG {
+	comp := lvl.Compression()
+	if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 {
 		return ImageDescriptor{}, fmt.Errorf(
-			"--to dicom: level %d is %s; Phase 1 supports JPEG-baseline tile-copy only",
-			level, lvl.Compression())
+			"--to dicom: level %d is %s; Phase 1 supports JPEG-baseline or JPEG 2000 tile-copy only",
+			level, comp)
 	}
+
 	buf := make([]byte, lvl.TileMaxSize())
 	n, err := lvl.TileInto(0, 0, buf)
 	if err != nil {
-		return ImageDescriptor{}, fmt.Errorf("read tile (0,0) for colorspace probe: %w", err)
+		return ImageDescriptor{}, fmt.Errorf("read tile (0,0) for codec probe: %w", err)
 	}
-	info, err := Inspect(buf[:n])
-	if err != nil {
-		return ImageDescriptor{}, fmt.Errorf("inspect source JPEG: %w", err)
-	}
-	photo, err := Photometric(info)
-	if err != nil {
-		return ImageDescriptor{}, fmt.Errorf("derive photometric from source JPEG: %w", err)
-	}
+	tile := buf[:n]
+
 	// Level 0 of a non-DICOM slide is the native acquisition (ORIGINAL); reduced
 	// levels are downsampled (DERIVED / RESAMPLED).
 	imageType := []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"}
 	if level > 0 {
 		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
 	}
-	return ImageDescriptor{
-		Photometric: photo,
-		ImageType:   imageType,
-		ICCProfile:  icc,
-		LossyRatio:  lossyRatio,
-	}, nil
+	desc := ImageDescriptor{ImageType: imageType, ICCProfile: icc, LossyRatio: lossyRatio}
+
+	switch comp {
+	case source.CompressionJPEG:
+		info, err := Inspect(tile)
+		if err != nil {
+			return ImageDescriptor{}, fmt.Errorf("inspect source JPEG: %w", err)
+		}
+		photo, err := Photometric(info)
+		if err != nil {
+			return ImageDescriptor{}, fmt.Errorf("derive photometric from source JPEG: %w", err)
+		}
+		desc.TransferSyntax = jpegBaselineTS
+		desc.Photometric = photo
+		desc.SamplesPerPixel = info.Components
+		desc.Lossy = true
+		desc.LossyMethod = "ISO_10918_1"
+	case source.CompressionJPEG2000:
+		info, err := InspectJP2K(tile)
+		if err != nil {
+			return ImageDescriptor{}, fmt.Errorf("inspect source JPEG 2000: %w", err)
+		}
+		photo, err := PhotometricJP2K(info)
+		if err != nil {
+			return ImageDescriptor{}, fmt.Errorf("derive photometric from source JPEG 2000: %w", err)
+		}
+		desc.Photometric = photo
+		desc.SamplesPerPixel = info.Components
+		if info.Reversible {
+			desc.TransferSyntax = jp2kLosslessTS
+			desc.Lossy = false
+			desc.LossyMethod = ""
+		} else {
+			desc.TransferSyntax = jp2kTS
+			desc.Lossy = true
+			desc.LossyMethod = "ISO_15444_1"
+		}
+	}
+	return desc, nil
 }
