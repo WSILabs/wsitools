@@ -16,7 +16,7 @@ import (
 var cvDICOMLevel int
 
 func init() {
-	convertCmd.Flags().IntVar(&cvDICOMLevel, "level", 0, "pyramid level to emit (--to dicom, P0)")
+	convertCmd.Flags().IntVar(&cvDICOMLevel, "level", 0, "pyramid level to emit (--to dicom)")
 }
 
 // runConvertDICOM emits ONE DICOM WSM VOLUME instance for a single pyramid

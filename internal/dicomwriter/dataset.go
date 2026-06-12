@@ -136,11 +136,12 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 	}
 
 	// OpticalPath item (tag-ordered within the item). ICCProfile (0028,2000) is
-	// Type 1C — required for color images; carry the source's embedded profile
-	// when present (placed after IlluminationTypeCodeSequence 0022,0016 and before
-	// OpticalPathIdentifier 0048,0106). LIMITATION: a source without an embedded
-	// profile reintroduces the Type 1C conformance gap (dciodvfy error) — accepted
-	// for Phase 0 (DICOM-only input, which carries an ICC profile in practice).
+	// Type 1C — required for color images; placed after IlluminationTypeCodeSequence
+	// 0022,0016 and before OpticalPathIdentifier 0048,0106. desc.ICCProfile is the
+	// source's embedded profile, or a synthesized sRGB profile when the source has
+	// none (buildDescriptor), so it is non-empty for color and the Type 1C
+	// requirement is always satisfied; the guard below tolerates an empty profile
+	// defensively.
 	opticalPathItem := []*dicom.Element{
 		mk(tag.IlluminationTypeCodeSequence, [][]*dicom.Element{
 			codeItem("111744", "DCM", "Brightfield illumination"),
