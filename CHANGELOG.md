@@ -95,6 +95,23 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   label `ImageOrientationSlide` / faithful label `PixelSpacing`, and HTJ2K /
   16-bit / `.jp2`-boxed associated images.
 
+  **Phase 2 follow-on — associated transcode:** associated images whose codec is
+  **not** a DICOM transfer syntax (e.g. the **LZW label** on every Aperio SVS —
+  the clinically important barcode) are no longer skipped. They are now
+  **decoded and stored as uncompressed native DICOM** instances (Explicit VR
+  Little Endian, VR `OB`, `LossyImageCompression "00"` — lossless, so the
+  barcode stays scannable); JPEG / JPEG 2000 associated images still tile-copy
+  verbatim-encapsulated. Decoding is delegated to **opentile-go v0.38.1**
+  (`AssociatedImage.Decode`, GH opentile-go#20), so wsitools' former
+  TIFF-reparse workaround in `extract` is deleted. The emitted `label.dcm`
+  pixel-round-trips byte-identically to the source label decode and passes
+  `dciodvfy` (0 errors); `make dicom-validate` now emits the full SVS pyramid so
+  the native label is validated too. (Two bugs surfaced and were fixed: the
+  writer must use VR `OB` not `OW` for 8-bit native pixel data — `OW` makes a
+  conformant reader interpret it as 16-bit and collapse RGB to grayscale; and
+  opentile-go#21 fixed the reader's native-RGB associated decode, where an
+  even-length pad byte had broken `SamplesPerPixel` inference.)
+
 ## [0.22.0] — 2026-06-07
 
 ### Added
