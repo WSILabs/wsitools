@@ -6,6 +6,7 @@ import (
 	"os"
 
 	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/opentile-go/decoder"
 	_ "github.com/wsilabs/opentile-go/formats/all"
 	dicom "github.com/wsilabs/opentile-go/formats/dicom"
 	svsfmt "github.com/wsilabs/opentile-go/formats/svs"
@@ -144,6 +145,9 @@ func (a *opentileAssociated) Size() image.Point {
 	return image.Point{X: sz.W, Y: sz.H}
 }
 func (a *opentileAssociated) Bytes() ([]byte, error) { return a.a.Bytes() }
+func (a *opentileAssociated) Decode(opts decoder.DecodeOptions) (*decoder.Image, error) {
+	return a.a.Decode(opts)
+}
 func (a *opentileAssociated) Compression() Compression {
 	return mapOpentileCompression(a.a.Compression())
 }
@@ -176,4 +180,3 @@ func mapOpentileCompression(c opentile.Compression) Compression {
 	}
 	return CompressionUnknown
 }
-

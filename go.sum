@@ -22,8 +22,8 @@ github.com/suyashkumar/dicom v1.1.0 h1:AG+N/aQnD+jzkFuFzz2wO401qXI8KnNcYGQgvTBr9
 github.com/suyashkumar/dicom v1.1.0/go.mod h1:8Yw14x/0r4fXVnutbCJpF3HiLVbgMS1DQ2HpfbDjq8Y=
 github.com/vbauerster/mpb/v8 v8.12.0 h1:+gneY3ifzc88tKDzOtfG8k8gfngCx615S2ZmFM4liWg=
 github.com/vbauerster/mpb/v8 v8.12.0/go.mod h1:V02YIuMVo301Y1VE9VtZlD8s84OMsk+EKN6mwvf/588=
-github.com/wsilabs/opentile-go v0.37.0 h1:ajQQfloIodbi62z1auxUOOSi8ZcftCpuwUzCb7/ILNQ=
-github.com/wsilabs/opentile-go v0.37.0/go.mod h1:uTJrlupQEXcTaR5k5Y0cGbpGqyUseI4/OJjeRxbW1h0=
+github.com/wsilabs/opentile-go v0.38.0 h1:o+Nvs/47/3C/hN3k+NtviPa9FsIyngKz1lBMVkCfwiw=
+github.com/wsilabs/opentile-go v0.38.0/go.mod h1:uTJrlupQEXcTaR5k5Y0cGbpGqyUseI4/OJjeRxbW1h0=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
 golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
 golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
