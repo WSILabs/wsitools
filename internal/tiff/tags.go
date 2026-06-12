@@ -17,6 +17,7 @@ const (
 	TagRowsPerStrip              uint16 = 278
 	TagStripByteCounts           uint16 = 279
 	TagPlanarConfiguration       uint16 = 284
+	TagPredictor                 uint16 = 317 // 1 none / 2 horizontal differencing (LZW/Deflate)
 	TagSubIFDs                   uint16 = 330
 	TagSoftware                  uint16 = 305
 	TagDateTime                  uint16 = 306

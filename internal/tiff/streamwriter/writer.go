@@ -22,8 +22,8 @@ type imageEntry struct {
 
 	// stripped
 	strippedSpec *StrippedSpec
-	stripOffset  uint64
-	stripCount   uint64
+	stripOffsets []uint64
+	stripCounts  []uint64
 
 	// IFD chain bookkeeping (populated during Close).
 	pyramidLevelIndex int
