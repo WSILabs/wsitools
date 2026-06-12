@@ -2,6 +2,7 @@ package dicomwriter
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -96,5 +97,98 @@ func TestWriteVolumeInstanceRoundTrip(t *testing.T) {
 	if !bytes.Equal(ef.Data, wantFirstTile) {
 		t.Fatalf("first frame bytes (%d) != source tile (%d) — verbatim-copy violated",
 			len(ef.Data), len(wantFirstTile))
+	}
+}
+
+type nopWriteCloser struct{ *bytes.Buffer }
+
+func (nopWriteCloser) Close() error { return nil }
+
+func TestWritePyramid(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	p := filepath.Join(dir, "dicom", "scan_621_grundium_dicom")
+	if _, err := os.Stat(p); err != nil {
+		t.Skip("no dicom fixture")
+	}
+	src, err := source.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	n := len(src.Levels())
+	if n < 2 {
+		t.Skip("need >= 2 levels")
+	}
+
+	bufs := make([]*bytes.Buffer, n)
+	factory := func(level int) (io.WriteCloser, error) {
+		bufs[level] = &bytes.Buffer{}
+		return nopWriteCloser{bufs[level]}, nil
+	}
+	if err := WritePyramid(src, Options{}, factory); err != nil {
+		t.Fatalf("WritePyramid: %v", err)
+	}
+
+	firstStr := func(ds dicom.Dataset, tg tag.Tag) string {
+		e, err := ds.FindElementByTag(tg)
+		if err != nil {
+			t.Fatalf("missing %v: %v", tg, err)
+		}
+		return e.Value.GetValue().([]string)[0]
+	}
+	firstInt := func(ds dicom.Dataset, tg tag.Tag) int {
+		e, err := ds.FindElementByTag(tg)
+		if err != nil {
+			t.Fatalf("missing %v: %v", tg, err)
+		}
+		return e.Value.GetValue().([]int)[0]
+	}
+
+	var series, frameOfRef, study string
+	sops := map[string]bool{}
+	for level := 0; level < n; level++ {
+		if bufs[level] == nil {
+			t.Fatalf("level %d was never written", level)
+		}
+		ds, err := dicom.Parse(bytes.NewReader(bufs[level].Bytes()), int64(bufs[level].Len()), nil)
+		if err != nil {
+			t.Fatalf("parse level %d: %v", level, err)
+		}
+		s := firstStr(ds, tag.SeriesInstanceUID)
+		fr := firstStr(ds, tag.FrameOfReferenceUID)
+		st := firstStr(ds, tag.StudyInstanceUID)
+		sop := firstStr(ds, tag.SOPInstanceUID)
+		inst := firstStr(ds, tag.InstanceNumber)
+		cols := firstInt(ds, tag.TotalPixelMatrixColumns)
+
+		if level == 0 {
+			series, frameOfRef, study = s, fr, st
+		} else {
+			if s != series {
+				t.Errorf("level %d SeriesInstanceUID %q != L0 %q", level, s, series)
+			}
+			if fr != frameOfRef {
+				t.Errorf("level %d FrameOfReferenceUID %q != L0 %q", level, fr, frameOfRef)
+			}
+			if st != study {
+				t.Errorf("level %d StudyInstanceUID %q != L0 %q", level, st, study)
+			}
+		}
+		if sops[sop] {
+			t.Errorf("duplicate SOPInstanceUID %q at level %d", sop, level)
+		}
+		sops[sop] = true
+		if inst != strconv.Itoa(level+1) {
+			t.Errorf("level %d InstanceNumber = %q, want %d", level, inst, level+1)
+		}
+		if want := src.Levels()[level].Size().X; cols != want {
+			t.Errorf("level %d TotalPixelMatrixColumns = %d, want %d", level, cols, want)
+		}
+	}
+	if len(sops) != n {
+		t.Errorf("got %d distinct SOPInstanceUIDs, want %d", len(sops), n)
 	}
 }

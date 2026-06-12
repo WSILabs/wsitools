@@ -12,11 +12,59 @@ import (
 // Options is reserved for future write-side knobs (P0/P1: empty).
 type Options struct{}
 
+// sharedUIDs are the UIDs shared by every instance in a pyramid Series: the
+// Study, Series, FrameOfReference, and DimensionOrganization. Each instance still
+// gets its own SOPInstanceUID.
+type sharedUIDs struct {
+	Study, Series, FrameOfReference, DimensionOrg string
+}
+
+// newSharedUIDs generates a fresh set of series-level UIDs (one per Study /
+// Series / FrameOfReference / DimensionOrganization).
+func newSharedUIDs() sharedUIDs {
+	return sharedUIDs{
+		Study:            NewUID(),
+		Series:           NewUID(),
+		FrameOfReference: NewUID(),
+		DimensionOrg:     NewUID(),
+	}
+}
+
 // WriteVolumeInstance emits ONE conformant DICOM WSM VOLUME instance for src
-// level `level` to w, copying the source's compressed JPEG tiles verbatim.
-// The source's selected level must carry JPEG-baseline tiles (DICOM sources
-// always do; non-DICOM sources are codec-gated in buildDescriptor).
+// level `level` to w, copying the source's compressed JPEG tiles verbatim. The
+// source's selected level must carry JPEG-baseline tiles (DICOM sources always
+// do; non-DICOM sources are codec-gated in buildDescriptor).
 func WriteVolumeInstance(w io.Writer, src source.Source, level int, _ Options) error {
+	return writeInstance(w, src, level, newSharedUIDs())
+}
+
+// WritePyramid emits the full resolution pyramid as a multi-instance Series: one
+// WSM VOLUME instance per source level, all sharing the Study/Series/
+// FrameOfReference/DimensionOrganization UIDs. newWriter supplies the destination
+// writer for each level (0-based); WritePyramid closes each writer after writing.
+func WritePyramid(src source.Source, _ Options, newWriter func(level int) (io.WriteCloser, error)) error {
+	shared := newSharedUIDs()
+	for level := range src.Levels() {
+		w, err := newWriter(level)
+		if err != nil {
+			return fmt.Errorf("open writer for level %d: %w", level, err)
+		}
+		werr := writeInstance(w, src, level, shared)
+		cerr := w.Close()
+		if werr != nil {
+			return fmt.Errorf("write level %d: %w", level, werr)
+		}
+		if cerr != nil {
+			return fmt.Errorf("close level %d: %w", level, cerr)
+		}
+	}
+	return nil
+}
+
+// writeInstance assembles + writes one WSM VOLUME instance for src level `level`
+// to w, using the supplied shared UIDs and a fresh SOPInstanceUID. The level's
+// InstanceNumber (level+1) is emitted by assembleWSMDataset.
+func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs) error {
 	if level < 0 || level >= len(src.Levels()) {
 		return fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
 	}
@@ -43,10 +91,10 @@ func WriteVolumeInstance(w io.Writer, src source.Source, level int, _ Options) e
 
 	uids := UIDSet{
 		SOP:              NewUID(),
-		Study:            NewUID(),
-		Series:           NewUID(),
-		FrameOfReference: NewUID(),
-		DimensionOrg:     NewUID(),
+		Study:            shared.Study,
+		Series:           shared.Series,
+		FrameOfReference: shared.FrameOfReference,
+		DimensionOrg:     shared.DimensionOrg,
 	}
 	ds, err := assembleWSMDataset(src, level, uids, desc)
 	if err != nil {
