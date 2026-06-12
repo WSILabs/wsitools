@@ -391,3 +391,108 @@ func TestJP2KToDICOMPixelRoundTrip(t *testing.T) {
 		t.Fatalf("pixel buffers differ in length: src=%d dcm=%d", len(srcImg.Pix), len(dcmImg.Pix))
 	}
 }
+
+// TestConvertDICOMLZWLabelTranscode proves the non-tile-copyable associated path:
+// CMU-1-Small-Region.svs's label is LZW (not a DICOM transfer syntax), so the
+// writer decodes it and stores it as an uncompressed native RGB instance
+// (label.dcm). Reading the emitted pyramid back as a DICOM series, the label is
+// surfaced as an associated image; its decode must equal the source label decode
+// (faithful, lossless transcode). The oracle is the series-directory +
+// AssociatedImage.Decode path — a lone LABEL .dcm is not a readable slide.
+func TestConvertDICOMLZWLabelTranscode(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	svs := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(svs); err != nil {
+		t.Skip("no CMU SVS fixture")
+	}
+
+	// Source label: faithful decode, and assert it's non-tile-copyable (the path
+	// under test) — otherwise the test would prove nothing.
+	src, err := source.Open(svs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var label source.AssociatedImage
+	for _, a := range src.Associated() {
+		if a.Type() == "label" {
+			label = a
+		}
+	}
+	if label == nil {
+		src.Close()
+		t.Skip("fixture has no label")
+	}
+	if label.Compression() == source.CompressionJPEG || label.Compression() == source.CompressionJPEG2000 {
+		src.Close()
+		t.Skip("label is tile-copyable; this test targets the decode→native path")
+	}
+	want, err := label.Decode(decoder.DecodeOptions{Format: decoder.PixelFormatRGB})
+	if err != nil {
+		src.Close()
+		t.Fatalf("decode source label: %v", err)
+	}
+	src.Close()
+
+	// Convert to a DICOM pyramid (writes label.dcm as native uncompressed RGB).
+	out := filepath.Join(t.TempDir(), "pyr")
+	convertCmd.Flags().Lookup("level").Changed = false
+	cvOutput, cvForce, cvNoAssociated = "", false, false
+	rootCmd.SetArgs([]string{"convert", "--to", "dicom", "-o", out, svs})
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		convertCmd.Flags().Lookup("level").Changed = false
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("convert --to dicom: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "label.dcm")); err != nil {
+		t.Fatalf("label.dcm not emitted: %v", err)
+	}
+
+	// Read the emitted pyramid back as a DICOM series; the label is an associated
+	// image. Decode it and compare to the source label decode.
+	back, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("open emitted pyramid: %v", err)
+	}
+	defer back.Close()
+	if back.Format() != "dicom" {
+		t.Errorf("emitted Format = %q, want dicom", back.Format())
+	}
+	var gotAssoc source.AssociatedImage
+	for _, a := range back.Associated() {
+		if a.Type() == "label" {
+			gotAssoc = a
+		}
+	}
+	if gotAssoc == nil {
+		t.Fatal("emitted pyramid has no label associated image")
+	}
+	got, err := gotAssoc.Decode(decoder.DecodeOptions{Format: decoder.PixelFormatRGB})
+	if err != nil {
+		t.Fatalf("decode emitted label: %v", err)
+	}
+	if got.Width != want.Width || got.Height != want.Height {
+		t.Fatalf("dim mismatch: src=%dx%d emitted=%dx%d", want.Width, want.Height, got.Width, got.Height)
+	}
+	if !bytes.Equal(tight(got), tight(want)) {
+		t.Error("emitted LZW label pixels differ from source decode (transcode not faithful)")
+	}
+}
+
+// tight strips any row-stride padding to a packed Height*Width*3 RGB buffer
+// (decoder.Image may over-allocate Stride for SIMD alignment).
+func tight(di *decoder.Image) []byte {
+	rowBytes := di.Width * 3
+	if di.Stride == rowBytes {
+		return di.Pix[:di.Height*rowBytes]
+	}
+	out := make([]byte, di.Height*rowBytes)
+	for y := 0; y < di.Height; y++ {
+		copy(out[y*rowBytes:(y+1)*rowBytes], di.Pix[y*di.Stride:y*di.Stride+rowBytes])
+	}
+	return out
+}
