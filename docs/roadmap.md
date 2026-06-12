@@ -185,8 +185,24 @@ queued, deferred, or under consideration.
     produced 21-char `PixelSpacing` values that exceeded the 16-char DS VR limit.
     The `YBR_ICT`/`YBR_RCT` (MCT=1) and `.90`/lossless branches are unit-tested
     only (no fixture); >8-bit / `.jp2`-boxed JPEG 2000 out of scope.
-  - **Next — Phase 2:** label/overview/thumbnail as **separate instances**;
-    then **HTJ2K** / **16-bit** support. Plus TILED_SPARSE, Concatenations (P2)
+  - ✅ **DONE (2026-06-12): Phase 2 — associated images.** Full-pyramid mode now
+    also emits the slide's **associated images** (label/overview/thumbnail,
+    macro→overview) as **same-Series single-frame WSM instances** at
+    `<dir>/<type>.dcm` (shared Study/Series/FrameOfReference, `InstanceNumber`
+    continuing after the levels). `assembleWSMDataset` was generalized into a pure
+    builder over a per-instance **`instanceSpec`** (both the pyramid-level path and
+    the new `writeAssociated` build a spec). `ImageType[2]` flavor + per-type
+    `SpecimenLabelInImage`; the **SlideLabel module** (`LabelText` + `BarcodeValue`,
+    Type 2, empty/anonymous) is emitted for label/overview (dciodvfy required it).
+    Default-on, skipped by `--no-associated`; `--level N` emits none. Associated
+    images whose codec is neither JPEG nor JPEG 2000 (e.g. an LZW label) are
+    **skipped with a logged warning** — no partial file, the pyramid still
+    completes. `dciodvfy` reports **0 errors** across all instances (pyramid levels
+    + associated); `make dicom-validate` now validates every `<dir>/*.dcm`.
+  - **Next:** **HTJ2K** / **16-bit** support, the pre-existing DICOM-source
+    codec-mislabel bug, and the golden's rotated label
+    `ImageOrientationSlide` / faithful label `PixelSpacing` (`.jp2`-boxed
+    associated images out of scope). Plus TILED_SPARSE, Concatenations (P2)
     and fluorescence (P3).
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
 - ✅ **DONE (2026-06-05): unify downsample/convert scaling.** `convert --factor N`

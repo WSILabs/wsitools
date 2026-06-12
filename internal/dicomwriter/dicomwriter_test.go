@@ -2,6 +2,7 @@ package dicomwriter
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -123,10 +124,11 @@ func TestWritePyramid(t *testing.T) {
 		t.Skip("need >= 2 levels")
 	}
 
-	bufs := make([]*bytes.Buffer, n)
-	factory := func(level int) (io.WriteCloser, error) {
-		bufs[level] = &bytes.Buffer{}
-		return nopWriteCloser{bufs[level]}, nil
+	bufs := map[string]*bytes.Buffer{}
+	factory := func(name string) (io.WriteCloser, error) {
+		b := &bytes.Buffer{}
+		bufs[name] = b
+		return nopWriteCloser{b}, nil
 	}
 	if err := WritePyramid(src, Options{}, factory); err != nil {
 		t.Fatalf("WritePyramid: %v", err)
@@ -150,10 +152,11 @@ func TestWritePyramid(t *testing.T) {
 	var series, frameOfRef, study string
 	sops := map[string]bool{}
 	for level := 0; level < n; level++ {
-		if bufs[level] == nil {
+		b := bufs[fmt.Sprintf("level-%d", level)]
+		if b == nil {
 			t.Fatalf("level %d was never written", level)
 		}
-		ds, err := dicom.Parse(bytes.NewReader(bufs[level].Bytes()), int64(bufs[level].Len()), nil)
+		ds, err := dicom.Parse(bytes.NewReader(b.Bytes()), int64(b.Len()), nil)
 		if err != nil {
 			t.Fatalf("parse level %d: %v", level, err)
 		}

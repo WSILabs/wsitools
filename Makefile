@@ -79,7 +79,7 @@ dicom-validate: build
 	if [ -d "$$SM" ]; then \
 		DIR=$$(mktemp -d -t wsm-pyr.XXXXXX); \
 		./bin/wsitools convert --to dicom -f -o "$$DIR/pyr" "$$SM"; \
-		for L in "$$DIR"/pyr/level-*.dcm; do \
+		for L in "$$DIR"/pyr/*.dcm; do \
 			echo "=== dciodvfy (DICOM pyramid) $$L ==="; \
 			"$(DCIODVFY)" "$$L" || RC=$$?; \
 		done; \
@@ -97,7 +97,7 @@ dicom-validate: build
 	if [ -f "$$JP2K" ]; then \
 		DIR2=$$(mktemp -d -t wsm-jp2k.XXXXXX); \
 		./bin/wsitools convert --to dicom -f -o "$$DIR2/pyr" "$$JP2K"; \
-		for L in "$$DIR2"/pyr/level-*.dcm; do \
+		for L in "$$DIR2"/pyr/*.dcm; do \
 			echo "=== dciodvfy (JP2K pyramid) $$L ==="; \
 			"$(DCIODVFY)" "$$L" || RC=$$?; \
 		done; \
