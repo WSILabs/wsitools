@@ -172,9 +172,22 @@ queued, deferred, or under consideration.
     base-MPP/shrunken-extent bug in the single-level non-L0 path). `dciodvfy`
     reports **0 errors** on **every** level of the Grundium full pyramid (L0/L1/L2)
     and on the SVS instance.
-  - **Next — Phase 1, remaining slice:** **JPEG 2000** (and other) codec support.
-    Then P2 (TILED_SPARSE, label/overview/thumbnail as separate instances,
-    Concatenations) and P3 (fluorescence).
+  - ✅ **DONE (2026-06-11): Phase 1 slice 3 — JPEG 2000.** `convert --to dicom`
+    now also accepts **JPEG 2000** sources (single-instance + full pyramid): the
+    raw J2K codestream is tile-copied **verbatim**. **Codestream-derived
+    photometric** — a new `jp2kmeta` SIZ/COD parser sets `PhotometricInterpretation`
+    to RGB / `YBR_ICT` / `YBR_RCT` / `MONOCHROME2`. **Reversibility-driven transfer
+    syntax** — reversible/lossless → `…4.90` + `LossyImageCompression "00"`,
+    irreversible/lossy → `…4.91` + `"01"` + `ISO_15444_1`. `dciodvfy` reports
+    **0 errors** on **every** level of the JP2K-33003-1.svs pyramid (RGB / `.91` /
+    lossy) + an RGB pixel round-trip. Also a general **DS-VR PixelSpacing-length
+    fix** (`formatDS`): non-power-of-2 level ratios + a non-round MPP previously
+    produced 21-char `PixelSpacing` values that exceeded the 16-char DS VR limit.
+    The `YBR_ICT`/`YBR_RCT` (MCT=1) and `.90`/lossless branches are unit-tested
+    only (no fixture); >8-bit / `.jp2`-boxed JPEG 2000 out of scope.
+  - **Next — Phase 2:** label/overview/thumbnail as **separate instances**;
+    then **HTJ2K** / **16-bit** support. Plus TILED_SPARSE, Concatenations (P2)
+    and fluorescence (P3).
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
 - ✅ **DONE (2026-06-05): unify downsample/convert scaling.** `convert --factor N`
   / `--target-mag M` ships for `svs|tiff|ome-tiff|cog-wsi` (reduce-then-rebuild

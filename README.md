@@ -102,20 +102,24 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   store-method ZIP, plus an optional `scan-properties.xml` populated from
   source metadata.
 - `wsitools convert --to dicom` — **early** (experimental). Emits conformant
-  DICOM-WSI VOLUME instances from a **DICOM or non-DICOM JPEG-baseline source**
+  DICOM-WSI VOLUME instances from a **DICOM, JPEG-baseline, or JPEG 2000 source**
   (SVS etc.): by default the **full resolution pyramid** — `convert --to dicom
   -o <dir> <input>` writes one instance per source level as `<dir>/level-<n>.dcm`
   (n=0 = full resolution) as a multi-instance Series sharing
   Study/Series/FrameOfReference UIDs, written **atomically** (temp dir → rename,
   never a partial pyramid). `--level N` selects a single level instead. The
-  source level's compressed JPEG tiles are copied **verbatim** (no decode/re-encode)
-  and re-encapsulated as TILED_FULL multi-frame PixelData.
+  source level's compressed tiles are copied **verbatim** (no decode/re-encode)
+  and re-encapsulated as TILED_FULL multi-frame PixelData. For **JPEG-baseline**,
   `PhotometricInterpretation` is **marker-driven** — probed from the first tile's
   JPEG markers (RGB for the Aperio APP14 raw-RGB variant, `YBR_FULL_422` /
-  `YBR_FULL` for subsampled / 4:4:4 YCbCr) — and the source ICC profile is carried
+  `YBR_FULL` for subsampled / 4:4:4 YCbCr). For **JPEG 2000**, the transfer
+  syntax is **reversibility-driven** (`…4.90` lossless / `…4.91` lossy) and
+  `PhotometricInterpretation` is **codestream-derived** from the SIZ/COD markers
+  (RGB / `YBR_ICT` / `YBR_RCT` / `MONOCHROME2`). The source ICC profile is carried
   through or a canonical **sRGB** profile is synthesized when absent. Validated
   with `dciodvfy` (0 errors on every pyramid level) plus a pixel round-trip on
-  CMU-1-Small-Region.svs. Non-JPEG-baseline codecs (JPEG 2000 etc.) error clearly.
+  CMU-1-Small-Region.svs (RGB JPEG-baseline) and JP2K-33003-1.svs (RGB JPEG 2000);
+  the JP2K YBR / lossless branches are unit-tested only. >8-bit / `.jp2`-boxed
   JPEG 2000 and label/overview/thumbnail as separate instances are later slices.
 - `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
   40x → 20x), **format-preserving**: the output is the same container as the
@@ -151,7 +155,7 @@ DICOM-WSI.
 ³ **convert (from)** — readable as a convert source. **✓\*** = striped source: opentile-go synthesizes a tile grid over the source strips, so `convert` decodes + re-encodes (reproducible JPEG tiles) rather than doing a bit-exact tile-copy. The lossless tile-copy fast path applies only to natively-tiled sources (plain ✓).
 ⁴ **convert (to)** — available as a convert output **target**. The full target set is `cog-wsi`, `svs`, `tiff` (→ generic-TIFF), `ome-tiff`, `dzi`, `szi`; **DZI and SZI** are output-only pyramid formats (not readable sources, so not listed as rows). All ✓ targets except `dzi`/`szi` also accept `--factor N` / `--target-mag M` to downsample during conversion (scales MPP ×N / magnification ÷N).
 ⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
-⁶ DICOM-WSI **write** is early — `convert --to dicom` emits conformant WSM VOLUME instances from a DICOM **or** non-DICOM **JPEG-baseline** source (verbatim tile-copy, marker-driven `PhotometricInterpretation`, ICC carried-or-synthesized). It emits a single instance with `--level N`, **or** the **full pyramid** by default as a multi-instance Series (one instance per level, `<dir>/level-<n>.dcm`, shared Series/FrameOfReference, atomic dir output). Validated with `dciodvfy` (0 errors on every level) plus an SVS→DICOM pixel round-trip. JPEG 2000 / other codecs and associated-image (label/overview/thumbnail) instances are later slices.
+⁶ DICOM-WSI **write** is early — `convert --to dicom` emits conformant WSM VOLUME instances from a DICOM, **JPEG-baseline**, **or JPEG 2000** source (verbatim tile-copy, ICC carried-or-synthesized). JPEG-baseline `PhotometricInterpretation` is marker-driven; JPEG 2000 derives its transfer syntax from source reversibility (`…4.90` lossless / `…4.91` lossy) and its `PhotometricInterpretation` from the codestream SIZ/COD markers (RGB / `YBR_ICT` / `YBR_RCT` / `MONOCHROME2`). It emits a single instance with `--level N`, **or** the **full pyramid** by default as a multi-instance Series (one instance per level, `<dir>/level-<n>.dcm`, shared Series/FrameOfReference, atomic dir output). Validated with `dciodvfy` (0 errors on every level) plus pixel round-trips on the RGB JPEG-baseline (CMU-1-Small-Region.svs) and RGB JPEG 2000 (JP2K-33003-1.svs) paths; the JP2K YBR / lossless branches are unit-tested only. >8-bit / `.jp2`-boxed JPEG 2000 and associated-image (label/overview/thumbnail) instances are later slices.
 ⁷ **label/macro remove|replace** — applies equally to `thumbnail` and `overview`. Pyramid tile bytes are copied verbatim (no decode/re-encode); only the tail IFD is rewritten.
 ⁸ **OME-TIFF editing is lossy** — rebuilds the file via `streamwriter` and regenerates a minimal OME-XML (instrument/acquisition/channel/vendor `OriginalMetadata` not preserved; pyramid pixels, geometry/MPP/magnification, ICC, and the other associated images are). An always-on runtime warning fires on every OME-TIFF edit. Associated replacements are **JPEG-only** (opentile-go's OME-TIFF reader limitation — LZW/Deflate replacements would be unreadable). See [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). For faithful OME metadata carry-through, use [Bio-Formats](https://www.openmicroscopy.org/bio-formats/).
 
