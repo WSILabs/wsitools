@@ -74,8 +74,26 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   values were already short). **Honestly stated limitation:** the `YBR_ICT` /
   `YBR_RCT` (MCT=1) and `.90` / lossless branches are **unit-tested but not yet
   e2e-validated** (no MCT=1 / lossless JP2K fixture); >8-bit JP2K and `.jp2`-boxed
-  inputs remain out of scope. Still pending: label/overview/thumbnail as separate
-  DICOM instances — a later slice.
+  inputs remain out of scope.
+  **Phase 2 — associated images:** `convert --to dicom -o <dir> <input>`
+  (full-pyramid mode) now also emits the slide's **associated images**
+  (label/overview/thumbnail, and macro→overview) as **single-frame WSM
+  instances in the same Series** — one per image at `<dir>/<type>.dcm` (e.g.
+  `label.dcm`, `overview.dcm`, `thumbnail.dcm`), sharing the
+  Study/Series/FrameOfReference UIDs and continuing `InstanceNumber` after the
+  levels. Each image's whole frame is tile-copied **verbatim** (JPEG or JPEG
+  2000); `ImageType[2]` is set per type (`LABEL`/`OVERVIEW`/`THUMBNAIL`) and
+  `SpecimenLabelInImage` per type (YES for label/overview, NO for thumbnail),
+  with the **SlideLabel module** emitted (empty/anonymous `LabelText` +
+  `BarcodeValue`) for label/overview. **Default-on**, skipped by
+  `--no-associated`; `--level N` (single-instance) mode emits no associated
+  images. Associated images whose codec is neither JPEG nor JPEG 2000 (e.g. an
+  **LZW label**, as in CMU-1-Small-Region.svs) are **skipped with a logged
+  warning** — no file left behind, the pyramid still completes. `dciodvfy`
+  reports **0 errors** including the associated instances; `make dicom-validate`
+  now validates every `<dir>/*.dcm`. Still out of scope: the golden's rotated
+  label `ImageOrientationSlide` / faithful label `PixelSpacing`, and HTJ2K /
+  16-bit / `.jp2`-boxed associated images.
 
 ## [0.22.0] — 2026-06-07
 

@@ -280,6 +280,62 @@ e2e-validate them yet.
 (label/overview/thumbnail as separate DICOM instances — P2); TILED_SPARSE /
 Concatenations (P2); fluorescence (P3).
 
+## Phase 2 outcome (2026-06-12)
+
+**DONE — associated images as separate instances SHIPPED.** `convert --to dicom
+-o <dir> <input>` (full-pyramid mode) now also emits the slide's **associated
+images** as **single-frame WSM instances in the same Series** as the pyramid —
+one per image at `<dir>/<type>.dcm` (`label.dcm`, `overview.dcm`,
+`thumbnail.dcm`). **Default-on**, skipped by the existing `--no-associated`
+flag; the single-instance `--level N` path emits no associated images.
+
+### Golden-confirmed model: same Series, single-frame, per-type flavor
+
+Associated instances share the pyramid's Study / Series / FrameOfReference UIDs
+and continue `InstanceNumber` after the levels — the same shared-Series model as
+the pyramid levels (no Pyramid UID), confirmed against the Grundium golden. Each
+is a single-frame instance carrying the whole associated image as one verbatim
+tile-copied frame (JPEG or JPEG 2000 — no decode/re-encode).
+
+- **`associatedFlavor` mapping** → `ImageType[2]`: `label`→`LABEL`,
+  `overview`→`OVERVIEW`, **`macro`→`OVERVIEW`** (DICOM has no MACRO flavor),
+  `thumbnail`→`THUMBNAIL`.
+- **`SpecimenLabelInImage`** per type: **YES** for label/overview, **NO** for
+  thumbnail.
+
+### `instanceSpec` assembler generalization
+
+`assembleWSMDataset` was generalized from the pyramid-level shape into a **pure
+builder over a per-instance `instanceSpec`**: both the pyramid-level path and the
+new `writeAssociated` build a spec and hand it to the same assembler. This is the
+architectural change that made the associated path a small addition rather than a
+fork of the dataset builder.
+
+### SlideLabel-module fix (found by dciodvfy)
+
+A LABEL/OVERVIEW instance requires the **SlideLabel module** (`LabelText` +
+`BarcodeValue`, Type 2) — `dciodvfy` errored without it. Emitted **empty
+(anonymous)** when `SpecimenLabelInImage = YES`.
+
+### Skip-with-warning for unsupported codecs
+
+Associated images whose codec is neither JPEG nor JPEG 2000 (e.g. the **LZW
+label** in CMU-1-Small-Region.svs) are **skipped with a logged warning** — no
+file is left behind, and the pyramid still completes. (Verbatim tile-copy needs a
+JPEG/JP2K frame; an LZW image would have no valid encapsulated transfer syntax.)
+
+### Validation
+
+`dciodvfy` reports **0 errors** across **all 12 instances** this session — the
+Grundium pyramid levels + its label/overview/thumbnail, the SVS instance, and the
+JP2K pyramid + its associated. `make dicom-validate` now validates every
+`<dir>/*.dcm`.
+
+**Remaining:** **HTJ2K** and **16-bit**; **`.jp2`-boxed** associated images; the
+golden's rotated label `ImageOrientationSlide` and faithful label `PixelSpacing`
+(we emit standard orientation + slide-derived spacing); and the pre-existing
+**P0 DICOM-source codec-mislabel bug**.
+
 ## Open questions for the eventual spec
 
 - Transfer syntax policy: tile-copy (reuse source JPEG) vs. re-encode; which
