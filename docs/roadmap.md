@@ -145,9 +145,22 @@ queued, deferred, or under consideration.
     hundred lines," **not a swamp.** Known P0 limitation: a source lacking an
     embedded ICC profile would reintroduce a Type 1C gap (ICCProfile in
     OpticalPath) — fine for P0 (DICOM input carries ICC in practice).
-  - **Next — Phase 1:** full pyramid (instance per level), **non-DICOM sources**,
-    and colorspace/photometric reconciliation; then P2 (TILED_SPARSE,
-    label/overview instances, Concatenations) and P3 (fluorescence).
+  - ✅ **DONE (2026-06-11): Phase 1, first slice — non-DICOM single-level.**
+    `convert --to dicom --level N <input.svs>` emits ONE conformant WSM **VOLUME**
+    instance from a **non-DICOM source** (SVS etc.), one pyramid level: the level's
+    JPEG-baseline tiles are copied **verbatim** (non-JPEG codecs error clearly).
+    `PhotometricInterpretation` is **marker-driven** — probed from the first tile's
+    Adobe APP14 + chroma-subsampling markers (**RGB** for the Aperio APP14 raw-RGB
+    variant, `YBR_FULL_422` / `YBR_FULL` for subsampled / 4:4:4 YCbCr). ICC is
+    carried from the source or a canonical **sRGB** profile is **synthesized** when
+    absent (closes the P0 Type 1C gap). Validated with `dciodvfy` (**0 errors**)
+    **and** a pixel round-trip on the CI fixture CMU-1-Small-Region.svs (decode the
+    emitted DICOM honoring its photometric → byte-identical RGB). `make
+    dicom-validate` extended to both the DICOM→DICOM and SVS→DICOM paths; DICOM→DICOM
+    output unchanged.
+  - **Next — Phase 1, remaining slices:** **full pyramid** (one instance per level
+    in a Series), then **JPEG 2000** (and other) codec support. Then P2
+    (TILED_SPARSE, label/overview instances, Concatenations) and P3 (fluorescence).
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
 - ✅ **DONE (2026-06-05): unify downsample/convert scaling.** `convert --factor N`
   / `--target-mag M` ships for `svs|tiff|ome-tiff|cog-wsi` (reduce-then-rebuild

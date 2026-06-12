@@ -44,7 +44,18 @@ type UIDSet struct {
 // Most geometry is DERIVED from the source level/metadata; structural constants
 // (ImageType, Modality, photometric/bit-depth fields, orientation, TILED_FULL,
 // anonymous identity, coded-sequence codes) are MIRRORED from the golden.
-func assembleWSMDataset(src source.Source, level int, uids UIDSet, lossyRatio float64) (dicom.Dataset, error) {
+// ImageDescriptor carries the codec/colorspace-dependent attributes that vary by
+// source. The caller (WriteVolumeInstance) derives these — probing a non-DICOM
+// source's JPEG, or using P0's fixed values for a DICOM source — so the assembler
+// stays a pure dataset builder.
+type ImageDescriptor struct {
+	Photometric string   // PhotometricInterpretation: RGB | YBR_FULL_422 | YBR_FULL | MONOCHROME2
+	ImageType   []string // ImageType + FrameType value (4 elements)
+	ICCProfile  []byte   // carried or synthesized; non-empty for color
+	LossyRatio  float64  // LossyImageCompressionRatio
+}
+
+func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDescriptor) (dicom.Dataset, error) {
 	if level < 0 || level >= len(src.Levels()) {
 		return dicom.Dataset{}, fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
 	}
@@ -74,7 +85,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, lossyRatio fl
 	}
 
 	// LossyImageCompressionRatio (Type 1C, DS, ≤16 chars) — %.4g keeps it compact.
-	ratioStr := fmt.Sprintf("%.4g", lossyRatio)
+	ratioStr := fmt.Sprintf("%.4g", desc.LossyRatio)
 
 	grid := lvl.Grid()
 	size := lvl.Size()
@@ -125,18 +136,19 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, lossyRatio fl
 	}
 
 	// OpticalPath item (tag-ordered within the item). ICCProfile (0028,2000) is
-	// Type 1C — required for color images; carry the source's embedded profile
-	// when present (placed after IlluminationTypeCodeSequence 0022,0016 and before
-	// OpticalPathIdentifier 0048,0106). LIMITATION: a source without an embedded
-	// profile reintroduces the Type 1C conformance gap (dciodvfy error) — accepted
-	// for Phase 0 (DICOM-only input, which carries an ICC profile in practice).
+	// Type 1C — required for color images; placed after IlluminationTypeCodeSequence
+	// 0022,0016 and before OpticalPathIdentifier 0048,0106. desc.ICCProfile is the
+	// source's embedded profile, or a synthesized sRGB profile when the source has
+	// none (buildDescriptor), so it is non-empty for color and the Type 1C
+	// requirement is always satisfied; the guard below tolerates an empty profile
+	// defensively.
 	opticalPathItem := []*dicom.Element{
 		mk(tag.IlluminationTypeCodeSequence, [][]*dicom.Element{
 			codeItem("111744", "DCM", "Brightfield illumination"),
 		}),
 	}
-	if len(md.ICCProfile) > 0 {
-		opticalPathItem = append(opticalPathItem, mk(tag.ICCProfile, md.ICCProfile))
+	if len(desc.ICCProfile) > 0 {
+		opticalPathItem = append(opticalPathItem, mk(tag.ICCProfile, desc.ICCProfile))
 	}
 	opticalPathItem = append(opticalPathItem,
 		mk(tag.OpticalPathIdentifier, []string{"0"}),
@@ -154,8 +166,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, lossyRatio fl
 		mk(tag.ImplementationClassUID, []string{NewUID()}),
 
 		// ---- General / SOP Common (group 0008) ----
-		// ImageType: VOLUME image; RESAMPLED for derived pyramid levels.
-		mk(tag.ImageType, []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}),
+		mk(tag.ImageType, desc.ImageType),
 		mk(tag.SOPClassUID, []string{wsmSOPClassUID}),
 		mk(tag.SOPInstanceUID, []string{uids.SOP}),
 		// Dates/times (tag-ordered: StudyDate 0020, ContentDate 0023,
@@ -199,7 +210,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, lossyRatio fl
 
 		// ---- Image Pixel / WSM frame descriptors (group 0028) ----
 		mk(tag.SamplesPerPixel, []int{3}),
-		mk(tag.PhotometricInterpretation, []string{"YBR_FULL_422"}),
+		mk(tag.PhotometricInterpretation, []string{desc.Photometric}),
 		mk(tag.PlanarConfiguration, []int{0}),
 		mk(tag.NumberOfFrames, []string{fmt.Sprintf("%d", numFrames)}),
 		mk(tag.Rows, []int{tileSize.Y}),
@@ -264,7 +275,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, lossyRatio fl
 					},
 				}),
 				mk(tag.WholeSlideMicroscopyImageFrameTypeSequence, [][]*dicom.Element{
-					{mk(tag.FrameType, []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"})},
+					{mk(tag.FrameType, desc.ImageType)},
 				}),
 			},
 		}),

@@ -101,13 +101,19 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
 - `wsitools convert --to szi` — Smart Zoom Image: DZI pyramid wrapped in a
   store-method ZIP, plus an optional `scan-properties.xml` populated from
   source metadata.
-- `wsitools convert --to dicom` — **Phase 0 spike** (experimental). Emits a
-  single conformant DICOM-WSI VOLUME instance from a **DICOM source only**: one
-  pyramid level (`--level`, default `0` = full resolution), with the source's
-  compressed JPEG tiles copied **verbatim** (no decode/re-encode) and
-  re-encapsulated as TILED_FULL multi-frame PixelData. Validated with `dciodvfy`
-  (0 errors). Not yet a full converter — no full pyramid (instance per level)
-  and no non-DICOM sources; those are later phases.
+- `wsitools convert --to dicom` — **spike** (experimental). Emits a single
+  conformant DICOM-WSI VOLUME instance from a **DICOM or non-DICOM JPEG-baseline
+  source** (SVS etc.): one pyramid level (`--level`, default `0` = full
+  resolution), with the source level's compressed JPEG tiles copied **verbatim**
+  (no decode/re-encode) and re-encapsulated as TILED_FULL multi-frame PixelData.
+  `PhotometricInterpretation` is **marker-driven** — probed from the first tile's
+  JPEG markers (RGB for the Aperio APP14 raw-RGB variant, `YBR_FULL_422` /
+  `YBR_FULL` for subsampled / 4:4:4 YCbCr) — and the source ICC profile is carried
+  through or a canonical **sRGB** profile is synthesized when absent. Validated
+  with `dciodvfy` (0 errors) plus a pixel round-trip on CMU-1-Small-Region.svs.
+  Non-JPEG-baseline codecs (JPEG 2000 etc.) error clearly. Not yet a full
+  converter — **full pyramid** (one instance per level) and JPEG 2000 are later
+  slices.
 - `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
   40x → 20x), **format-preserving**: the output is the same container as the
   source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,
@@ -135,14 +141,14 @@ DICOM-WSI.
 | Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
 | COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
 | IFE           | ✓ | ✓ | — | ✓ | ✓ | ✓  | — | — | — |
-| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | P0⁶ | — | — |
+| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | P1⁶ | — | — |
 
 ¹ `extract` works when the slide carries that associated image (label/macro/thumbnail/overview); run `info` to list which.
 ² `hash`: `--mode pixel` works for every format; the default file-mode is a single-file SHA-256.
 ³ **convert (from)** — readable as a convert source. **✓\*** = striped source: opentile-go synthesizes a tile grid over the source strips, so `convert` decodes + re-encodes (reproducible JPEG tiles) rather than doing a bit-exact tile-copy. The lossless tile-copy fast path applies only to natively-tiled sources (plain ✓).
 ⁴ **convert (to)** — available as a convert output **target**. The full target set is `cog-wsi`, `svs`, `tiff` (→ generic-TIFF), `ome-tiff`, `dzi`, `szi`; **DZI and SZI** are output-only pyramid formats (not readable sources, so not listed as rows). All ✓ targets except `dzi`/`szi` also accept `--factor N` / `--target-mag M` to downsample during conversion (scales MPP ×N / magnification ÷N).
 ⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
-⁶ DICOM-WSI **write** is a **Phase 0 spike** — `convert --to dicom` emits a single conformant WSM VOLUME instance from a DICOM source (one level, verbatim JPEG tile-copy), validated with `dciodvfy` (0 errors). DICOM→DICOM only; full pyramid / non-DICOM sources are later phases.
+⁶ DICOM-WSI **write** is an early spike — `convert --to dicom` emits a single conformant WSM VOLUME instance from a DICOM **or** non-DICOM **JPEG-baseline** source (one level, verbatim tile-copy, marker-driven `PhotometricInterpretation`, ICC carried-or-synthesized), validated with `dciodvfy` (0 errors) plus an SVS→DICOM pixel round-trip. JPEG 2000 / other codecs and the full pyramid (instance per level) are later slices.
 ⁷ **label/macro remove|replace** — applies equally to `thumbnail` and `overview`. Pyramid tile bytes are copied verbatim (no decode/re-encode); only the tail IFD is rewritten.
 ⁸ **OME-TIFF editing is lossy** — rebuilds the file via `streamwriter` and regenerates a minimal OME-XML (instrument/acquisition/channel/vendor `OriginalMetadata` not preserved; pyramid pixels, geometry/MPP/magnification, ICC, and the other associated images are). An always-on runtime warning fires on every OME-TIFF edit. Associated replacements are **JPEG-only** (opentile-go's OME-TIFF reader limitation — LZW/Deflate replacements would be unreadable). See [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). For faithful OME metadata carry-through, use [Bio-Formats](https://www.openmicroscopy.org/bio-formats/).
 
