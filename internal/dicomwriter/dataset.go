@@ -267,6 +267,13 @@ func assembleWSMDataset(src source.Source, uids UIDSet, spec instanceSpec) (dico
 		mk(tag.NumberOfOpticalPaths, []int{1}),
 		mk(tag.TotalPixelMatrixFocalPlanes, []int{1}),
 
+		// ---- Slide Label (group 2200) — required when the image contains the
+		// label (SpecimenLabelInImage == "YES", i.e. LABEL/OVERVIEW flavors). Both
+		// Type 2: present-but-empty (anonymous re-emission). Filtered out below for
+		// instances that do not contain the label.
+		mk(tag.LabelText, []string{}),
+		mk(tag.BarcodeValue, []string{}),
+
 		// ---- Shared Functional Groups (group 5200) ----
 		mk(tag.SharedFunctionalGroupsSequence, [][]*dicom.Element{
 			{
@@ -290,16 +297,22 @@ func assembleWSMDataset(src source.Source, uids UIDSet, spec instanceSpec) (dico
 	if firstErr != nil {
 		return dicom.Dataset{}, firstErr
 	}
-	// Type 1C omissions: LossyImageCompressionRatio + Method only when "01";
-	// PlanarConfiguration only when SamplesPerPixel > 1.
+	// Conditional omissions: LossyImageCompressionRatio + Method are Type 1C (only
+	// when "01"); PlanarConfiguration is Type 1C (only when SamplesPerPixel > 1);
+	// the SlideLabel module (LabelText + BarcodeValue) is required only when the
+	// image contains the label (SpecimenLabelInImage == "YES").
 	mono := spec.SamplesPerPixel == 1
-	if !spec.Lossy || mono {
+	hasLabel := spec.SpecimenLabelInImage == "YES"
+	if !spec.Lossy || mono || !hasLabel {
 		kept := elems[:0]
 		for _, e := range elems {
 			if !spec.Lossy && (e.Tag == tag.LossyImageCompressionRatio || e.Tag == tag.LossyImageCompressionMethod) {
 				continue
 			}
 			if mono && e.Tag == tag.PlanarConfiguration {
+				continue
+			}
+			if !hasLabel && (e.Tag == tag.LabelText || e.Tag == tag.BarcodeValue) {
 				continue
 			}
 			kept = append(kept, e)

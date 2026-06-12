@@ -144,3 +144,43 @@ func firstStrA(t *testing.T, ds dicom.Dataset, tg tag.Tag) string {
 	}
 	return e.Value.GetValue().([]string)[0]
 }
+
+func TestSlideLabelModuleOnlyForLabelImages(t *testing.T) {
+	src := openGrundium(t)
+	defer src.Close()
+	uids := newSharedUIDs()
+	base := func(specimenLabel string) instanceSpec {
+		lvl := src.Levels()[0]
+		g := lvl.Grid()
+		return instanceSpec{
+			Size: lvl.Size(), TileSize: lvl.TileSize(), NumFrames: g.X * g.Y,
+			ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}, SpecimenLabelInImage: specimenLabel,
+			InstanceNumber:  1,
+			ImageDescriptor: ImageDescriptor{TransferSyntax: jpegBaselineTS, Photometric: "YBR_FULL_422", SamplesPerPixel: 3, ICCProfile: src.Metadata().ICCProfile, Lossy: true, LossyMethod: "ISO_10918_1", LossyRatio: 10.0},
+		}
+	}
+	// SpecimenLabelInImage=YES → SlideLabel module (LabelText + BarcodeValue) present.
+	uidsY := UIDSet{SOP: NewUID(), Study: uids.Study, Series: uids.Series, FrameOfReference: uids.FrameOfReference, DimensionOrg: uids.DimensionOrg}
+	dsY, err := assembleWSMDataset(src, uidsY, base("YES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dsY.FindElementByTag(tag.LabelText); err != nil {
+		t.Error("LabelText missing on a SpecimenLabelInImage=YES instance")
+	}
+	if _, err := dsY.FindElementByTag(tag.BarcodeValue); err != nil {
+		t.Error("BarcodeValue missing on a SpecimenLabelInImage=YES instance")
+	}
+	// SpecimenLabelInImage=NO (VOLUME / thumbnail) → SlideLabel module omitted.
+	uidsN := UIDSet{SOP: NewUID(), Study: uids.Study, Series: uids.Series, FrameOfReference: uids.FrameOfReference, DimensionOrg: uids.DimensionOrg}
+	dsN, err := assembleWSMDataset(src, uidsN, base("NO"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dsN.FindElementByTag(tag.LabelText); err == nil {
+		t.Error("LabelText present on a SpecimenLabelInImage=NO instance (must be omitted)")
+	}
+	if _, err := dsN.FindElementByTag(tag.BarcodeValue); err == nil {
+		t.Error("BarcodeValue present on a SpecimenLabelInImage=NO instance (must be omitted)")
+	}
+}
