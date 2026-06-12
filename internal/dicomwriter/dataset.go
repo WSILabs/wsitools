@@ -45,9 +45,9 @@ type UIDSet struct {
 // (ImageType, Modality, photometric/bit-depth fields, orientation, TILED_FULL,
 // anonymous identity, coded-sequence codes) are MIRRORED from the golden.
 // ImageDescriptor carries the codec/colorspace-dependent attributes that vary by
-// source. The caller (WriteVolumeInstance) derives these — probing a non-DICOM
-// source's JPEG, or using P0's fixed values for a DICOM source — so the assembler
-// stays a pure dataset builder.
+// source. The caller (writeInstance, via buildDescriptor) derives these — probing
+// a non-DICOM source's JPEG, or using P0's fixed values for a DICOM source — so
+// the assembler stays a pure dataset builder.
 type ImageDescriptor struct {
 	Photometric string   // PhotometricInterpretation: RGB | YBR_FULL_422 | YBR_FULL | MONOCHROME2
 	ImageType   []string // ImageType + FrameType value (4 elements)
