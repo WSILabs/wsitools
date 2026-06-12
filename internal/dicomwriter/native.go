@@ -42,8 +42,20 @@ func nativePixelData(rgb []byte, rows, cols, samples int) (*dicom.Element, error
 		InternalCols:            cols,
 		InternalBitsPerSample:   8,
 	}
-	return dicom.NewElement(tag.PixelData, dicom.PixelDataInfo{
+	el, err := dicom.NewElement(tag.PixelData, dicom.PixelDataInfo{
 		IsEncapsulated: false,
 		Frames:         []*frame.Frame{{Encapsulated: false, NativeData: nf}},
 	})
+	if err != nil {
+		return nil, err
+	}
+	// dicom.NewElement hardcodes VR "OW" (16-bit Other Word) for PixelData
+	// regardless of bit depth (element.go: `if t == tag.PixelData { rawVR = "OW" }`).
+	// Our samples are 8-bit, so DICOM requires VR "OB" (Other Byte): with OW a
+	// conformant reader (e.g. opentile) interprets the 8-bit buffer as 16-bit
+	// words and collapses every RGB triple to grayscale — a silently lossy
+	// transcode. Override to OB; PixelData's allowed VRs are {OB, OW}, so the
+	// write-side VR check accepts it.
+	el.RawValueRepresentation = "OB"
+	return el, nil
 }

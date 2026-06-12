@@ -66,4 +66,11 @@ func TestNativePixelDataRoundTrip(t *testing.T) {
 	if len(info.Frames) != 1 {
 		t.Fatalf("frame count = %d, want 1", len(info.Frames))
 	}
+	// VR must be OB for 8-bit native pixel data. dicom.NewElement hardcodes OW
+	// for PixelData; nativePixelData overrides it to OB. With OW a conformant
+	// reader (opentile) decodes the 8-bit buffer as 16-bit words and collapses
+	// RGB to grayscale — a silently lossy transcode. This guards that regression.
+	if vr := pd.RawValueRepresentation; vr != "OB" {
+		t.Errorf("PixelData VR = %q, want OB (8-bit native); OW would be read as 16-bit", vr)
+	}
 }
