@@ -255,3 +255,72 @@ func TestSVSToDICOMPixelRoundTrip(t *testing.T) {
 		t.Fatalf("pixel buffers differ in length: src=%d dcm=%d", len(srcImg.Pix), len(dcmImg.Pix))
 	}
 }
+
+func TestJP2KToDICOMPixelRoundTrip(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	svs := filepath.Join(dir, "svs", "JP2K-33003-1.svs")
+	if _, err := os.Stat(svs); err != nil {
+		t.Skip("no JP2K SVS fixture")
+	}
+
+	src, err := source.Open(svs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "jp2k.dcm")
+	f, err := os.Create(out)
+	if err != nil {
+		src.Close()
+		t.Fatal(err)
+	}
+	if err := dicomwriter.WriteVolumeInstance(f, src, 0, dicomwriter.Options{}); err != nil {
+		f.Close()
+		src.Close()
+		t.Fatalf("WriteVolumeInstance: %v", err)
+	}
+	f.Close()
+	src.Close()
+
+	back, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("source.Open(emitted dicom): %v", err)
+	}
+	if back.Format() != "dicom" {
+		t.Errorf("emitted Format = %q, want dicom", back.Format())
+	}
+	back.Close()
+
+	const w, h = 256, 256 // JP2K-33003-1 L0 tile size
+	decodeRGB := func(path string) *decoder.Image {
+		s, err := opentile.OpenFile(path)
+		if err != nil {
+			t.Fatalf("opentile.OpenFile(%s): %v", path, err)
+		}
+		defer s.Close()
+		img, err := s.ImageReadRegion(0, 0, 0, 0, w, h, opentile.WithFormat(decoder.PixelFormatRGB))
+		if err != nil {
+			t.Fatalf("ImageReadRegion(%s): %v", path, err)
+		}
+		return img
+	}
+	srcImg := decodeRGB(svs)
+	dcmImg := decodeRGB(out)
+	if srcImg.Width != dcmImg.Width || srcImg.Height != dcmImg.Height {
+		t.Fatalf("dim mismatch: src=%dx%d dcm=%dx%d", srcImg.Width, srcImg.Height, dcmImg.Width, dcmImg.Height)
+	}
+	if !bytes.Equal(srcImg.Pix, dcmImg.Pix) {
+		n := len(srcImg.Pix)
+		if len(dcmImg.Pix) < n {
+			n = len(dcmImg.Pix)
+		}
+		for i := 0; i < n; i++ {
+			if srcImg.Pix[i] != dcmImg.Pix[i] {
+				t.Fatalf("pixel mismatch at byte %d: src=%d dcm=%d (photometric/transfer-syntax likely wrong)", i, srcImg.Pix[i], dcmImg.Pix[i])
+			}
+		}
+		t.Fatalf("pixel buffers differ in length: src=%d dcm=%d", len(srcImg.Pix), len(dcmImg.Pix))
+	}
+}
