@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/opentile-go/decoder"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
 	"github.com/wsilabs/wsitools/internal/source"
 )
@@ -128,5 +130,79 @@ func TestConvertDICOMCommand(t *testing.T) {
 	defer dst.Close()
 	if got := dst.Format(); got != "dicom" {
 		t.Errorf("output Format() = %q, want \"dicom\"", got)
+	}
+}
+
+func TestSVSToDICOMPixelRoundTrip(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	svsPath := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(svsPath); err != nil {
+		t.Skip("no CMU SVS fixture")
+	}
+
+	// Emit SVS level 0 → DICOM.
+	src, err := source.Open(svsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "svs.dcm")
+	f, err := os.Create(out)
+	if err != nil {
+		src.Close()
+		t.Fatal(err)
+	}
+	if err := dicomwriter.WriteVolumeInstance(f, src, 0, dicomwriter.Options{}); err != nil {
+		f.Close()
+		src.Close()
+		t.Fatalf("WriteVolumeInstance: %v", err)
+	}
+	f.Close()
+	src.Close()
+
+	// Read back as DICOM (regression: it opens + reports as a DICOM slide).
+	back, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("source.Open(emitted dicom): %v", err)
+	}
+	if back.Format() != "dicom" {
+		t.Errorf("emitted Format = %q, want dicom", back.Format())
+	}
+	back.Close()
+
+	// Pixel round-trip: decode region (0,0,w,h) from both files and compare.
+	const w, h = 240, 240 // CMU L0 tile size; a single-tile region exercises frame 0
+	decodeRGB := func(path string) *decoder.Image {
+		s, err := opentile.OpenFile(path)
+		if err != nil {
+			t.Fatalf("opentile.OpenFile(%s): %v", path, err)
+		}
+		defer s.Close()
+		img, err := s.ImageReadRegion(0, 0, 0, 0, w, h, opentile.WithFormat(decoder.PixelFormatRGB))
+		if err != nil {
+			t.Fatalf("ImageReadRegion(%s): %v", path, err)
+		}
+		return img
+	}
+	srcImg := decodeRGB(svsPath)
+	dcmImg := decodeRGB(out)
+
+	if srcImg.Width != dcmImg.Width || srcImg.Height != dcmImg.Height {
+		t.Fatalf("dim mismatch: src=%dx%d dcm=%dx%d", srcImg.Width, srcImg.Height, dcmImg.Width, dcmImg.Height)
+	}
+	// Verbatim copy + matching photometric ⇒ byte-identical decoded RGB.
+	if !bytes.Equal(srcImg.Pix, dcmImg.Pix) {
+		n := len(srcImg.Pix)
+		if len(dcmImg.Pix) < n {
+			n = len(dcmImg.Pix)
+		}
+		for i := 0; i < n; i++ {
+			if srcImg.Pix[i] != dcmImg.Pix[i] {
+				t.Fatalf("pixel mismatch at byte %d: src=%d dcm=%d (colorspace/photometric likely wrong)", i, srcImg.Pix[i], dcmImg.Pix[i])
+			}
+		}
+		t.Fatalf("pixel buffers differ in length: src=%d dcm=%d", len(srcImg.Pix), len(dcmImg.Pix))
 	}
 }

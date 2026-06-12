@@ -16,7 +16,10 @@ import (
 // encapsulated PixelData element.
 //
 // For a DICOM source, TileInto returns the raw encapsulated JPEG frame bytes
-// exactly as stored, so the copy is byte-for-byte.
+// exactly as stored, so the copy is byte-for-byte — except an odd-length frame
+// is padded with a trailing 0x00 to satisfy DICOM's even-length fragment
+// requirement (PS3.5 §7.5/§A.4). Pixel content is unchanged, since JPEG decoders
+// stop at the EOI marker.
 //
 // The returned Element is HAND-BUILT (VR "OB", undefined length) rather than
 // constructed via dicom.NewElement(tag.PixelData, ...): NewElement forces
@@ -44,6 +47,13 @@ func encapsulatePixelData(src source.Source, level int) (*dicom.Element, int64, 
 			// Copy out of the reused buffer before the next iteration overwrites it.
 			data := append([]byte(nil), buf[:n]...)
 			totalBytes += int64(n)
+			// DICOM encapsulated fragment Items must have even length
+			// (PS3.5 §7.5/§A.4). Pad an odd-length JPEG frame with a
+			// trailing 0x00; decoders ignore bytes after the EOI marker,
+			// so pixel data is preserved verbatim.
+			if len(data)%2 != 0 {
+				data = append(data, 0x00)
+			}
 			frames = append(frames, &frame.Frame{
 				Encapsulated:     true,
 				EncapsulatedData: frame.EncapsulatedFrame{Data: data},
