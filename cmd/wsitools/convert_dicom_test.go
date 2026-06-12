@@ -182,6 +182,85 @@ func TestConvertDICOMPyramidCommand(t *testing.T) {
 	}
 }
 
+func TestConvertDICOMPyramidAssociated(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	svs := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(svs); err != nil {
+		t.Skip("no CMU SVS fixture")
+	}
+	src, err := source.Open(svs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only JPEG/JPEG2000 associated images are emitted; others (e.g. CMU's LZW
+	// label) are skipped. Collect the types that should produce a <type>.dcm.
+	var wantTypes, skipTypes []string
+	for _, a := range src.Associated() {
+		c := a.Compression()
+		if c == source.CompressionJPEG || c == source.CompressionJPEG2000 {
+			wantTypes = append(wantTypes, a.Type())
+		} else {
+			skipTypes = append(skipTypes, a.Type())
+		}
+	}
+	src.Close()
+	if len(wantTypes) == 0 {
+		t.Skip("fixture has no JPEG/JP2K associated images")
+	}
+
+	out := filepath.Join(t.TempDir(), "pyr")
+	convertCmd.Flags().Lookup("level").Changed = false
+	cvOutput, cvForce, cvNoAssociated = "", false, false
+	rootCmd.SetArgs([]string{"convert", "--to", "dicom", "-o", out, svs})
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		convertCmd.Flags().Lookup("level").Changed = false
+		cvNoAssociated = false
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("convert --to dicom: %v", err)
+	}
+	// Emitted associated images: <type>.dcm exists and opens as a DICOM source.
+	for _, typ := range wantTypes {
+		p := filepath.Join(out, typ+".dcm")
+		s, err := source.Open(p)
+		if err != nil {
+			t.Errorf("emitted associated %s.dcm: %v", typ, err)
+			continue
+		}
+		if s.Format() != "dicom" {
+			t.Errorf("%s.dcm Format = %q, want dicom", typ, s.Format())
+		}
+		s.Close()
+	}
+	// Skipped (non-JPEG) associated images leave no file.
+	for _, typ := range skipTypes {
+		if _, err := os.Stat(filepath.Join(out, typ+".dcm")); err == nil {
+			t.Errorf("skipped associated %s left a %s.dcm file", typ, typ)
+		}
+	}
+
+	// --no-associated: only level-<n>.dcm, no associated files at all.
+	out2 := filepath.Join(t.TempDir(), "pyr2")
+	convertCmd.Flags().Lookup("level").Changed = false
+	cvOutput, cvForce, cvNoAssociated = "", false, true
+	rootCmd.SetArgs([]string{"convert", "--to", "dicom", "--no-associated", "-o", out2, svs})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("convert --no-associated: %v", err)
+	}
+	for _, typ := range append(wantTypes, skipTypes...) {
+		if _, err := os.Stat(filepath.Join(out2, typ+".dcm")); err == nil {
+			t.Errorf("--no-associated still wrote %s.dcm", typ)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out2, "level-0.dcm")); err != nil {
+		t.Errorf("--no-associated should still write level-0.dcm: %v", err)
+	}
+}
+
 func TestSVSToDICOMPixelRoundTrip(t *testing.T) {
 	dir := os.Getenv("WSI_TOOLS_TESTDIR")
 	if dir == "" {
