@@ -43,7 +43,12 @@ func TestAssembleWSMDataset(t *testing.T) {
 		FrameOfReference: NewUID(),
 		DimensionOrg:     NewUID(),
 	}
-	ds, err := assembleWSMDataset(src, level, uids, 10.0)
+	ds, err := assembleWSMDataset(src, level, uids, ImageDescriptor{
+		Photometric: "YBR_FULL_422",
+		ImageType:   []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+		ICCProfile:  src.Metadata().ICCProfile, // Grundium fixture carries an ICC profile
+		LossyRatio:  10.0,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

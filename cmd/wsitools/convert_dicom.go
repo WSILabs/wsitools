@@ -20,7 +20,8 @@ func init() {
 }
 
 // runConvertDICOM emits ONE DICOM WSM VOLUME instance for a single pyramid
-// level of a DICOM source, copying compressed JPEG frames verbatim (P0).
+// level of a DICOM or non-DICOM source whose tiles are JPEG-baseline, copying
+// the compressed JPEG tiles verbatim (Phase 1).
 func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 	if cvOutput == "" {
 		return fmt.Errorf("-o/--output is required")
