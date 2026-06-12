@@ -52,8 +52,30 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   non-L0 path, which previously emitted base-MPP spacing and a shrunken extent).
   `dciodvfy` reports **0 errors** on **every** level of the Grundium full pyramid
   (L0/L1/L2) and on the SVS instance; `make dicom-validate` now emits + validates
-  the whole pyramid. Still pending: **JPEG 2000 / other codecs**, and
-  label/overview/thumbnail as separate DICOM instances — later slices.
+  the whole pyramid.
+  **Phase 1, third slice:** `convert --to dicom` now also accepts **JPEG 2000**
+  sources (previously JPEG-baseline only; other codecs errored). The source
+  level's raw J2K codestream is tile-copied **verbatim** (no decode/re-encode),
+  on both the single-instance and full-pyramid paths. The transfer syntax is
+  **reversibility-driven**: a reversible/lossless source emits `1.2.840.10008.1.2.4.90`
+  (JPEG 2000 Lossless Only) with `LossyImageCompression "00"` (ratio/method
+  omitted); an irreversible/lossy source emits `1.2.840.10008.1.2.4.91`
+  (JPEG 2000) with `LossyImageCompression "01"` + method `ISO_15444_1`. A new
+  `jp2kmeta` parser reads the codestream's SIZ/COD markers to derive
+  `PhotometricInterpretation` — **RGB** (no multi-component transform),
+  `YBR_ICT` / `YBR_RCT` (irreversible / reversible MCT), or **MONOCHROME2**
+  (1 component). `dciodvfy` reports **0 errors** on **every** level of the
+  JP2K-33003-1.svs full pyramid (RGB / `.91` / lossy) and a pixel round-trip
+  confirms the RGB path is colour-correct. Also fixes a general
+  **DS-VR PixelSpacing length** bug (new `formatDS` helper): non-power-of-2
+  level ratios combined with a non-round MPP previously produced 21-char
+  `PixelSpacing` values that exceeded DICOM's DS VR 16-char limit and `dciodvfy`
+  rejected; values are now formatted to fit (Grundium/SVS output unchanged, their
+  values were already short). **Honestly stated limitation:** the `YBR_ICT` /
+  `YBR_RCT` (MCT=1) and `.90` / lossless branches are **unit-tested but not yet
+  e2e-validated** (no MCT=1 / lossless JP2K fixture); >8-bit JP2K and `.jp2`-boxed
+  inputs remain out of scope. Still pending: label/overview/thumbnail as separate
+  DICOM instances — a later slice.
 
 ## [0.22.0] — 2026-06-07
 

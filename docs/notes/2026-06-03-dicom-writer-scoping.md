@@ -226,6 +226,60 @@ reduced Grundium levels confirms the scaled spacing is conformant.
 instances** (label/overview/thumbnail as separate DICOM instances — P2);
 TILED_SPARSE / Concatenations (P2); fluorescence (P3).
 
+## Phase 1 — slice 3 outcome (2026-06-11)
+
+**DONE — JPEG 2000 tile-copy SHIPPED.** `convert --to dicom` now also accepts
+**JPEG 2000** sources (previously JPEG-baseline only; other codecs errored), on
+both the single-instance (`--level N`) and full-pyramid (`-o <dir>`) paths. The
+source level's raw J2K codestream is tile-copied **verbatim** — no
+decode/re-encode, same as the JPEG-baseline path.
+
+### Codestream-derived photometric: the `jp2kmeta` parser
+
+A new `jp2kmeta` parser reads the J2K codestream markers (not a `.jp2` box
+wrapper) to derive `PhotometricInterpretation`:
+
+- **SIZ marker** → component count `Csiz` (read at offset **34** within the SIZ
+  segment). 1 component → **MONOCHROME2**.
+- **COD marker** → the **multiple-component-transformation** byte (**MCT @ offset
+  4** in the COD segment) and the **wavelet transform** byte (**@ offset 9**:
+  9-7 irreversible vs. 5-3 reversible). MCT = 0 → **RGB**; MCT = 1 with the
+  irreversible (9-7) transform → **YBR_ICT**; MCT = 1 with the reversible (5-3)
+  transform → **YBR_RCT**.
+
+### Reversibility-driven transfer syntax + conditional tag omission
+
+- Reversible/lossless source → `1.2.840.10008.1.2.4.90` (JPEG 2000 Lossless
+  Only) + `LossyImageCompression "00"`, with `LossyImageCompressionRatio` /
+  `LossyImageCompressionMethod` **omitted**.
+- Irreversible/lossy source → `1.2.840.10008.1.2.4.91` (JPEG 2000) +
+  `LossyImageCompression "01"` + method `ISO_15444_1`.
+- For the **MONOCHROME2** (1-component) case `PlanarConfiguration` is a Type-1C
+  attribute that does not apply and is **omitted**.
+
+### DS-VR PixelSpacing-length fix (general, surfaced by this fixture)
+
+JP2K-33003-1.svs surfaced a general bug: a **non-round MPP** combined with the
+**non-integer downsample ratios** of non-power-of-2 pyramid levels produced
+`PixelSpacing` values up to **21 chars**, exceeding DICOM's **DS VR 16-char
+limit** — `dciodvfy` rejected them. A new `formatDS` helper formats DS values
+to fit the 16-char budget; this affects **all** sources (Grundium/SVS output is
+unchanged because their values were already short).
+
+### Validation
+
+`dciodvfy` reports **0 errors** on **every** level of the JP2K-33003-1.svs full
+pyramid (RGB / `.91` / lossy), and a pixel round-trip confirms the **RGB** path
+is colour-correct (decode the emitted DICOM honoring its photometric →
+byte-correct RGB). The **`YBR_ICT` / `YBR_RCT` (MCT=1)** and **`.90` / lossless**
+branches are **unit-tested only** — there is no MCT=1 / lossless JP2K fixture to
+e2e-validate them yet.
+
+**Remaining:** **HTJ2K** and **16-bit** JPEG 2000; **`.jp2`-boxed** inputs
+(box-wrapped rather than raw codestream); **associated-image instances**
+(label/overview/thumbnail as separate DICOM instances — P2); TILED_SPARSE /
+Concatenations (P2); fluorescence (P3).
+
 ## Open questions for the eventual spec
 
 - Transfer syntax policy: tile-copy (reuse source JPEG) vs. re-encode; which

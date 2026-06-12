@@ -2,6 +2,7 @@ package dicomwriter
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/suyashkumar/dicom"
@@ -9,6 +10,24 @@ import (
 
 	"github.com/wsilabs/wsitools/internal/source"
 )
+
+// formatDS formats a float64 as a DICOM DS (Decimal String) value guaranteed to
+// fit the VR's 16-character limit. It uses the shortest round-tripping form, then
+// reduces significant digits until it fits — non-integer per-level downsample
+// ratios (e.g. an SVS whose level sizes aren't exact powers of two) can otherwise
+// yield 20+ char PixelSpacing values that dciodvfy rejects.
+func formatDS(v float64) string {
+	s := strconv.FormatFloat(v, 'g', -1, 64)
+	if len(s) <= 16 {
+		return s
+	}
+	for prec := 15; prec >= 1; prec-- {
+		if s = strconv.FormatFloat(v, 'g', prec, 64); len(s) <= 16 {
+			return s
+		}
+	}
+	return s[:16]
+}
 
 // writerSoftware is the value emitted for Manufacturer / SoftwareVersions.
 // dicomwriter is an internal/ package and cannot import package main (the
@@ -19,6 +38,8 @@ const writerSoftware = "wsitools"
 const (
 	wsmSOPClassUID = "1.2.840.10008.5.1.4.1.1.77.1.6" // VLWholeSlideMicroscopyImageStorage
 	jpegBaselineTS = "1.2.840.10008.1.2.4.50"         // JPEG Baseline (Process 1)
+	jp2kLosslessTS = "1.2.840.10008.1.2.4.90"         // JPEG 2000 (Lossless Only)
+	jp2kTS         = "1.2.840.10008.1.2.4.91"         // JPEG 2000 Image Compression
 )
 
 // UIDSet holds the generated UIDs for one instance. The caller populates these
@@ -46,13 +67,17 @@ type UIDSet struct {
 // anonymous identity, coded-sequence codes) are MIRRORED from the golden.
 // ImageDescriptor carries the codec/colorspace-dependent attributes that vary by
 // source. The caller (writeInstance, via buildDescriptor) derives these — probing
-// a non-DICOM source's JPEG, or using P0's fixed values for a DICOM source — so
-// the assembler stays a pure dataset builder.
+// a non-DICOM source's codestream, or using P0's fixed values for a DICOM source —
+// so the assembler stays a pure dataset builder.
 type ImageDescriptor struct {
-	Photometric string   // PhotometricInterpretation: RGB | YBR_FULL_422 | YBR_FULL | MONOCHROME2
-	ImageType   []string // ImageType + FrameType value (4 elements)
-	ICCProfile  []byte   // carried or synthesized; non-empty for color
-	LossyRatio  float64  // LossyImageCompressionRatio
+	TransferSyntax  string   // 1.2.840.10008.1.2.4.{50|90|91}
+	Photometric     string   // RGB | YBR_FULL_422 | YBR_FULL | YBR_ICT | YBR_RCT | MONOCHROME2
+	SamplesPerPixel int      // 1 or 3
+	ImageType       []string // ImageType + FrameType value (4 elements)
+	ICCProfile      []byte   // carried or synthesized; non-empty for color
+	Lossy           bool     // LossyImageCompression "01" (true) vs "00" (false)
+	LossyMethod     string   // "ISO_10918_1" | "ISO_15444_1" (empty when lossless)
+	LossyRatio      float64  // emitted only when Lossy
 }
 
 func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDescriptor) (dicom.Dataset, error) {
@@ -86,6 +111,10 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 
 	// LossyImageCompressionRatio (Type 1C, DS, ≤16 chars) — %.4g keeps it compact.
 	ratioStr := fmt.Sprintf("%.4g", desc.LossyRatio)
+	lossyFlag := "00"
+	if desc.Lossy {
+		lossyFlag = "01"
+	}
 
 	grid := lvl.Grid()
 	size := lvl.Size()
@@ -174,7 +203,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		mk(tag.FileMetaInformationVersion, []byte{0x00, 0x01}),
 		mk(tag.MediaStorageSOPClassUID, []string{wsmSOPClassUID}),
 		mk(tag.MediaStorageSOPInstanceUID, []string{uids.SOP}),
-		mk(tag.TransferSyntaxUID, []string{jpegBaselineTS}),
+		mk(tag.TransferSyntaxUID, []string{desc.TransferSyntax}),
 		mk(tag.ImplementationClassUID, []string{NewUID()}),
 
 		// ---- General / SOP Common (group 0008) ----
@@ -221,7 +250,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		mk(tag.DimensionOrganizationType, []string{"TILED_FULL"}),
 
 		// ---- Image Pixel / WSM frame descriptors (group 0028) ----
-		mk(tag.SamplesPerPixel, []int{3}),
+		mk(tag.SamplesPerPixel, []int{desc.SamplesPerPixel}),
 		mk(tag.PhotometricInterpretation, []string{desc.Photometric}),
 		mk(tag.PlanarConfiguration, []int{0}),
 		mk(tag.NumberOfFrames, []string{fmt.Sprintf("%d", numFrames)}),
@@ -232,9 +261,9 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		mk(tag.HighBit, []int{7}),
 		mk(tag.PixelRepresentation, []int{0}),
 		mk(tag.BurnedInAnnotation, []string{"NO"}),
-		mk(tag.LossyImageCompression, []string{"01"}),
+		mk(tag.LossyImageCompression, []string{lossyFlag}),
 		mk(tag.LossyImageCompressionRatio, []string{ratioStr}),
-		mk(tag.LossyImageCompressionMethod, []string{"ISO_10918_1"}),
+		mk(tag.LossyImageCompressionMethod, []string{desc.LossyMethod}),
 
 		// ---- Specimen (group 0040) ----
 		mk(tag.ContainerIdentifier, []string{"WSITOOLS"}),
@@ -279,10 +308,10 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 				mk(tag.PixelMeasuresSequence, [][]*dicom.Element{
 					{
 						mk(tag.SliceThickness, []string{"0.001"}),
-						// PixelSpacing is row\col == Y\X (DS).
+						// PixelSpacing is row\col == Y\X (DS, ≤16 chars).
 						mk(tag.PixelSpacing, []string{
-							fmt.Sprintf("%g", psY),
-							fmt.Sprintf("%g", psX),
+							formatDS(psY),
+							formatDS(psX),
 						}),
 					},
 				}),
@@ -295,6 +324,24 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 
 	if firstErr != nil {
 		return dicom.Dataset{}, firstErr
+	}
+	// Type 1C omissions: LossyImageCompressionRatio + Method are present only when
+	// LossyImageCompression == "01" (so omitted for a lossless instance);
+	// PlanarConfiguration is present only when SamplesPerPixel > 1 (so omitted for
+	// a single-component MONOCHROME2 instance).
+	mono := desc.SamplesPerPixel == 1
+	if !desc.Lossy || mono {
+		kept := elems[:0]
+		for _, e := range elems {
+			if !desc.Lossy && (e.Tag == tag.LossyImageCompressionRatio || e.Tag == tag.LossyImageCompressionMethod) {
+				continue
+			}
+			if mono && e.Tag == tag.PlanarConfiguration {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		elems = kept
 	}
 	return dicom.Dataset{Elements: elems}, nil
 }
