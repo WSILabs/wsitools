@@ -67,8 +67,21 @@ type AssociatedSpec struct {
 	Photometric     uint16
 	BitsPerSample   []uint16
 	SamplesPerPixel uint16
-	Bytes           []byte // verbatim compressed payload
-	Tiled           bool   // (informational; associated IFDs always use strips in v0.1)
+	// Strips are the per-strip compressed payloads, in document order, written
+	// verbatim. Faithful associated copy (WSILabs/wsitools#1) requires the
+	// original multi-strip layout to be preserved alongside Predictor/JPEGTables.
+	Strips [][]byte
+	// Bytes is the deprecated single-payload form. When Strips is empty and
+	// Bytes is non-nil, AddAssociated normalizes it into a single strip.
+	Bytes []byte // Deprecated: use Strips.
+	// Predictor is TIFF tag 317 (1 none / 2 horizontal differencing). Emitted
+	// only when > 1 (required to faithfully reproduce LZW+Predictor labels).
+	Predictor uint16
+	// JPEGTables is TIFF tag 347 (abbreviated-JPEG DQT/DHT). Emitted when non-nil.
+	JPEGTables []byte
+	// RowsPerStrip is TIFF tag 278. 0 ⇒ Height (single strip semantics).
+	RowsPerStrip uint32
+	Tiled        bool // (informational; associated IFDs always use strips in v0.1)
 }
 
 // Writer is the public handle for a COG-WSI file under construction.
@@ -171,6 +184,11 @@ func (w *Writer) AddAssociated(spec AssociatedSpec) error {
 	if err := validateAssocType(spec.Type); err != nil {
 		return err
 	}
+	// Transitional shim: callers that still set the deprecated single Bytes
+	// payload are normalized into a one-strip spec.
+	if len(spec.Strips) == 0 && len(spec.Bytes) > 0 {
+		spec.Strips = [][]byte{spec.Bytes}
+	}
 	w.assoc = append(w.assoc, assocSpooled{spec: spec})
 	return nil
 }
@@ -233,8 +251,14 @@ func (w *Writer) Close() error {
 		})
 	}
 	for _, a := range w.assoc {
+		stripBytes := make([]uint32, len(a.spec.Strips))
+		for j, s := range a.spec.Strips {
+			stripBytes[j] = uint32(len(s))
+		}
 		in.Associated = append(in.Associated, associatedLayoutInput{
-			Bytes:       uint32(len(a.spec.Bytes)),
+			StripBytes:  stripBytes,
+			JPEGTables:  uint32(len(a.spec.JPEGTables)),
+			Predictor:   a.spec.Predictor,
 			Width:       a.spec.Width,
 			Height:      a.spec.Height,
 			Compression: a.spec.Compression,
@@ -366,11 +390,16 @@ func (w *Writer) Close() error {
 		}
 	}
 
-	// Write associated images.
+	// Write associated images. Strips are concatenated contiguously starting at
+	// the planned DataOffset, in document order.
 	for i, a := range w.assoc {
-		if _, err := w.out.WriteAt(a.spec.Bytes, int64(plan.Associated[i].DataOffset)); err != nil {
-			w.abortInternal()
-			return fmt.Errorf("write assoc %d: %w", i, err)
+		cur := int64(plan.Associated[i].DataOffset)
+		for _, strip := range a.spec.Strips {
+			if _, err := w.out.WriteAt(strip, cur); err != nil {
+				w.abortInternal()
+				return fmt.Errorf("write assoc %d: %w", i, err)
+			}
+			cur += int64(len(strip))
 		}
 	}
 
@@ -540,17 +569,24 @@ func l0MetadataExternalBytes(opts Options) uint64 {
 }
 
 // populateAssocIFD fills a tiff.EntryBuilder for an associated image. Associated
-// images use strip-based encoding (1 strip covering the full image).
-// In classic-TIFF mode it returns an error if the data offset or byte count
-// would overflow a uint32; in BigTIFF mode it uses LONG8 for both fields.
+// images use strip-based encoding, preserving the source's multi-strip layout
+// (StripOffsets/StripByteCounts arrays) plus Predictor (317) and JPEGTables
+// (347) when present, so LZW+Predictor labels round-trip faithfully (#1).
+// In classic-TIFF mode it returns an error if any strip offset or the total
+// data length would overflow a uint32; in BigTIFF mode it uses LONG8 offsets.
 func populateAssocIFD(b *tiff.EntryBuilder, bigtiff bool, spec AssociatedSpec, dataOffset uint64) error {
-	if !bigtiff {
-		if dataOffset > 0xFFFFFFFF {
-			return fmt.Errorf("cogwsi: associated image data offset %d overflows classic TIFF", dataOffset)
-		}
-		if uint64(len(spec.Bytes)) > 0xFFFFFFFF {
-			return fmt.Errorf("cogwsi: associated image byte count %d overflows classic TIFF", len(spec.Bytes))
-		}
+	// Compute per-strip absolute offsets and byte counts from the running data
+	// cursor, then validate classic-TIFF range against the final cursor.
+	offs := make([]uint64, len(spec.Strips))
+	cnts := make([]uint64, len(spec.Strips))
+	cur := dataOffset
+	for i, s := range spec.Strips {
+		offs[i] = cur
+		cnts[i] = uint64(len(s))
+		cur += uint64(len(s))
+	}
+	if !bigtiff && cur > 0xFFFFFFFF {
+		return fmt.Errorf("cogwsi: associated image data offset/length %d overflows classic TIFF", cur)
 	}
 	b.AddLong(254 /*NewSubfileType*/, []uint32{1})
 	b.AddLong(256, []uint32{spec.Width})
@@ -566,14 +602,23 @@ func populateAssocIFD(b *tiff.EntryBuilder, bigtiff bool, spec AssociatedSpec, d
 	}
 	b.AddShort(277, []uint16{spec.SamplesPerPixel})
 	b.AddShort(284, []uint16{1})
-	if bigtiff {
-		b.AddLong8(273 /*StripOffsets*/, []uint64{dataOffset})
-		b.AddLong8(279 /*StripByteCounts*/, []uint64{uint64(len(spec.Bytes))})
-	} else {
-		b.AddLong(273 /*StripOffsets*/, []uint32{uint32(dataOffset)})
-		b.AddLong(279 /*StripByteCounts*/, []uint32{uint32(len(spec.Bytes))})
+	if err := b.AddTileOffsets(273 /*StripOffsets*/, offs); err != nil {
+		return err
 	}
-	b.AddLong(278 /*RowsPerStrip*/, []uint32{spec.Height})
+	if err := b.AddTileOffsets(279 /*StripByteCounts*/, cnts); err != nil {
+		return err
+	}
+	rps := spec.RowsPerStrip
+	if rps == 0 {
+		rps = spec.Height
+	}
+	b.AddLong(278 /*RowsPerStrip*/, []uint32{rps})
+	if spec.Predictor > 1 {
+		b.AddShort(tiff.TagPredictor, []uint16{spec.Predictor})
+	}
+	if len(spec.JPEGTables) > 0 {
+		b.AddUndefined(tiff.TagJPEGTables, spec.JPEGTables)
+	}
 	b.AddASCII(tiff.TagWSIImageType, spec.Type)
 	return nil
 }
