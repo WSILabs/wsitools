@@ -45,9 +45,9 @@ type UIDSet struct {
 // (ImageType, Modality, photometric/bit-depth fields, orientation, TILED_FULL,
 // anonymous identity, coded-sequence codes) are MIRRORED from the golden.
 // ImageDescriptor carries the codec/colorspace-dependent attributes that vary by
-// source. The caller (WriteVolumeInstance) derives these — probing a non-DICOM
-// source's JPEG, or using P0's fixed values for a DICOM source — so the assembler
-// stays a pure dataset builder.
+// source. The caller (writeInstance, via buildDescriptor) derives these — probing
+// a non-DICOM source's JPEG, or using P0's fixed values for a DICOM source — so
+// the assembler stays a pure dataset builder.
 type ImageDescriptor struct {
 	Photometric string   // PhotometricInterpretation: RGB | YBR_FULL_422 | YBR_FULL | MONOCHROME2
 	ImageType   []string // ImageType + FrameType value (4 elements)
@@ -92,8 +92,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 	tileSize := lvl.TileSize()
 	numFrames := grid.X * grid.Y
 
-	// PixelSpacing in mm = MPP(µm) / 1000. Fall back to 0 when unknown; the
-	// golden carries a real value, so prefer per-axis when available.
+	// Base (level-0) MPP in µm/px, with the per-axis → symmetric fallback.
 	mppX, mppY := md.MPPX, md.MPPY
 	if mppX == 0 {
 		mppX = md.MPP
@@ -101,12 +100,25 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 	if mppY == 0 {
 		mppY = md.MPP
 	}
-	psX := mppX / 1000.0 // mm/px, column spacing
-	psY := mppY / 1000.0 // mm/px, row spacing
+	// PixelSpacing must scale by THIS level's downsample factor relative to L0 (a
+	// reduced level has coarser spacing). The physical ImagedVolume extent is
+	// CONSTANT across levels (same slide area) — derive both from L0 so every
+	// pyramid instance is spatially co-registered. When MPP is unknown (0),
+	// spacing and extent fall back to 0 as before.
+	l0Size := src.Levels()[0].Size()
+	dsX, dsY := 1.0, 1.0
+	if size.X > 0 {
+		dsX = float64(l0Size.X) / float64(size.X)
+	}
+	if size.Y > 0 {
+		dsY = float64(l0Size.Y) / float64(size.Y)
+	}
+	psX := mppX * dsX / 1000.0 // mm/px at this level, column spacing
+	psY := mppY * dsY / 1000.0 // mm/px at this level, row spacing
 
-	// ImagedVolume dimensions (mm) = matrix pixels × pixel spacing.
-	imagedW := float64(size.X) * psX
-	imagedH := float64(size.Y) * psY
+	// ImagedVolume (mm) = L0 matrix pixels × base MPP — the constant slide extent.
+	imagedW := float64(l0Size.X) * mppX / 1000.0
+	imagedH := float64(l0Size.Y) * mppY / 1000.0
 
 	// mk wraps NewElement, accumulating the first error.
 	var firstErr error

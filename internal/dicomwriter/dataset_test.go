@@ -1,6 +1,8 @@
 package dicomwriter
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -159,5 +161,102 @@ func TestAssembleWSMDataset(t *testing.T) {
 		if !foundICC {
 			t.Error("ICCProfile not carried into OpticalPathSequence item")
 		}
+	}
+}
+
+// imagedVolumeWidth reads the top-level ImagedVolumeWidth (FL) from ds.
+func imagedVolumeWidth(t *testing.T, ds dicom.Dataset) float64 {
+	t.Helper()
+	e, err := ds.FindElementByTag(tag.ImagedVolumeWidth)
+	if err != nil {
+		t.Fatalf("ImagedVolumeWidth: %v", err)
+	}
+	vs, ok := e.Value.GetValue().([]float64)
+	if !ok || len(vs) == 0 {
+		t.Fatalf("ImagedVolumeWidth value is %T", e.Value.GetValue())
+	}
+	return vs[0]
+}
+
+// pixelSpacingYX reads PixelSpacing (DS, row\col = Y\X) from the nested
+// SharedFunctionalGroupsSequence → PixelMeasuresSequence.
+func pixelSpacingYX(t *testing.T, ds dicom.Dataset) (psY, psX float64) {
+	t.Helper()
+	sfg, err := ds.FindElementByTag(tag.SharedFunctionalGroupsSequence)
+	if err != nil {
+		t.Fatalf("SharedFunctionalGroupsSequence: %v", err)
+	}
+	items := sfg.Value.GetValue().([]*dicom.SequenceItemValue)
+	for _, el := range items[0].GetValue().([]*dicom.Element) {
+		if el.Tag != tag.PixelMeasuresSequence {
+			continue
+		}
+		pm := el.Value.GetValue().([]*dicom.SequenceItemValue)
+		for _, pe := range pm[0].GetValue().([]*dicom.Element) {
+			if pe.Tag == tag.PixelSpacing {
+				vs := pe.Value.GetValue().([]string)
+				fmt.Sscanf(vs[0], "%g", &psY)
+				fmt.Sscanf(vs[1], "%g", &psX)
+				return psY, psX
+			}
+		}
+	}
+	t.Fatal("PixelSpacing not found")
+	return 0, 0
+}
+
+func TestPerLevelSpatialMetadata(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	p := filepath.Join(dir, "dicom", "scan_621_grundium_dicom")
+	if _, err := os.Stat(p); err != nil {
+		t.Skip("no dicom fixture")
+	}
+	src, err := source.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	if len(src.Levels()) < 2 {
+		t.Skip("need >= 2 levels")
+	}
+	last := len(src.Levels()) - 1
+
+	desc := ImageDescriptor{
+		Photometric: "YBR_FULL_422",
+		ImageType:   []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+		ICCProfile:  src.Metadata().ICCProfile,
+		LossyRatio:  10.0,
+	}
+	uids := UIDSet{SOP: NewUID(), Study: NewUID(), Series: NewUID(), FrameOfReference: NewUID(), DimensionOrg: NewUID()}
+
+	ds0, err := assembleWSMDataset(src, 0, uids, desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dsN, err := assembleWSMDataset(src, last, uids, desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Physical extent must be CONSTANT across levels.
+	iv0 := imagedVolumeWidth(t, ds0)
+	ivN := imagedVolumeWidth(t, dsN)
+	if iv0 <= 0 {
+		t.Fatalf("ImagedVolumeWidth at L0 = %g (want > 0; fixture should carry MPP)", iv0)
+	}
+	if math.Abs(iv0-ivN) > iv0*1e-6 {
+		t.Errorf("ImagedVolumeWidth not constant across levels: L0=%g L%d=%g", iv0, last, ivN)
+	}
+
+	// PixelSpacing at a reduced level must scale by its downsample factor.
+	_, ps0 := pixelSpacingYX(t, ds0)
+	_, psN := pixelSpacingYX(t, dsN)
+	downsample := float64(src.Levels()[0].Size().X) / float64(src.Levels()[last].Size().X)
+	want := ps0 * downsample
+	if math.Abs(psN-want) > want*0.01 {
+		t.Errorf("L%d PixelSpacing(X)=%g, want ~%g (L0 %g × downsample %g)", last, psN, want, ps0, downsample)
 	}
 }

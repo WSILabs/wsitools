@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	opentile "github.com/wsilabs/opentile-go"
@@ -130,6 +131,54 @@ func TestConvertDICOMCommand(t *testing.T) {
 	defer dst.Close()
 	if got := dst.Format(); got != "dicom" {
 		t.Errorf("output Format() = %q, want \"dicom\"", got)
+	}
+}
+
+func TestConvertDICOMPyramidCommand(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	svs := filepath.Join(dir, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(svs); err != nil {
+		t.Skip("no CMU SVS fixture")
+	}
+
+	src, err := source.Open(svs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := len(src.Levels())
+	src.Close()
+
+	out := filepath.Join(t.TempDir(), "pyramid")
+	// The pyramid path requires --level NOT set; cobra persists Changed across
+	// Execute() calls, so reset it defensively.
+	convertCmd.Flags().Lookup("level").Changed = false
+	cvOutput = ""
+	cvForce = false
+	rootCmd.SetArgs([]string{"convert", "--to", "dicom", "-o", out, svs})
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		convertCmd.Flags().Lookup("level").Changed = false
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("convert --to dicom (pyramid): %v", err)
+	}
+
+	for level := 0; level < n; level++ {
+		path := filepath.Join(out, "level-"+strconv.Itoa(level)+".dcm")
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("missing %s: %v", path, err)
+		}
+		s, err := source.Open(path)
+		if err != nil {
+			t.Fatalf("source.Open(%s): %v", path, err)
+		}
+		if s.Format() != "dicom" {
+			t.Errorf("%s Format = %q, want dicom", path, s.Format())
+		}
+		s.Close()
 	}
 }
 
