@@ -825,6 +825,8 @@ func mapCompressionForOutput(c source.Compression) uint16 {
 		return tiff.CompressionLZW
 	case source.CompressionJPEG2000:
 		return tiff.CompressionJPEG2000
+	case source.CompressionDeflate:
+		return tiff.CompressionDeflate
 	}
 	return tiff.CompressionNone
 }
