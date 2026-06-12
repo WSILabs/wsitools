@@ -62,23 +62,21 @@ func WritePyramid(src source.Source, _ Options, newWriter func(level int) (io.Wr
 }
 
 // writeInstance assembles + writes one WSM VOLUME instance for src level `level`
-// to w, using the supplied shared UIDs and a fresh SOPInstanceUID. The level's
-// InstanceNumber (level+1) is emitted by assembleWSMDataset.
+// (InstanceNumber level+1) to w, using the shared UIDs and a fresh SOPInstanceUID.
 func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs) error {
 	if level < 0 || level >= len(src.Levels()) {
 		return fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
 	}
-	// Encapsulate first: the compressed byte total feeds the lossy compression
-	// ratio (LossyImageCompressionRatio is Type 1C, required when
-	// LossyImageCompression is "01").
 	pd, compressedBytes, err := encapsulatePixelData(src, level)
 	if err != nil {
 		return err
 	}
 	lvl := src.Levels()[level]
+	size := lvl.Size()
 	tileSize := lvl.TileSize()
 	grid := lvl.Grid()
-	uncompressed := int64(grid.X) * int64(grid.Y) * int64(tileSize.X) * int64(tileSize.Y) * 3
+	numFrames := grid.X * grid.Y
+	uncompressed := int64(numFrames) * int64(tileSize.X) * int64(tileSize.Y) * 3
 	lossyRatio := 1.0
 	if compressedBytes > 0 {
 		lossyRatio = float64(uncompressed) / float64(compressedBytes)
@@ -89,6 +87,42 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs)
 		return err
 	}
 
+	// ImageType: a DICOM source re-emission is DERIVED at every level (P0); a
+	// non-DICOM level 0 is the native acquisition (ORIGINAL), reduced levels DERIVED.
+	var imageType []string
+	switch {
+	case src.Format() == "dicom":
+		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}
+	case level == 0:
+		imageType = []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"}
+	default:
+		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
+	}
+
+	md := src.Metadata()
+	mppX, mppY := md.MPPX, md.MPPY
+	if mppX == 0 {
+		mppX = md.MPP
+	}
+	if mppY == 0 {
+		mppY = md.MPP
+	}
+	psX, psY, imgW, imgH := levelSpatial(src.Levels()[0].Size(), size, mppX, mppY)
+
+	spec := instanceSpec{
+		Size:                 size,
+		TileSize:             tileSize,
+		NumFrames:            numFrames,
+		ImageType:            imageType,
+		SpecimenLabelInImage: "NO",
+		InstanceNumber:       level + 1,
+		PixelSpacingX:        psX,
+		PixelSpacingY:        psY,
+		ImagedVolumeW:        imgW,
+		ImagedVolumeH:        imgH,
+		ImageDescriptor:      desc,
+	}
+
 	uids := UIDSet{
 		SOP:              NewUID(),
 		Study:            shared.Study,
@@ -96,62 +130,18 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs)
 		FrameOfReference: shared.FrameOfReference,
 		DimensionOrg:     shared.DimensionOrg,
 	}
-	ds, err := assembleWSMDataset(src, level, uids, desc)
+	ds, err := assembleWSMDataset(src, uids, spec)
 	if err != nil {
 		return err
 	}
-	ds.Elements = append(ds.Elements, pd) // PixelData last
+	ds.Elements = append(ds.Elements, pd)
 	return dicom.Write(w, ds)
 }
 
-// buildDescriptor derives the codec/colorspace-dependent attributes for src
-// level `level`. DICOM sources reuse P0's fixed values; non-DICOM sources are
-// gated to JPEG-baseline or JPEG 2000 tiles and their photometric + transfer
-// syntax are derived from the tile's codestream. ICC is carried, or sRGB-synthesized.
-func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDescriptor, error) {
-	md := src.Metadata()
-	icc := md.ICCProfile
-	if len(icc) == 0 {
-		icc = srgbICCProfile
-	}
-
-	if src.Format() == "dicom" {
-		// P0 path: Grundium-mirrored values, unchanged output.
-		return ImageDescriptor{
-			TransferSyntax:  jpegBaselineTS,
-			Photometric:     "YBR_FULL_422",
-			SamplesPerPixel: 3,
-			ImageType:       []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-			ICCProfile:      icc,
-			Lossy:           true,
-			LossyMethod:     "ISO_10918_1",
-			LossyRatio:      lossyRatio,
-		}, nil
-	}
-
-	lvl := src.Levels()[level]
-	comp := lvl.Compression()
-	if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 {
-		return ImageDescriptor{}, fmt.Errorf(
-			"--to dicom: level %d is %s; Phase 1 supports JPEG-baseline or JPEG 2000 tile-copy only",
-			level, comp)
-	}
-
-	buf := make([]byte, lvl.TileMaxSize())
-	n, err := lvl.TileInto(0, 0, buf)
-	if err != nil {
-		return ImageDescriptor{}, fmt.Errorf("read tile (0,0) for codec probe: %w", err)
-	}
-	tile := buf[:n]
-
-	// Level 0 of a non-DICOM slide is the native acquisition (ORIGINAL); reduced
-	// levels are downsampled (DERIVED / RESAMPLED).
-	imageType := []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"}
-	if level > 0 {
-		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
-	}
-	desc := ImageDescriptor{ImageType: imageType, ICCProfile: icc, LossyRatio: lossyRatio}
-
+// codecColor derives the codec/colorspace attributes from a tile/frame's
+// codestream bytes. Gated to JPEG-baseline + JPEG 2000.
+func codecColor(tile []byte, comp source.Compression, icc []byte, lossyRatio float64) (ImageDescriptor, error) {
+	desc := ImageDescriptor{ICCProfile: icc, LossyRatio: lossyRatio}
 	switch comp {
 	case source.CompressionJPEG:
 		info, err := Inspect(tile)
@@ -187,6 +177,44 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 			desc.Lossy = true
 			desc.LossyMethod = "ISO_15444_1"
 		}
+	default:
+		// Reachable once writeAssociated calls codecColor directly on associated
+		// frame bytes (buildDescriptor pre-checks the level codec before calling).
+		return ImageDescriptor{}, fmt.Errorf("unsupported codec %s (JPEG-baseline or JPEG 2000 only)", comp)
 	}
 	return desc, nil
+}
+
+// buildDescriptor derives the codec/color attributes for src level `level`. DICOM
+// sources reuse P0's fixed JPEG-baseline values; non-DICOM levels probe the tile.
+func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDescriptor, error) {
+	md := src.Metadata()
+	icc := md.ICCProfile
+	if len(icc) == 0 {
+		icc = srgbICCProfile
+	}
+	if src.Format() == "dicom" {
+		return ImageDescriptor{
+			TransferSyntax:  jpegBaselineTS,
+			Photometric:     "YBR_FULL_422",
+			SamplesPerPixel: 3,
+			ICCProfile:      icc,
+			Lossy:           true,
+			LossyMethod:     "ISO_10918_1",
+			LossyRatio:      lossyRatio,
+		}, nil
+	}
+	lvl := src.Levels()[level]
+	comp := lvl.Compression()
+	if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 {
+		return ImageDescriptor{}, fmt.Errorf(
+			"--to dicom: level %d is %s; Phase 1 supports JPEG-baseline or JPEG 2000 tile-copy only",
+			level, comp)
+	}
+	buf := make([]byte, lvl.TileMaxSize())
+	n, err := lvl.TileInto(0, 0, buf)
+	if err != nil {
+		return ImageDescriptor{}, fmt.Errorf("read tile (0,0) for codec probe: %w", err)
+	}
+	return codecColor(buf[:n], comp, icc, lossyRatio)
 }

@@ -45,15 +45,22 @@ func TestAssembleWSMDataset(t *testing.T) {
 		FrameOfReference: NewUID(),
 		DimensionOrg:     NewUID(),
 	}
-	ds, err := assembleWSMDataset(src, level, uids, ImageDescriptor{
-		TransferSyntax:  jpegBaselineTS,
-		Photometric:     "YBR_FULL_422",
-		SamplesPerPixel: 3,
-		ImageType:       []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-		ICCProfile:      src.Metadata().ICCProfile, // Grundium fixture carries an ICC profile
-		Lossy:           true,
-		LossyMethod:     "ISO_10918_1",
-		LossyRatio:      10.0,
+	ds, err := assembleWSMDataset(src, uids, instanceSpec{
+		Size:                 size,
+		TileSize:             tileSize,
+		NumFrames:            grid.X * grid.Y,
+		ImageType:            []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+		SpecimenLabelInImage: "NO",
+		InstanceNumber:       1,
+		// Inert placeholders — this test asserts no spatial tags; real per-level
+		// spacing/extent is verified in TestPerLevelSpatialMetadata.
+		PixelSpacingX: 0.000251, PixelSpacingY: 0.000251,
+		ImagedVolumeW: 16.0, ImagedVolumeH: 16.0,
+		ImageDescriptor: ImageDescriptor{
+			TransferSyntax: jpegBaselineTS, Photometric: "YBR_FULL_422", SamplesPerPixel: 3,
+			ICCProfile: src.Metadata().ICCProfile, // Grundium fixture carries an ICC profile
+			Lossy:      true, LossyMethod: "ISO_10918_1", LossyRatio: 10.0,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -228,23 +235,33 @@ func TestPerLevelSpatialMetadata(t *testing.T) {
 	}
 	last := len(src.Levels()) - 1
 
-	desc := ImageDescriptor{
-		TransferSyntax:  jpegBaselineTS,
-		Photometric:     "YBR_FULL_422",
-		SamplesPerPixel: 3,
-		ImageType:       []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-		ICCProfile:      src.Metadata().ICCProfile,
-		Lossy:           true,
-		LossyMethod:     "ISO_10918_1",
-		LossyRatio:      10.0,
-	}
 	uids := UIDSet{SOP: NewUID(), Study: NewUID(), Series: NewUID(), FrameOfReference: NewUID(), DimensionOrg: NewUID()}
 
-	ds0, err := assembleWSMDataset(src, 0, uids, desc)
+	specFor := func(level int) instanceSpec {
+		lvl := src.Levels()[level]
+		md := src.Metadata()
+		mppX, mppY := md.MPPX, md.MPPY
+		if mppX == 0 {
+			mppX = md.MPP
+		}
+		if mppY == 0 {
+			mppY = md.MPP
+		}
+		psX, psY, w, h := levelSpatial(src.Levels()[0].Size(), lvl.Size(), mppX, mppY)
+		g := lvl.Grid()
+		return instanceSpec{
+			Size: lvl.Size(), TileSize: lvl.TileSize(), NumFrames: g.X * g.Y,
+			ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}, SpecimenLabelInImage: "NO",
+			InstanceNumber: level + 1, PixelSpacingX: psX, PixelSpacingY: psY, ImagedVolumeW: w, ImagedVolumeH: h,
+			ImageDescriptor: ImageDescriptor{TransferSyntax: jpegBaselineTS, Photometric: "YBR_FULL_422", SamplesPerPixel: 3, ICCProfile: src.Metadata().ICCProfile, Lossy: true, LossyMethod: "ISO_10918_1", LossyRatio: 10.0},
+		}
+	}
+
+	ds0, err := assembleWSMDataset(src, uids, specFor(0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	dsN, err := assembleWSMDataset(src, last, uids, desc)
+	dsN, err := assembleWSMDataset(src, uids, specFor(last))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,15 +302,23 @@ func TestAssembleWSMDatasetLosslessOmitsLossyTags(t *testing.T) {
 	defer src.Close()
 
 	uids := UIDSet{SOP: NewUID(), Study: NewUID(), Series: NewUID(), FrameOfReference: NewUID(), DimensionOrg: NewUID()}
-	ds, err := assembleWSMDataset(src, 0, uids, ImageDescriptor{
-		TransferSyntax:  jp2kLosslessTS,
-		Photometric:     "RGB",
-		SamplesPerPixel: 3,
-		ImageType:       []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"},
-		ICCProfile:      src.Metadata().ICCProfile,
-		Lossy:           false, // lossless → ratio + method must be omitted
-		LossyMethod:     "",
-		LossyRatio:      1.0,
+	lvl := src.Levels()[0]
+	ds, err := assembleWSMDataset(src, uids, instanceSpec{
+		Size:                 lvl.Size(),
+		TileSize:             lvl.TileSize(),
+		NumFrames:            lvl.Grid().X * lvl.Grid().Y,
+		ImageType:            []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"},
+		SpecimenLabelInImage: "NO",
+		InstanceNumber:       1,
+		ImageDescriptor: ImageDescriptor{
+			TransferSyntax:  jp2kLosslessTS,
+			Photometric:     "RGB",
+			SamplesPerPixel: 3,
+			ICCProfile:      src.Metadata().ICCProfile,
+			Lossy:           false, // lossless → ratio + method must be omitted
+			LossyMethod:     "",
+			LossyRatio:      1.0,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,15 +357,23 @@ func TestAssembleWSMDatasetMonoOmitsPlanarConfiguration(t *testing.T) {
 	defer src.Close()
 
 	uids := UIDSet{SOP: NewUID(), Study: NewUID(), Series: NewUID(), FrameOfReference: NewUID(), DimensionOrg: NewUID()}
-	ds, err := assembleWSMDataset(src, 0, uids, ImageDescriptor{
-		TransferSyntax:  jpegBaselineTS,
-		Photometric:     "MONOCHROME2",
-		SamplesPerPixel: 1, // mono → PlanarConfiguration (Type 1C) must be omitted
-		ImageType:       []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"},
-		ICCProfile:      src.Metadata().ICCProfile,
-		Lossy:           true,
-		LossyMethod:     "ISO_10918_1",
-		LossyRatio:      10.0,
+	lvl := src.Levels()[0]
+	ds, err := assembleWSMDataset(src, uids, instanceSpec{
+		Size:                 lvl.Size(),
+		TileSize:             lvl.TileSize(),
+		NumFrames:            lvl.Grid().X * lvl.Grid().Y,
+		ImageType:            []string{"ORIGINAL", "PRIMARY", "VOLUME", "NONE"},
+		SpecimenLabelInImage: "NO",
+		InstanceNumber:       1,
+		ImageDescriptor: ImageDescriptor{
+			TransferSyntax:  jpegBaselineTS,
+			Photometric:     "MONOCHROME2",
+			SamplesPerPixel: 1, // mono → PlanarConfiguration (Type 1C) must be omitted
+			ICCProfile:      src.Metadata().ICCProfile,
+			Lossy:           true,
+			LossyMethod:     "ISO_10918_1",
+			LossyRatio:      10.0,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

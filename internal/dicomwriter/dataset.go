@@ -2,6 +2,7 @@ package dicomwriter
 
 import (
 	"fmt"
+	"image"
 	"strconv"
 	"time"
 
@@ -48,51 +49,58 @@ type UIDSet struct {
 	SOP, Study, Series, FrameOfReference, DimensionOrg string
 }
 
-// assembleWSMDataset builds the WSM IOD element list (everything except
-// PixelData) for src level `level`, mirroring the Grundium golden template
-// (sample_files/dicom/scan_621_grundium_dicom/scan_621__pyr04.dcm).
-//
-// SEQUENCE (SQ) CONSTRUCTION — verified against suyashkumar/dicom v1.1.0:
-//
-//	dicom.NewElement(seqTag, [][]*dicom.Element{ {item0elems...}, {item1elems...} })
-//
-// NewValue's [][]*Element branch wraps each inner slice as a SequenceItemValue.
-// Nesting works the same: an item element can itself be a NewElement(SQ, [][]...).
-// An EMPTY sequence is dicom.NewElement(seqTag, [][]*dicom.Element{}). The
-// library resolves VR from its tag dictionary, so coded-sequence items just
-// carry CodeValue/CodingSchemeDesignator/CodeMeaning string elements.
-//
-// Most geometry is DERIVED from the source level/metadata; structural constants
-// (ImageType, Modality, photometric/bit-depth fields, orientation, TILED_FULL,
-// anonymous identity, coded-sequence codes) are MIRRORED from the golden.
-// ImageDescriptor carries the codec/colorspace-dependent attributes that vary by
-// source. The caller (writeInstance, via buildDescriptor) derives these — probing
-// a non-DICOM source's codestream, or using P0's fixed values for a DICOM source —
-// so the assembler stays a pure dataset builder.
+// ImageDescriptor carries the codec/colorspace attributes derived from a tile's
+// codestream (independent of geometry or image flavor).
 type ImageDescriptor struct {
-	TransferSyntax  string   // 1.2.840.10008.1.2.4.{50|90|91}
-	Photometric     string   // RGB | YBR_FULL_422 | YBR_FULL | YBR_ICT | YBR_RCT | MONOCHROME2
-	SamplesPerPixel int      // 1 or 3
-	ImageType       []string // ImageType + FrameType value (4 elements)
-	ICCProfile      []byte   // carried or synthesized; non-empty for color
-	Lossy           bool     // LossyImageCompression "01" (true) vs "00" (false)
-	LossyMethod     string   // "ISO_10918_1" | "ISO_15444_1" (empty when lossless)
-	LossyRatio      float64  // emitted only when Lossy
+	TransferSyntax  string // 1.2.840.10008.1.2.4.{50|90|91}
+	Photometric     string // RGB | YBR_FULL_422 | YBR_FULL | YBR_ICT | YBR_RCT | MONOCHROME2
+	SamplesPerPixel int    // 1 or 3
+	ICCProfile      []byte // carried or synthesized; non-empty for color
+	Lossy           bool   // LossyImageCompression "01" (true) vs "00" (false)
+	LossyMethod     string // "ISO_10918_1" | "ISO_15444_1" (empty when lossless)
+	LossyRatio      float64
 }
 
-func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDescriptor) (dicom.Dataset, error) {
-	if level < 0 || level >= len(src.Levels()) {
-		return dicom.Dataset{}, fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
+// instanceSpec is everything that varies per WSM instance (pyramid level or
+// associated image). assembleWSMDataset is a pure builder over src's shared slide
+// metadata + this spec.
+type instanceSpec struct {
+	Size      image.Point // TotalPixelMatrix (X=cols, Y=rows)
+	TileSize  image.Point // Rows=Y, Columns=X (the frame size)
+	NumFrames int
+
+	ImageType            []string // 4 elements; [2] = VOLUME|LABEL|OVERVIEW|THUMBNAIL
+	SpecimenLabelInImage string   // "YES" | "NO"
+	InstanceNumber       int
+
+	PixelSpacingX, PixelSpacingY float64 // mm
+	ImagedVolumeW, ImagedVolumeH float64 // mm
+
+	ImageDescriptor // embedded codec/color (promotes TransferSyntax/Photometric/…)
+}
+
+// levelSpatial returns PixelSpacing (mm) and the constant ImagedVolume extent (mm)
+// for an image of pixel size `size` viewed as a downsample of an L0 of size `l0`
+// at base MPP (µm/px). Shared by pyramid levels and associated images. MPP 0 →
+// spacing/extent 0.
+func levelSpatial(l0, size image.Point, mppX, mppY float64) (psX, psY, imgW, imgH float64) {
+	dsX, dsY := 1.0, 1.0
+	if size.X > 0 {
+		dsX = float64(l0.X) / float64(size.X)
 	}
-	lvl := src.Levels()[level]
+	if size.Y > 0 {
+		dsY = float64(l0.Y) / float64(size.Y)
+	}
+	psX = mppX * dsX / 1000.0
+	psY = mppY * dsY / 1000.0
+	imgW = float64(l0.X) * mppX / 1000.0
+	imgH = float64(l0.Y) * mppY / 1000.0
+	return psX, psY, imgW, imgH
+}
+
+func assembleWSMDataset(src source.Source, uids UIDSet, spec instanceSpec) (dicom.Dataset, error) {
 	md := src.Metadata()
 
-	// Date/time attributes. The opentile DICOM reader does not currently surface
-	// the source's acquisition timestamp, so ContentDate/Time (Type 1, "when this
-	// instance was created") use now; AcquisitionDateTime (Type 1) uses the source
-	// value when present, else now. StudyDate/Time (Type 2) mirror the content
-	// date/time so a DICOMDIR can index the instance (StudyID stays empty — we
-	// have no real study identifier for an anonymous re-emission).
 	now := time.Now().UTC()
 	acq := md.AcquisitionDateTime
 	if acq.IsZero() {
@@ -102,52 +110,16 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 	contentTM := now.Format("150405")
 	acqDT := acq.Format("20060102150405")
 
-	// DeviceSerialNumber is Type 1 (must be non-empty). Carry the source serial
-	// when available, else identify the synthesizing writer.
 	serial := md.SerialNumber
 	if serial == "" {
 		serial = writerSoftware
 	}
 
-	// LossyImageCompressionRatio (Type 1C, DS, ≤16 chars) — %.4g keeps it compact.
-	ratioStr := fmt.Sprintf("%.4g", desc.LossyRatio)
+	ratioStr := fmt.Sprintf("%.4g", spec.LossyRatio)
 	lossyFlag := "00"
-	if desc.Lossy {
+	if spec.Lossy {
 		lossyFlag = "01"
 	}
-
-	grid := lvl.Grid()
-	size := lvl.Size()
-	tileSize := lvl.TileSize()
-	numFrames := grid.X * grid.Y
-
-	// Base (level-0) MPP in µm/px, with the per-axis → symmetric fallback.
-	mppX, mppY := md.MPPX, md.MPPY
-	if mppX == 0 {
-		mppX = md.MPP
-	}
-	if mppY == 0 {
-		mppY = md.MPP
-	}
-	// PixelSpacing must scale by THIS level's downsample factor relative to L0 (a
-	// reduced level has coarser spacing). The physical ImagedVolume extent is
-	// CONSTANT across levels (same slide area) — derive both from L0 so every
-	// pyramid instance is spatially co-registered. When MPP is unknown (0),
-	// spacing and extent fall back to 0 as before.
-	l0Size := src.Levels()[0].Size()
-	dsX, dsY := 1.0, 1.0
-	if size.X > 0 {
-		dsX = float64(l0Size.X) / float64(size.X)
-	}
-	if size.Y > 0 {
-		dsY = float64(l0Size.Y) / float64(size.Y)
-	}
-	psX := mppX * dsX / 1000.0 // mm/px at this level, column spacing
-	psY := mppY * dsY / 1000.0 // mm/px at this level, row spacing
-
-	// ImagedVolume (mm) = L0 matrix pixels × base MPP — the constant slide extent.
-	imagedW := float64(l0Size.X) * mppX / 1000.0
-	imagedH := float64(l0Size.Y) * mppY / 1000.0
 
 	// mk wraps NewElement, accumulating the first error.
 	var firstErr error
@@ -176,20 +148,13 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		model = writerSoftware
 	}
 
-	// OpticalPath item (tag-ordered within the item). ICCProfile (0028,2000) is
-	// Type 1C — required for color images; placed after IlluminationTypeCodeSequence
-	// 0022,0016 and before OpticalPathIdentifier 0048,0106. desc.ICCProfile is the
-	// source's embedded profile, or a synthesized sRGB profile when the source has
-	// none (buildDescriptor), so it is non-empty for color and the Type 1C
-	// requirement is always satisfied; the guard below tolerates an empty profile
-	// defensively.
 	opticalPathItem := []*dicom.Element{
 		mk(tag.IlluminationTypeCodeSequence, [][]*dicom.Element{
 			codeItem("111744", "DCM", "Brightfield illumination"),
 		}),
 	}
-	if len(desc.ICCProfile) > 0 {
-		opticalPathItem = append(opticalPathItem, mk(tag.ICCProfile, desc.ICCProfile))
+	if len(spec.ICCProfile) > 0 {
+		opticalPathItem = append(opticalPathItem, mk(tag.ICCProfile, spec.ICCProfile))
 	}
 	opticalPathItem = append(opticalPathItem,
 		mk(tag.OpticalPathIdentifier, []string{"0"}),
@@ -203,11 +168,11 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		mk(tag.FileMetaInformationVersion, []byte{0x00, 0x01}),
 		mk(tag.MediaStorageSOPClassUID, []string{wsmSOPClassUID}),
 		mk(tag.MediaStorageSOPInstanceUID, []string{uids.SOP}),
-		mk(tag.TransferSyntaxUID, []string{desc.TransferSyntax}),
+		mk(tag.TransferSyntaxUID, []string{spec.TransferSyntax}),
 		mk(tag.ImplementationClassUID, []string{NewUID()}),
 
 		// ---- General / SOP Common (group 0008) ----
-		mk(tag.ImageType, desc.ImageType),
+		mk(tag.ImageType, spec.ImageType),
 		mk(tag.SOPClassUID, []string{wsmSOPClassUID}),
 		mk(tag.SOPInstanceUID, []string{uids.SOP}),
 		// Dates/times (tag-ordered: StudyDate 0020, ContentDate 0023,
@@ -239,7 +204,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		mk(tag.SeriesInstanceUID, []string{uids.Series}),
 		mk(tag.StudyID, []string{}),
 		mk(tag.SeriesNumber, []string{"1"}),
-		mk(tag.InstanceNumber, []string{fmt.Sprintf("%d", level+1)}),
+		mk(tag.InstanceNumber, []string{strconv.Itoa(spec.InstanceNumber)}),
 		mk(tag.FrameOfReferenceUID, []string{uids.FrameOfReference}),
 		mk(tag.PositionReferenceIndicator, []string{"SLIDE_CORNER"}),
 
@@ -250,12 +215,12 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		mk(tag.DimensionOrganizationType, []string{"TILED_FULL"}),
 
 		// ---- Image Pixel / WSM frame descriptors (group 0028) ----
-		mk(tag.SamplesPerPixel, []int{desc.SamplesPerPixel}),
-		mk(tag.PhotometricInterpretation, []string{desc.Photometric}),
+		mk(tag.SamplesPerPixel, []int{spec.SamplesPerPixel}),
+		mk(tag.PhotometricInterpretation, []string{spec.Photometric}),
 		mk(tag.PlanarConfiguration, []int{0}),
-		mk(tag.NumberOfFrames, []string{fmt.Sprintf("%d", numFrames)}),
-		mk(tag.Rows, []int{tileSize.Y}),
-		mk(tag.Columns, []int{tileSize.X}),
+		mk(tag.NumberOfFrames, []string{strconv.Itoa(spec.NumFrames)}),
+		mk(tag.Rows, []int{spec.TileSize.Y}),
+		mk(tag.Columns, []int{spec.TileSize.X}),
 		mk(tag.BitsAllocated, []int{8}),
 		mk(tag.BitsStored, []int{8}),
 		mk(tag.HighBit, []int{7}),
@@ -263,7 +228,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		mk(tag.BurnedInAnnotation, []string{"NO"}),
 		mk(tag.LossyImageCompression, []string{lossyFlag}),
 		mk(tag.LossyImageCompressionRatio, []string{ratioStr}),
-		mk(tag.LossyImageCompressionMethod, []string{desc.LossyMethod}),
+		mk(tag.LossyImageCompressionMethod, []string{spec.LossyMethod}),
 
 		// ---- Specimen (group 0040) ----
 		mk(tag.ContainerIdentifier, []string{"WSITOOLS"}),
@@ -282,11 +247,11 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 		}),
 
 		// ---- Whole Slide Microscopy Image (group 0048) ----
-		mk(tag.ImagedVolumeWidth, []float64{imagedW}),
-		mk(tag.ImagedVolumeHeight, []float64{imagedH}),
+		mk(tag.ImagedVolumeWidth, []float64{spec.ImagedVolumeW}),
+		mk(tag.ImagedVolumeHeight, []float64{spec.ImagedVolumeH}),
 		mk(tag.ImagedVolumeDepth, []float64{1}),
-		mk(tag.TotalPixelMatrixColumns, []int{size.X}),
-		mk(tag.TotalPixelMatrixRows, []int{size.Y}),
+		mk(tag.TotalPixelMatrixColumns, []int{spec.Size.X}),
+		mk(tag.TotalPixelMatrixRows, []int{spec.Size.Y}),
 		mk(tag.TotalPixelMatrixOriginSequence, [][]*dicom.Element{
 			{
 				mk(tag.XOffsetInSlideCoordinateSystem, []string{"0.0"}),
@@ -294,7 +259,7 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 				mk(tag.ZOffsetInSlideCoordinateSystem, []string{"0.0"}),
 			},
 		}),
-		mk(tag.SpecimenLabelInImage, []string{"NO"}),
+		mk(tag.SpecimenLabelInImage, []string{spec.SpecimenLabelInImage}),
 		mk(tag.FocusMethod, []string{"AUTO"}),
 		mk(tag.ExtendedDepthOfField, []string{"NO"}),
 		mk(tag.ImageOrientationSlide, []string{"0", "1", "0", "1", "0", "0"}),
@@ -310,13 +275,13 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 						mk(tag.SliceThickness, []string{"0.001"}),
 						// PixelSpacing is row\col == Y\X (DS, ≤16 chars).
 						mk(tag.PixelSpacing, []string{
-							formatDS(psY),
-							formatDS(psX),
+							formatDS(spec.PixelSpacingY),
+							formatDS(spec.PixelSpacingX),
 						}),
 					},
 				}),
 				mk(tag.WholeSlideMicroscopyImageFrameTypeSequence, [][]*dicom.Element{
-					{mk(tag.FrameType, desc.ImageType)},
+					{mk(tag.FrameType, spec.ImageType)},
 				}),
 			},
 		}),
@@ -325,15 +290,13 @@ func assembleWSMDataset(src source.Source, level int, uids UIDSet, desc ImageDes
 	if firstErr != nil {
 		return dicom.Dataset{}, firstErr
 	}
-	// Type 1C omissions: LossyImageCompressionRatio + Method are present only when
-	// LossyImageCompression == "01" (so omitted for a lossless instance);
-	// PlanarConfiguration is present only when SamplesPerPixel > 1 (so omitted for
-	// a single-component MONOCHROME2 instance).
-	mono := desc.SamplesPerPixel == 1
-	if !desc.Lossy || mono {
+	// Type 1C omissions: LossyImageCompressionRatio + Method only when "01";
+	// PlanarConfiguration only when SamplesPerPixel > 1.
+	mono := spec.SamplesPerPixel == 1
+	if !spec.Lossy || mono {
 		kept := elems[:0]
 		for _, e := range elems {
-			if !desc.Lossy && (e.Tag == tag.LossyImageCompressionRatio || e.Tag == tag.LossyImageCompressionMethod) {
+			if !spec.Lossy && (e.Tag == tag.LossyImageCompressionRatio || e.Tag == tag.LossyImageCompressionMethod) {
 				continue
 			}
 			if mono && e.Tag == tag.PlanarConfiguration {
