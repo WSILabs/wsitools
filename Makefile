@@ -61,21 +61,33 @@ goldens-byte-stable: build
 bench-dzi: $(BIN)
 	@scripts/bench-dzi.sh
 
-# Emits a WSM VOLUME instance from a DICOM fixture and runs dciodvfy conformance
-# validation (Phase 0 de-risk). Requires WSI_TOOLS_TESTDIR to point at a dir
-# containing dicom/scan_621_grundium_dicom, and dciodvfy on PATH (see DCIODVFY).
-# Success bar: 0 Errors (Study ID DICOMDIR warning is expected/benign).
+# Emits WSM VOLUME instances and runs dciodvfy conformance validation
+# (Phase 0/1 de-risk): a DICOM->DICOM instance from the Grundium fixture, and a
+# non-DICOM SVS->DICOM instance from CMU-1-Small-Region.svs (RGB photometric +
+# synthesized sRGB ICC path). Requires WSI_TOOLS_TESTDIR and dciodvfy (see
+# DCIODVFY). Success bar: 0 Errors (Study ID DICOMDIR warning is expected/benign);
+# a non-zero exit from either instance fails the target.
 dicom-validate: build
 	@if [ -z "$$WSI_TOOLS_TESTDIR" ]; then \
 		echo "WSI_TOOLS_TESTDIR not set; skipping dicom-validate"; \
 		exit 0; \
 	fi
-	@SM="$$WSI_TOOLS_TESTDIR/dicom/scan_621_grundium_dicom"; \
-	[ -d "$$SM" ] || { echo "missing $$SM; skipping"; exit 0; }; \
-	command -v "$(DCIODVFY)" >/dev/null 2>&1 || { echo "$(DCIODVFY) not found; see Makefile DCIODVFY note"; exit 1; }; \
-	OUT=$$(mktemp -t wsm.XXXXXX).dcm; \
-	./bin/wsitools convert --to dicom --level 0 -f -o "$$OUT" "$$SM"; \
-	echo "=== dciodvfy $$OUT ==="; \
-	"$(DCIODVFY)" "$$OUT"; RC=$$?; \
-	rm -f "$$OUT"; \
+	@command -v "$(DCIODVFY)" >/dev/null 2>&1 || { echo "$(DCIODVFY) not found; see Makefile DCIODVFY note"; exit 1; }; \
+	RC=0; \
+	SM="$$WSI_TOOLS_TESTDIR/dicom/scan_621_grundium_dicom"; \
+	if [ -d "$$SM" ]; then \
+		OUT=$$(mktemp -t wsm.XXXXXX).dcm; \
+		./bin/wsitools convert --to dicom --level 0 -f -o "$$OUT" "$$SM"; \
+		echo "=== dciodvfy (DICOM->DICOM) $$OUT ==="; \
+		"$(DCIODVFY)" "$$OUT" || RC=$$?; \
+		rm -f "$$OUT"; \
+	else echo "missing $$SM; skipping DICOM->DICOM"; fi; \
+	SVS="$$WSI_TOOLS_TESTDIR/svs/CMU-1-Small-Region.svs"; \
+	if [ -f "$$SVS" ]; then \
+		OUT2=$$(mktemp -t wsm-svs.XXXXXX).dcm; \
+		./bin/wsitools convert --to dicom --level 0 -f -o "$$OUT2" "$$SVS"; \
+		echo "=== dciodvfy (SVS->DICOM) $$OUT2 ==="; \
+		"$(DCIODVFY)" "$$OUT2" || RC=$$?; \
+		rm -f "$$OUT2"; \
+	else echo "missing $$SVS; skipping SVS->DICOM"; fi; \
 	exit $$RC
