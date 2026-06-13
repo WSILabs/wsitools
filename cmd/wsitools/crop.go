@@ -44,7 +44,7 @@ rebuilt for the cropped extent.
 The crop is a full re-encode (one JPEG generation) — it matches how Aperio
 ImageScope crops. The ImageDescription records the crop geometry and the
 source's provenance chain; the thumbnail is regenerated to the crop aspect;
-label, overview, and ICC profile pass through unchanged.`,
+label, macro, overview, and ICC profile pass through unchanged.`,
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
 	SilenceErrors: false,
@@ -53,7 +53,8 @@ label, overview, and ICC profile pass through unchanged.`,
 		if err != nil {
 			return err
 		}
-		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h, time.Now())
+		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
+			cropQuality, cropWorkers, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, time.Now())
 	},
 }
 
@@ -100,14 +101,16 @@ func validateCropBounds(x, y, w, h, l0W, l0H int) error {
 	return nil
 }
 
-func runCrop(ctx context.Context, input, output string, x, y, w, h int, start time.Time) error {
+// runCrop takes all options as explicit parameters (no global-flag reads),
+// mirroring downsampleToSVS, so it stays testable and reusable. The cobra RunE
+// closure resolves the flag globals and passes them in.
+func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers int, tileOrderName, bigtiffFlag string, force, noAssociated bool, start time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if output == "" {
 		return fmt.Errorf("--output is required")
 	}
-	workers := cropWorkers
 	if workers == 0 {
 		workers = runtime.NumCPU()
 	}
@@ -117,7 +120,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h int, start ti
 	if _, err := os.Stat(input); err != nil {
 		return fmt.Errorf("input: %w", err)
 	}
-	if !cropForce {
+	if !force {
 		if _, err := os.Stat(output); err == nil {
 			return fmt.Errorf("output exists (use --force to overwrite): %s", output)
 		}
@@ -152,7 +155,6 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h int, start ti
 		return fmt.Errorf("parse source ImageDescription: %w", err)
 	}
 
-	quality := cropQuality
 	if quality == 0 {
 		if q, ok := desc.Quality(); ok {
 			quality = q
@@ -167,12 +169,17 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h int, start ti
 	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, x, y, w, h, outputTileSize, outputTileSize, quality)
 
 	var bigtiffMode tiff.BigTIFFMode
-	switch cropBigTIFF {
+	switch bigtiffFlag {
 	case "on":
 		bigtiffMode = tiff.BigTIFFOn
 	case "off":
 		bigtiffMode = tiff.BigTIFFOff
 	default: // auto
+		// No source pyramid factor is available for an arbitrary crop, so use
+		// the uncompressed L0 raster size as a proxy. JPEG tiles compress ~8:1,
+		// so a >4 GiB raster (~500 MiB L0 JPEG plus its pyramid) is where the
+		// 32-bit TIFF offset space starts to be at risk; below it, classic TIFF
+		// is safe.
 		if int64(w)*int64(h)*3 > (int64(4) << 30) {
 			bigtiffMode = tiff.BigTIFFOn
 		} else {
@@ -180,7 +187,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h int, start ti
 		}
 	}
 
-	order, err := tileorder.ByName(cropTileOrder)
+	order, err := tileorder.ByName(tileOrderName)
 	if err != nil {
 		return fmt.Errorf("--tile-order: %w", err)
 	}
@@ -218,7 +225,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h int, start ti
 	}
 
 	var label, macro opentile.AssociatedImage
-	if !cropNoAssoc {
+	if !noAssociated {
 		for _, a := range src.AssociatedImages() {
 			switch a.Type() {
 			case "label":
@@ -229,11 +236,13 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h int, start ti
 		}
 	}
 
-	postL0Hook := func() error {
-		if cropNoAssoc {
-			return nil
+	// The thumbnail is regenerated (not passed through) and interleaved between
+	// L0 and L1 via the hook. --no-associated leaves the hook nil.
+	var postL0Hook func() error
+	if !noAssociated {
+		postL0Hook = func() error {
+			return regenCropThumbnail(wtr, outL0, w, h, quality)
 		}
-		return regenCropThumbnail(wtr, outL0, w, h, quality)
 	}
 
 	nLevels := cropPyramidLevels(w, h, outputTileSize)
