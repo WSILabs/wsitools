@@ -196,7 +196,7 @@ func TestCropLossless_ByteIdentity(t *testing.T) {
 	baseW, baseH := srcL0.Size.W, srcL0.Size.H
 
 	cases := []struct {
-		name        string
+		name       string
 		x, y, w, h int
 	}{
 		{"unaligned", 300, 200, 400, 400},
