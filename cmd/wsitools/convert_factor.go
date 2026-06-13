@@ -848,33 +848,32 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 		return err
 	}
 
-	currentRaster := outL0
-	currentW, currentH := outW, outH
+	_ = workers // reserved for future parallel encode path
+	return buildPyramidFromRasterCOGWSI(ctx, w, outL0, outW, outH, nLevels, quality)
+}
 
+// buildPyramidFromRasterCOGWSI encodes an in-memory RGB888 L0 raster into a
+// cogwsiwriter pyramid, box-halving between levels via halveRaster. nLevels is
+// the total level count (L0 included). Shared by buildPyramidCOGWSI (downsample)
+// and cropToCOGWSI.
+func buildPyramidFromRasterCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality int) error {
+	currentRaster := l0
+	currentW, currentH := l0W, l0H
 	for outLvl := 0; outLvl < nLevels; outLvl++ {
 		if err := encodeAndWriteLevelCOGWSI(ctx, w, currentRaster, currentW, currentH, quality, outLvl == 0); err != nil {
 			return fmt.Errorf("level %d: %w", outLvl, err)
 		}
-
 		if outLvl < nLevels-1 {
-			evenW := currentW &^ 1
-			evenH := currentH &^ 1
-			if evenW != currentW || evenH != currentH {
-				currentRaster = cropRaster(currentRaster, currentW, currentH, evenW, evenH)
-				currentW, currentH = evenW, evenH
+			var herr error
+			currentRaster, currentW, currentH, herr = halveRaster(currentRaster, currentW, currentH)
+			if herr != nil {
+				return fmt.Errorf("Box halving level %d→%d: %w", outLvl, outLvl+1, herr)
 			}
-			nextPix, nextW, nextH, err := downscale.BoxHalve(currentRaster, currentW, currentH, 2)
-			if err != nil {
-				return fmt.Errorf("halve level %d→%d: %w", outLvl, outLvl+1, err)
-			}
-			currentRaster = nextPix
-			currentW, currentH = nextW, nextH
 			if currentW == 0 || currentH == 0 {
 				break
 			}
 		}
 	}
-	_ = workers // reserved for future parallel encode path
 	return nil
 }
 

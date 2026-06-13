@@ -35,22 +35,26 @@ var (
 )
 
 var cropCmd = &cobra.Command{
-	Use:   "crop [flags] <slide.svs>",
-	Short: "Crop a rectangular region of an SVS into a new pyramidal SVS",
+	Use:   "crop [flags] <slide>",
+	Short: "Crop a rectangular region of a WSI into a new pyramidal file (same container)",
 	Long: `crop extracts a rectangular region (level-0 pixel coordinates) of a
-source SVS and writes a new tiled-pyramid SVS of just that region, anchored at
-pixel origin (0,0). Resolution/magnification are preserved; the pyramid is
-rebuilt for the cropped extent.
+source WSI and writes a new tiled-pyramid file of just that region, anchored at
+pixel origin (0,0). It is format-preserving: the output is written back to the
+source's own container (SVS, OME-TIFF, generic TIFF, or COG-WSI).
+Resolution/magnification are preserved; the pyramid is rebuilt for the cropped
+extent.
 
-The crop is a full re-encode (one JPEG generation) — it matches how Aperio
-ImageScope crops. The ImageDescription records the crop geometry and the
-source's provenance chain; the thumbnail is regenerated to the crop aspect;
-label, macro, overview, and ICC profile pass through unchanged.
+The default crop is a full re-encode (one JPEG generation). For SVS it matches
+how Aperio ImageScope crops: the ImageDescription records the crop geometry and
+the source's provenance chain, and the thumbnail is regenerated to the crop
+aspect. Associated images (label/macro/overview) and the ICC profile pass
+through unchanged.
 
-With --lossless, the crop is snapped to the L0 tile grid and the full-resolution
-tiles are copied verbatim (byte-identical); the output is a tile-aligned superset
-of the requested rect (up to ~255px larger per edge), and the command prints the
-effective snapped rect when the input is not already tile-aligned.`,
+With --lossless (SVS only for now), the crop is snapped to the L0 tile grid and
+the full-resolution tiles are copied verbatim (byte-identical); the output is a
+tile-aligned superset of the requested rect (up to ~255px larger per edge), and
+the command prints the effective snapped rect when the input is not already
+tile-aligned.`,
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
 	SilenceErrors: false,
@@ -70,8 +74,8 @@ func init() {
 	cropCmd.Flags().IntVar(&cropY, "y", 0, "Crop Y (level-0 coords)")
 	cropCmd.Flags().IntVar(&cropW, "w", 0, "Crop width (level-0 pixels)")
 	cropCmd.Flags().IntVar(&cropH, "h", 0, "Crop height (level-0 pixels)")
-	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output SVS path (required)")
-	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: source Q)")
+	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output path, same container as source (required)")
+	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: source Q for SVS, else 90)")
 	cropCmd.Flags().IntVar(&cropWorkers, "workers", 0, "Encode workers (default: NumCPU)")
 	cropCmd.Flags().StringVar(&cropTileOrder, "tile-order", "row-major", "Tile order: row-major|hilbert|morton")
 	cropCmd.Flags().StringVar(&cropBigTIFF, "bigtiff", "auto", "BigTIFF mode: auto|on|off")
@@ -169,8 +173,10 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer src.Close()
-	if src.Format() != opentile.FormatSVS {
-		return fmt.Errorf("crop supports SVS sources only; got %s", src.Format())
+
+	target, ok := downsampleTargetForFormat(string(src.Format()))
+	if !ok {
+		return fmt.Errorf("crop: unsupported source format %q (supported: svs, ome-tiff, tiff, cog-wsi)", src.Format())
 	}
 
 	srcL0 := src.Levels()[0]
@@ -178,6 +184,57 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if err := validateCropBounds(x, y, w, h, baseW, baseH); err != nil {
 		return err
 	}
+	if lossless && target != "svs" {
+		return fmt.Errorf("crop --lossless currently supports SVS sources only (other containers: Phase 2b)")
+	}
+	order, err := tileorder.ByName(tileOrderName)
+	if err != nil {
+		return fmt.Errorf("--tile-order: %w", err)
+	}
+
+	if target == "svs" {
+		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, order, bigtiffFlag, noAssociated, lossless, start)
+	}
+
+	// Non-SVS sources carry no Aperio ImageDescription to mine for a source Q
+	// (unlike the SVS path, which defaults to the source quality); use 90.
+	q := quality
+	if q == 0 {
+		q = 90
+	}
+	if q < 1 || q > 100 {
+		return fmt.Errorf("--quality must be in [1,100], got %d", q)
+	}
+	rasterBytes := int64(w) * int64(h) * 3
+	if rasterBytes < 0 {
+		return fmt.Errorf("cropped L0 raster size overflows int64")
+	}
+	outL0 := make([]byte, rasterBytes)
+	if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, x, y, w, h); err != nil {
+		return fmt.Errorf("materialize cropped L0: %w", err)
+	}
+	nLevels := cropPyramidLevels(w, h, outputTileSize)
+
+	switch target {
+	case "tiff":
+		return cropToTIFF(ctx, src, input, output, outL0, w, h, nLevels, q, workers, order, bigtiffFlag, noAssociated, start)
+	case "ome-tiff":
+		return cropToOMETIFF(ctx, src, input, output, outL0, w, h, nLevels, q, workers, order, bigtiffFlag, noAssociated, start)
+	case "cog-wsi":
+		return cropToCOGWSI(ctx, src, input, output, outL0, w, h, nLevels, q, workers, order, bigtiffFlag, noAssociated, start)
+	default:
+		// Unreachable while downsampleTargetForFormat returns exactly
+		// svs/tiff/ome-tiff/cog-wsi (svs handled above); defensive guard.
+		return fmt.Errorf("crop: target %q not implemented", target)
+	}
+}
+
+// cropEmitSVS is the SVS-specific crop emitter. It receives an already-opened
+// source slide and all resolved options. The front-end (runCrop) owns: OpenFile,
+// format guard, validateCropBounds, lossless guard, and tileorder.ByName.
+func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string, x, y, w, h, quality, workers int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated, lossless bool, start time.Time) error {
+	srcL0 := src.Levels()[0]
+	baseW, baseH := srcL0.Size.W, srcL0.Size.H
 
 	rawDesc, err := source.ReadSourceImageDescription(input)
 	if err != nil {
@@ -228,11 +285,6 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		} else {
 			bigtiffMode = tiff.BigTIFFOff
 		}
-	}
-
-	order, err := tileorder.ByName(tileOrderName)
-	if err != nil {
-		return fmt.Errorf("--tile-order: %w", err)
 	}
 
 	wtr, err := streamwriter.Create(output, streamwriter.Options{

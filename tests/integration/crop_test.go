@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	opentile "github.com/wsilabs/opentile-go"
@@ -303,6 +304,86 @@ func TestCropLossless_ByteIdentity_Variants(t *testing.T) {
 			}
 			assertLosslessByteIdentity(t, bin, src, v.x, v.y, v.w, v.h)
 		})
+	}
+}
+
+// TestCrop_FormatPreserving verifies crop writes the output back to the source's
+// own container (re-encode) for the TIFF family, with exact extent + preserved
+// MPP/mag. Local-only (large fixtures).
+func TestCrop_FormatPreserving(t *testing.T) {
+	td := testdir(t)
+	bin := buildOnce(t)
+	cases := []struct {
+		file, ext  string
+		x, y, w, h int
+		wantFormat opentile.Format
+	}{
+		{"generic-tiff/CMU-1.tiff", "tiff", 500, 500, 2000, 2000, opentile.FormatGenericTIFF},
+		{"ome-tiff/Leica-1.ome.tiff", "ome.tiff", 500, 500, 2000, 2000, opentile.FormatOMETIFF},
+		{"cog-wsi/CMU-1_cog-wsi.tiff", "tiff", 500, 500, 2000, 2000, opentile.FormatCOGWSI},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.file, func(t *testing.T) {
+			src := filepath.Join(td, c.file)
+			if _, err := os.Stat(src); err != nil {
+				t.Skipf("fixture missing: %s", src)
+			}
+			srcTlr, err := opentile.OpenFile(src)
+			if err != nil {
+				t.Fatalf("open src: %v", err)
+			}
+			sb := srcTlr.Levels()[0].Size
+			srcMD := srcTlr.Metadata()
+			srcTlr.Close()
+			if c.x+c.w > sb.W || c.y+c.h > sb.H {
+				t.Skipf("rect exceeds source %dx%d", sb.W, sb.H)
+			}
+			out := filepath.Join(t.TempDir(), "crop."+c.ext)
+			cmd := exec.Command(bin, "crop", "--rect",
+				fmt.Sprintf("%d,%d,%d,%d", c.x, c.y, c.w, c.h), "-o", out, src)
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("crop: %v\n%s", err, b)
+			}
+			outTlr, err := opentile.OpenFile(out)
+			if err != nil {
+				t.Fatalf("open out: %v", err)
+			}
+			defer outTlr.Close()
+			if outTlr.Format() != c.wantFormat {
+				t.Errorf("format = %v, want preserved %v", outTlr.Format(), c.wantFormat)
+			}
+			l0 := outTlr.Levels()[0]
+			if l0.Size.W != c.w || l0.Size.H != c.h {
+				t.Errorf("L0 = %dx%d, want exact %dx%d", l0.Size.W, l0.Size.H, c.w, c.h)
+			}
+			md := outTlr.Metadata()
+			if srcMD.MPP.X != 0 && md.MPP.X != srcMD.MPP.X {
+				t.Errorf("MPP.X changed: got %v, want %v", md.MPP.X, srcMD.MPP.X)
+			}
+			if srcMD.Magnification != 0 && md.Magnification != srcMD.Magnification {
+				t.Errorf("Magnification changed: got %v, want %v", md.Magnification, srcMD.Magnification)
+			}
+		})
+	}
+}
+
+// TestCropLossless_RejectsNonSVS confirms --lossless errors clearly on a non-SVS
+// source until Phase 2b.
+func TestCropLossless_RejectsNonSVS(t *testing.T) {
+	td := testdir(t)
+	bin := buildOnce(t)
+	src := filepath.Join(td, "generic-tiff", "CMU-1-Small-Region.stripped.tiff")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %s", src)
+	}
+	out := filepath.Join(t.TempDir(), "x.tiff")
+	b, err := exec.Command(bin, "crop", "--lossless", "--rect", "0,0,256,256", "-o", out, src).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error for --lossless on non-SVS, got success:\n%s", b)
+	}
+	if !strings.Contains(string(b), "SVS sources only") {
+		t.Errorf("error should mention SVS-only; got:\n%s", b)
 	}
 }
 
