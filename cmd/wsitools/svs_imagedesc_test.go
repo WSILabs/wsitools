@@ -39,3 +39,41 @@ func TestMutateForDownsample_Factor2(t *testing.T) {
 		t.Errorf("expected 23000x16457 in:\n%s", out)
 	}
 }
+
+const cropTestOrigDesc = "Aperio Image Library v10.0.51\r\n" +
+	"79560x30562 [0,100 78000x30462] (256x256) JPEG/RGB Q=30|AppMag = 20|MPP = 0.4990|" +
+	"Left = 27.409658|Top = 20.522137|ImageID = 1004487|OriginalWidth = 79560|Originalheight = 30562"
+
+func TestAperioDescription_Quality(t *testing.T) {
+	d, err := ParseImageDescription(cropTestOrigDesc)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	q, ok := d.Quality()
+	if !ok || q != 30 {
+		t.Fatalf("Quality() = %d,%v want 30,true", q, ok)
+	}
+}
+
+func TestBuildCropImageDescription(t *testing.T) {
+	got := BuildCropImageDescription(cropTestOrigDesc, 78000, 30462, 46492, 3599, 27836, 25633, 256, 256, 30)
+
+	wantGeo := "78000x30462 [46492,3599 27836x25633] (256x256) JPEG/RGB Q=30;"
+	if !strings.Contains(got, wantGeo) {
+		t.Errorf("missing geometry line %q in:\n%s", wantGeo, got)
+	}
+	if !strings.Contains(got, "Aperio Image Library v10.0.51") {
+		t.Errorf("provenance chain missing original software line")
+	}
+	if !strings.HasPrefix(got, "Aperio") {
+		t.Errorf("crop description must start with Aperio")
+	}
+	if !strings.Contains(got, "OriginalWidth = 78000") || !strings.Contains(got, "OriginalHeight = 30462") {
+		t.Errorf("missing appended OriginalWidth/Height = base dims:\n%s", got)
+	}
+	for _, f := range []string{"MPP = 0.4990", "AppMag = 20", "ImageID = 1004487", "Left = 27.409658"} {
+		if !strings.Contains(got, f) {
+			t.Errorf("missing preserved field %q", f)
+		}
+	}
+}
