@@ -9,6 +9,7 @@ import (
 	otdecoder "github.com/wsilabs/opentile-go/decoder"
 	otresample "github.com/wsilabs/opentile-go/resample"
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
@@ -36,26 +37,16 @@ func thumbDims(srcW, srcH, longSide int) (int, int) {
 	return w, longSide
 }
 
-// regenCropThumbnail renders a thumbnail from the cropped L0 raster (RGB888,
-// l0W×l0H) at the crop's aspect ratio and writes it as a single-strip baseline
-// JPEG associated IFD (type "thumbnail", NewSubfileType=0). The complete JFIF
-// decodes via opentile-go's associated Bytes()→ViaCodec path.
-func regenCropThumbnail(w *streamwriter.Writer, l0 []byte, l0W, l0H, quality int) error {
-	tw, th := thumbDims(l0W, l0H, thumbLongSide)
-
-	src := &otdecoder.Image{
-		Width:  l0W,
-		Height: l0H,
-		Stride: l0W * 3,
-		Format: otdecoder.PixelFormatRGB,
-		Pix:    l0,
-	}
+// renderCropThumbnail box-downscales the cropped L0 to a thumbnail (longest side
+// thumbLongSide, aspect preserved) and returns the encoded baseline-JPEG bytes
+// and its dimensions. Writer-agnostic.
+func renderCropThumbnail(l0 []byte, l0W, l0H, quality int) (jpegBytes []byte, tw, th int, err error) {
+	tw, th = thumbDims(l0W, l0H, thumbLongSide)
+	src := &otdecoder.Image{Width: l0W, Height: l0H, Stride: l0W * 3, Format: otdecoder.PixelFormatRGB, Pix: l0}
 	dst := otdecoder.NewImageFormat(tw, th, otdecoder.PixelFormatRGB)
-	if err := otresample.ImageInto(src, dst, otresample.Box); err != nil {
-		return fmt.Errorf("thumbnail downscale: %w", err)
+	if err = otresample.ImageInto(src, dst, otresample.Box); err != nil {
+		return nil, 0, 0, fmt.Errorf("thumbnail downscale: %w", err)
 	}
-
-	// Pack into image.RGBA for the stdlib JPEG encoder (complete JFIF baseline).
 	img := image.NewRGBA(image.Rect(0, 0, tw, th))
 	for y := 0; y < th; y++ {
 		for x := 0; x < tw; x++ {
@@ -68,10 +59,21 @@ func regenCropThumbnail(w *streamwriter.Writer, l0 []byte, l0W, l0H, quality int
 		}
 	}
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
-		return fmt.Errorf("thumbnail encode: %w", err)
+	if err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, 0, 0, fmt.Errorf("thumbnail encode: %w", err)
 	}
+	return buf.Bytes(), tw, th, nil
+}
 
+// regenCropThumbnail renders a thumbnail from the cropped L0 raster (RGB888,
+// l0W×l0H) at the crop's aspect ratio and writes it as a single-strip baseline
+// JPEG associated IFD (type "thumbnail", NewSubfileType=0). The complete JFIF
+// decodes via opentile-go's associated Bytes()→ViaCodec path.
+func regenCropThumbnail(w *streamwriter.Writer, l0 []byte, l0W, l0H, quality int) error {
+	jpegBytes, tw, th, err := renderCropThumbnail(l0, l0W, l0H, quality)
+	if err != nil {
+		return err
+	}
 	return w.AddStripped(streamwriter.StrippedSpec{
 		Width:           uint32(tw),
 		Height:          uint32(th),
@@ -80,8 +82,27 @@ func regenCropThumbnail(w *streamwriter.Writer, l0 []byte, l0W, l0H, quality int
 		SamplesPerPixel: 3,
 		Photometric:     6, // YCbCr (stdlib JFIF); cosmetic for opentile decode
 		Compression:     tiff.CompressionJPEG,
-		StripBytes:      buf.Bytes(),
+		StripBytes:      jpegBytes,
 		NewSubfileType:  0,
 		WSIImageType:    tiff.WSIImageTypeThumbnail,
+	})
+}
+
+// regenCropThumbnailCOGWSI emits a regenerated thumbnail into a cogwsiwriter.
+func regenCropThumbnailCOGWSI(w *cogwsiwriter.Writer, l0 []byte, l0W, l0H, quality int) error {
+	jpegBytes, tw, th, err := renderCropThumbnail(l0, l0W, l0H, quality)
+	if err != nil {
+		return err
+	}
+	return w.AddAssociated(cogwsiwriter.AssociatedSpec{
+		Type:            tiff.WSIImageTypeThumbnail,
+		Width:           uint32(tw),
+		Height:          uint32(th),
+		Compression:     tiff.CompressionJPEG,
+		Photometric:     6,
+		BitsPerSample:   []uint16{8, 8, 8},
+		SamplesPerPixel: 3,
+		Bytes:           jpegBytes,
+		RowsPerStrip:    uint32(th),
 	})
 }

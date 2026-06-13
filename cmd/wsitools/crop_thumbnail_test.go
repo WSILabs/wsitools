@@ -2,6 +2,23 @@ package main
 
 import "testing"
 
+func TestRenderCropThumbnail(t *testing.T) {
+	l0 := make([]byte, 2000*1000*3)
+	for i := range l0 {
+		l0[i] = byte(i)
+	}
+	jpegBytes, tw, th, err := renderCropThumbnail(l0, 2000, 1000, 80)
+	if err != nil {
+		t.Fatalf("renderCropThumbnail: %v", err)
+	}
+	if tw != 1024 || th != 512 {
+		t.Errorf("dims = %dx%d, want 1024x512", tw, th)
+	}
+	if len(jpegBytes) < 2 || jpegBytes[0] != 0xFF || jpegBytes[1] != 0xD8 {
+		t.Errorf("not a JPEG (no SOI marker), %d bytes", len(jpegBytes))
+	}
+}
+
 func TestThumbDims(t *testing.T) {
 	// Landscape: longest side → 1024.
 	w, h := thumbDims(27836, 25633, 1024)
