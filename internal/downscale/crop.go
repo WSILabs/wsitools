@@ -97,9 +97,18 @@ func MaterializeCroppedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []by
 				return fmt.Errorf("read source tile (%d,%d): %w", tx, ty, err)
 			}
 			// factor=1 → unscaled full-tile decode (codec-agnostic).
-			decoded, decW, _, err := DecodeReducedTile(fac, tileBuf[:n], srcTileW, srcTileH, 1)
+			decoded, decW, decH, err := DecodeReducedTile(fac, tileBuf[:n], srcTileW, srcTileH, 1)
 			if err != nil {
 				return fmt.Errorf("decode source tile (%d,%d): %w", tx, ty, err)
+			}
+			// Defensive clamp (matches MaterializeReducedL0): cropTilePlan
+			// derives validW/validH from image bounds, but the decoded tile is
+			// the authoritative pixel source — never read past it.
+			if validW > decW {
+				validW = decW
+			}
+			if validH > decH {
+				validH = decH
 			}
 			PasteSubRect(outL0, cropW, cropH, dstX, dstY, decoded, decW, srcLocalX, srcLocalY, validW, validH)
 		}
