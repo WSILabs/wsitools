@@ -256,7 +256,7 @@ func downsampleToSVS(
 	// macro/overview at the end — mirrors runDownsample exactly.
 	var thumbnail, label, macro opentile.AssociatedImage
 	if !noAssociated {
-		for _, a := range src.Associated() {
+		for _, a := range src.AssociatedImages() {
 			switch a.Type() {
 			case "thumbnail":
 				thumbnail = a
@@ -272,7 +272,7 @@ func downsampleToSVS(
 		if thumbnail == nil {
 			return nil
 		}
-		return writeOneAssociated(w, src, thumbnail)
+		return writeOneAssociated(w, thumbnail)
 	}
 
 	if err := buildPyramid(ctx, src, w, factor, quality, workers, postL0Hook); err != nil {
@@ -280,12 +280,12 @@ func downsampleToSVS(
 	}
 
 	if label != nil {
-		if err := writeOneAssociated(w, src, label); err != nil {
+		if err := writeOneAssociated(w, label); err != nil {
 			return fmt.Errorf("write associated label: %w", err)
 		}
 	}
 	if macro != nil {
-		if err := writeOneAssociated(w, src, macro); err != nil {
+		if err := writeOneAssociated(w, macro); err != nil {
 			return fmt.Errorf("write associated macro/overview: %w", err)
 		}
 	}
@@ -355,8 +355,8 @@ func downsampleToTIFF(
 		srcMag = desc.AppMag
 	} else {
 		md := src.Metadata()
-		srcMPPX = md.MicronsPerPixelX
-		srcMPPY = md.MicronsPerPixelY
+		srcMPPX = md.MPP.X
+		srcMPPY = md.MPP.Y
 		srcMag = md.Magnification
 	}
 
@@ -450,8 +450,8 @@ func downsampleToTIFF(
 	}
 
 	if !noAssociated {
-		for _, a := range src.Associated() {
-			if err := writeOneAssociated(w, src, a); err != nil {
+		for _, a := range src.AssociatedImages() {
+			if err := writeOneAssociated(w, a); err != nil {
 				return fmt.Errorf("write associated %s: %w", a.Type(), err)
 			}
 		}
@@ -520,8 +520,8 @@ func downsampleToCOGWSI(
 		srcMag = descCOG.AppMag
 	} else {
 		md := src.Metadata()
-		srcMPPX = md.MicronsPerPixelX
-		srcMPPY = md.MicronsPerPixelY
+		srcMPPX = md.MPP.X
+		srcMPPY = md.MPP.Y
 		srcMag = md.Magnification
 	}
 
@@ -604,8 +604,8 @@ func downsampleToCOGWSI(
 	}
 
 	if !noAssociated {
-		for _, a := range src.Associated() {
-			spec, err := faithfulCOGWSISpecOT(src, a)
+		for _, a := range src.AssociatedImages() {
+			spec, err := faithfulCOGWSISpecOT(a)
 			if err != nil {
 				if errors.Is(err, errSkipAssociated) {
 					slog.Warn("skipping associated image", "type", a.Type(), "reason", err)
@@ -687,8 +687,8 @@ func downsampleToOMETIFF(
 		srcMag = descOME.AppMag
 	} else {
 		md := src.Metadata()
-		srcMPPX = md.MicronsPerPixelX
-		srcMPPY = md.MicronsPerPixelY
+		srcMPPX = md.MPP.X
+		srcMPPY = md.MPP.Y
 		srcMag = md.Magnification
 	}
 
@@ -745,8 +745,8 @@ func downsampleToOMETIFF(
 	// (label/macro/thumbnail) are listed so IFD positions stay consistent.
 	var omeAssocs []OMEAssoc
 	if !noAssociated {
-		for _, a := range src.Associated() {
-			name := omeAssocName(a.Type())
+		for _, a := range src.AssociatedImages() {
+			name := omeAssocName(string(a.Type()))
 			if name == "" {
 				continue
 			}
@@ -802,11 +802,11 @@ func downsampleToOMETIFF(
 	// Write associated images filtered to recognized OME types (consistent
 	// with omeAssocs above so IFD count matches OME-XML Image list).
 	if !noAssociated {
-		for _, a := range src.Associated() {
-			if omeAssocName(a.Type()) == "" {
+		for _, a := range src.AssociatedImages() {
+			if omeAssocName(string(a.Type())) == "" {
 				continue
 			}
-			if err := writeOneAssociated(w, src, a); err != nil {
+			if err := writeOneAssociated(w, a); err != nil {
 				return fmt.Errorf("write associated %s: %w", a.Type(), err)
 			}
 		}
@@ -844,7 +844,7 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 		return fmt.Errorf("output L0 raster size overflows int64")
 	}
 	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeReducedL0(ctx, src, srcL0, outL0, outW, outH, factor); err != nil {
+	if err := downscale.MaterializeReducedL0(ctx, srcL0, outL0, outW, outH, factor); err != nil {
 		return err
 	}
 

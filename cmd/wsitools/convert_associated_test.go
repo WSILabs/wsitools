@@ -28,13 +28,13 @@ func decodeAssocMap(t *testing.T, path string) map[string][]byte {
 	}
 	defer s.Close()
 	out := make(map[string][]byte)
-	for _, a := range s.Associated() {
+	for _, a := range s.AssociatedImages() {
 		di, err := a.Decode(decoder.DecodeOptions{Format: decoder.PixelFormatRGB})
 		if err != nil {
 			t.Logf("skip undecodable associated %q in %s: %v", a.Type(), path, err)
 			continue
 		}
-		out[a.Type()] = packTightRGB(di)
+		out[string(a.Type())] = packTightRGB(di)
 	}
 	return out
 }

@@ -143,7 +143,7 @@ func runRegion(cmd *cobra.Command, args []string) error {
 	defer slide.Close()
 
 	// Validate --image and --level against opened slide.
-	images := slide.Images()
+	images := slide.Pyramids()
 	if regionImage < 0 || regionImage >= len(images) {
 		return fmt.Errorf("--image %d out of range [0, %d)", regionImage, len(images))
 	}
@@ -164,7 +164,11 @@ func runRegion(cmd *cobra.Command, args []string) error {
 	}
 
 	// Read the region.
-	img, err := slide.ImageReadRegion(regionImage, regionLevel, x, y, w, h, opts...)
+	lv, err := slide.Pyramid(regionImage).Level(regionLevel)
+	if err != nil {
+		return fmt.Errorf("level (%d,%d): %w", regionImage, regionLevel, err)
+	}
+	img, err := lv.ReadRegion(opentile.Region{Origin: opentile.Point{X: x, Y: y}, Size: opentile.Size{W: w, H: h}}, opts...)
 	if err != nil {
 		return fmt.Errorf("reading region: %w", err)
 	}

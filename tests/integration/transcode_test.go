@@ -45,7 +45,7 @@ func TestTranscode_PerCodec_CMU1Small(t *testing.T) {
 	if len(srcLevels) == 0 {
 		t.Fatalf("source has no levels: %s", src)
 	}
-	srcTileSize := srcLevels[0].TileSize()
+	srcTileSize := srcLevels[0].TileSize
 	srcMag := srcTlr.Metadata().Magnification
 	srcTlr.Close()
 
@@ -160,10 +160,10 @@ func validateNovelCodecOutput(t *testing.T, outPath string, wantCompression open
 	if len(levels) == 0 {
 		t.Fatalf("no levels in %s", outPath)
 	}
-	if got := levels[0].Compression(); got != wantCompression {
+	if got := levels[0].Compression; got != wantCompression {
 		t.Errorf("L0 Compression() = %v, want %v", got, wantCompression)
 	}
-	if got := levels[0].TileSize(); got != wantTileSize {
+	if got := levels[0].TileSize; got != wantTileSize {
 		t.Errorf("L0 TileSize() = %v, want %v", got, wantTileSize)
 	}
 

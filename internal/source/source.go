@@ -77,8 +77,8 @@ type AssociatedImage interface {
 	// Source returns the faithful on-disk source form (verbatim strips + TIFF
 	// tags) for byte-identical re-emission into a new standalone TIFF; ok=false
 	// for synthesized / tiled / non-TIFF associated images. Delegates to
-	// opentile-go's Slide.AssociatedSourceOf (GH opentile-go#22).
-	Source() (opentile.AssociatedSource, bool)
+	// opentile-go's AssociatedImage.Encoding() (GH opentile-go#22).
+	Source() (opentile.AssociatedEncoding, bool)
 
 	// IFDOffset returns the byte offset of the backing TIFF IFD for
 	// TIFF-family slides; ok=false otherwise.

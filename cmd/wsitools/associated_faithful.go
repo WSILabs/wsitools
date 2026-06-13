@@ -81,9 +81,9 @@ func faithfulStrippedSpec(a source.AssociatedImage) (streamwriter.StrippedSpec, 
 // associated image byte-faithfully when opentile exposes its source form via
 // AssociatedSourceOf (verbatim strips + Predictor/JPEGTables), else decodes and
 // re-encodes as a self-contained LZW strip (no predictor).
-func faithfulCOGWSISpecOT(slide *opentile.Slide, a opentile.AssociatedImage) (cogwsiwriter.AssociatedSpec, error) {
-	t := a.Type()
-	if src, ok := slide.AssociatedSourceOf(a); ok {
+func faithfulCOGWSISpecOT(a opentile.AssociatedImage) (cogwsiwriter.AssociatedSpec, error) {
+	t := string(a.Type())
+	if src, ok := a.Encoding(); ok {
 		sz := a.Size()
 		return cogwsiwriter.AssociatedSpec{
 			Type: t, Width: uint32(sz.W), Height: uint32(sz.H),
@@ -112,9 +112,9 @@ func faithfulCOGWSISpecOT(slide *opentile.Slide, a opentile.AssociatedImage) (co
 // faithfulStrippedSpec for the *opentile.Slide paths (convert --factor
 // svs|tiff|ome-tiff). It fills geometry + codec + strips faithfully; the
 // caller overlays flavor (NewSubfileType / WSIImageType / ExtraTags).
-func faithfulStrippedSpecOT(slide *opentile.Slide, a opentile.AssociatedImage) (streamwriter.StrippedSpec, error) {
-	t := a.Type()
-	if src, ok := slide.AssociatedSourceOf(a); ok {
+func faithfulStrippedSpecOT(a opentile.AssociatedImage) (streamwriter.StrippedSpec, error) {
+	t := string(a.Type())
+	if src, ok := a.Encoding(); ok {
 		sz := a.Size()
 		return streamwriter.StrippedSpec{
 			Width: uint32(sz.W), Height: uint32(sz.H),

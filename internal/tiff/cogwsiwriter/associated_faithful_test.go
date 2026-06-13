@@ -42,11 +42,11 @@ func TestAssociatedMultiStripPredictorJPEGTables(t *testing.T) {
 	var wantPix []byte
 	var spec cogwsiwriter.AssociatedSpec
 	var found bool
-	for _, a := range ss.Associated() {
+	for _, a := range ss.AssociatedImages() {
 		if a.Type() != "label" {
 			continue
 		}
-		src, ok := ss.AssociatedSourceOf(a)
+		src, ok := a.Encoding()
 		if !ok {
 			t.Fatal("no faithful source for label")
 		}
@@ -131,7 +131,7 @@ func TestAssociatedMultiStripPredictorJPEGTables(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer gs.Close()
-	for _, a := range gs.Associated() {
+	for _, a := range gs.AssociatedImages() {
 		if a.Type() != "label" {
 			continue
 		}

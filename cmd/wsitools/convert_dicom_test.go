@@ -296,9 +296,13 @@ func TestSVSToDICOMPixelRoundTrip(t *testing.T) {
 			t.Fatalf("opentile.OpenFile(%s): %v", path, err)
 		}
 		defer s.Close()
-		img, err := s.ImageReadRegion(0, 0, 0, 0, w, h, opentile.WithFormat(decoder.PixelFormatRGB))
+		lv, err := s.Pyramid(0).Level(0)
 		if err != nil {
-			t.Fatalf("ImageReadRegion(%s): %v", path, err)
+			t.Fatalf("Level(0,0) %s: %v", path, err)
+		}
+		img, err := lv.ReadRegion(opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: w, H: h}}, opentile.WithFormat(decoder.PixelFormatRGB))
+		if err != nil {
+			t.Fatalf("ReadRegion(%s): %v", path, err)
 		}
 		return img
 	}
@@ -367,9 +371,13 @@ func TestJP2KToDICOMPixelRoundTrip(t *testing.T) {
 			t.Fatalf("opentile.OpenFile(%s): %v", path, err)
 		}
 		defer s.Close()
-		img, err := s.ImageReadRegion(0, 0, 0, 0, w, h, opentile.WithFormat(decoder.PixelFormatRGB))
+		lv, err := s.Pyramid(0).Level(0)
 		if err != nil {
-			t.Fatalf("ImageReadRegion(%s): %v", path, err)
+			t.Fatalf("Level(0,0) %s: %v", path, err)
+		}
+		img, err := lv.ReadRegion(opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: w, H: h}}, opentile.WithFormat(decoder.PixelFormatRGB))
+		if err != nil {
+			t.Fatalf("ReadRegion(%s): %v", path, err)
 		}
 		return img
 	}
