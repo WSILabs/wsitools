@@ -107,17 +107,7 @@ func MaterializeReducedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []by
 // tile (which has stride decW*3) into the dst raster at position (dx, dy).
 // Caller must have clamped validW/validH to fit inside dst.
 func PasteIntoRaster(dst []byte, dstW, dstH, dx, dy int, src []byte, srcStrideW, validW, validH int) {
-	if validW <= 0 || validH <= 0 {
-		return
-	}
-	rowBytes := validW * 3
-	srcStride := srcStrideW * 3
-	dstStride := dstW * 3
-	for y := 0; y < validH; y++ {
-		srcOff := y * srcStride
-		dstOff := (dy+y)*dstStride + dx*3
-		copy(dst[dstOff:dstOff+rowBytes], src[srcOff:srcOff+rowBytes])
-	}
+	PasteSubRect(dst, dstW, dstH, dx, dy, src, srcStrideW, 0, 0, validW, validH)
 }
 
 // DecodeReducedTile decodes one source tile's compressed bytes reduced by
