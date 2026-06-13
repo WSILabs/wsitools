@@ -28,3 +28,29 @@ func TestValidateCropBounds(t *testing.T) {
 		t.Error("Y+H past L0 height must error")
 	}
 }
+
+func TestHalveRaster(t *testing.T) {
+	w, h := 4, 4
+	raster := make([]byte, w*h*3)
+	for i := range raster {
+		raster[i] = byte(i)
+	}
+	out, ow, oh, err := halveRaster(raster, w, h)
+	if err != nil {
+		t.Fatalf("halveRaster: %v", err)
+	}
+	if ow != 2 || oh != 2 {
+		t.Errorf("dims = %dx%d, want 2x2", ow, oh)
+	}
+	if len(out) != ow*oh*3 {
+		t.Errorf("len = %d, want %d", len(out), ow*oh*3)
+	}
+	odd := make([]byte, 5*5*3)
+	_, ow, oh, err = halveRaster(odd, 5, 5)
+	if err != nil {
+		t.Fatalf("halveRaster odd: %v", err)
+	}
+	if ow != 2 || oh != 2 {
+		t.Errorf("odd dims = %dx%d, want 2x2 (5&^1=4, /2=2)", ow, oh)
+	}
+}

@@ -312,29 +312,14 @@ func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []by
 		}
 
 		if outLvl < nLevels-1 {
-			evenW := currentW &^ 1
-			evenH := currentH &^ 1
-			if evenW != currentW || evenH != currentH {
-				currentRaster = cropRaster(currentRaster, currentW, currentH, evenW, evenH)
-				currentW, currentH = evenW, evenH
-			}
-			srcImg := &otdecoder.Image{
-				Width:  currentW,
-				Height: currentH,
-				Stride: currentW * 3,
-				Format: otdecoder.PixelFormatRGB,
-				Pix:    currentRaster,
-			}
-			dstImg := otdecoder.NewImageFormat(currentW/2, currentH/2, otdecoder.PixelFormatRGB)
-			if err := otresample.ImageInto(srcImg, dstImg, otresample.Box); err != nil {
+			var herr error
+			currentRaster, currentW, currentH, herr = halveRaster(currentRaster, currentW, currentH)
+			if herr != nil {
 				if progress != nil {
 					progress.Wait()
 				}
-				return fmt.Errorf("Box halving level %d→%d: %w", outLvl, outLvl+1, err)
+				return fmt.Errorf("Box halving level %d→%d: %w", outLvl, outLvl+1, herr)
 			}
-			currentRaster = dstImg.Pix
-			currentW /= 2
-			currentH /= 2
 			if currentW == 0 || currentH == 0 {
 				break
 			}
@@ -345,6 +330,31 @@ func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []by
 		progress.Wait()
 	}
 	return nil
+}
+
+// halveRaster box-downscales an RGB888 raster by 2×, truncating odd dimensions
+// to even first, returning the half-size raster and its new dimensions. Shared
+// by buildPyramidFromRaster's inter-level reduction and the lossless crop's
+// L0→L1 reduction so both produce byte-identical L1 pixels.
+func halveRaster(raster []byte, w, h int) ([]byte, int, int, error) {
+	evenW := w &^ 1
+	evenH := h &^ 1
+	if evenW != w || evenH != h {
+		raster = cropRaster(raster, w, h, evenW, evenH)
+		w, h = evenW, evenH
+	}
+	src := &otdecoder.Image{
+		Width:  w,
+		Height: h,
+		Stride: w * 3,
+		Format: otdecoder.PixelFormatRGB,
+		Pix:    raster,
+	}
+	dst := otdecoder.NewImageFormat(w/2, h/2, otdecoder.PixelFormatRGB)
+	if err := otresample.ImageInto(src, dst, otresample.Box); err != nil {
+		return nil, 0, 0, err
+	}
+	return dst.Pix, w / 2, h / 2, nil
 }
 
 // cropRaster returns a fresh RGB888 buffer of size dstW*dstH*3 containing the
