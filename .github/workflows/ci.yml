@@ -38,16 +38,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: sample_files
-          key: wsi-fixtures-v1-${{ hashFiles('.github/fixtures.sha256') }}
+          key: wsi-fixtures-v4-${{ hashFiles('.github/fixtures.sha256') }}
 
       - name: Download fixtures
         if: steps.fixtures-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p sample_files
           cd sample_files
-          gh release download v1 \
+          # Pull only the tarballs wsitools verifies (see fixtures.sha256) so CI
+          # doesn't fetch the full corpus (philips-tiff/bif are large and unused
+          # here). Add more --pattern lines if a test starts needing them.
+          gh release download v4 \
             --repo wsilabs/wsi-fixtures \
-            --pattern '*.tar'
+            --pattern 'svs.tar' \
+            --pattern 'ndpi.tar' \
+            --pattern 'cog-wsi.tar'
           for t in *.tar; do
             tar xf "$t" && rm "$t"
           done
