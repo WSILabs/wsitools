@@ -85,6 +85,12 @@ func cropToTIFF(ctx context.Context, src *opentile.Slide, input, output string, 
 	}
 	if !noAssociated {
 		for _, a := range src.AssociatedImages() {
+			if a.Type() == opentile.AssociatedThumbnail {
+				if err := regenCropThumbnail(w, l0, l0W, l0H, quality); err != nil {
+					return fmt.Errorf("regenerate thumbnail: %w", err)
+				}
+				continue
+			}
 			if err := writeOneAssociated(w, a); err != nil {
 				return fmt.Errorf("write associated %s: %w", a.Type(), err)
 			}
@@ -102,12 +108,19 @@ func cropToOMETIFF(ctx context.Context, src *opentile.Slide, input, output strin
 	mppX, mppY, mag := cropSourceScale(input, src)
 	bigtiffMode := streamwriterBigTIFF(bigtiffFlag, l0W, l0H)
 
+	ttw, tth := thumbDims(l0W, l0H, thumbLongSide)
 	var omeAssocs []OMEAssoc
 	if !noAssociated {
 		for _, a := range src.AssociatedImages() {
-			if name := omeAssocName(string(a.Type())); name != "" {
-				omeAssocs = append(omeAssocs, OMEAssoc{Name: name, W: uint32(a.Size().W), H: uint32(a.Size().H)})
+			name := omeAssocName(string(a.Type()))
+			if name == "" {
+				continue
 			}
+			aw, ah := uint32(a.Size().W), uint32(a.Size().H)
+			if a.Type() == opentile.AssociatedThumbnail {
+				aw, ah = uint32(ttw), uint32(tth) // regenerated dims must match the written IFD
+			}
+			omeAssocs = append(omeAssocs, OMEAssoc{Name: name, W: aw, H: ah})
 		}
 	}
 	omeXML := SyntheticOMEDescriptionWithMag(uint32(l0W), uint32(l0H), mppX, mppY, mag, "Image", string(src.Format()), omeAssocs)
@@ -142,6 +155,12 @@ func cropToOMETIFF(ctx context.Context, src *opentile.Slide, input, output strin
 	if !noAssociated {
 		for _, a := range src.AssociatedImages() {
 			if omeAssocName(string(a.Type())) == "" {
+				continue
+			}
+			if a.Type() == opentile.AssociatedThumbnail {
+				if err := regenCropThumbnail(w, l0, l0W, l0H, quality); err != nil {
+					return fmt.Errorf("regenerate thumbnail: %w", err)
+				}
 				continue
 			}
 			if err := writeOneAssociated(w, a); err != nil {
@@ -201,6 +220,13 @@ func cropToCOGWSI(ctx context.Context, src *opentile.Slide, input, output string
 	}
 	if !noAssociated {
 		for _, a := range src.AssociatedImages() {
+			if a.Type() == opentile.AssociatedThumbnail {
+				if err := regenCropThumbnailCOGWSI(w, l0, l0W, l0H, quality); err != nil {
+					aborted = true
+					return fmt.Errorf("regenerate thumbnail: %w", err)
+				}
+				continue
+			}
 			spec, err := faithfulCOGWSISpecOT(a)
 			if err != nil {
 				if errors.Is(err, errSkipAssociated) {

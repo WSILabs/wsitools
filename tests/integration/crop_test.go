@@ -387,6 +387,71 @@ func TestCropLossless_RejectsNonSVS(t *testing.T) {
 	}
 }
 
+// TestCrop_ThumbnailRegen verifies a non-SVS crop regenerates the thumbnail to
+// the crop's aspect ratio (not the whole-slide thumbnail passed through). Uses
+// the cog-wsi fixture (it carries a thumbnail). Local-only.
+func TestCrop_ThumbnailRegen(t *testing.T) {
+	td := testdir(t)
+	bin := buildOnce(t)
+	src := filepath.Join(td, "cog-wsi", "CMU-1_cog-wsi.tiff")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %s", src)
+	}
+	srcTlr, err := opentile.OpenFile(src)
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	hasThumb := false
+	for _, a := range srcTlr.AssociatedImages() {
+		if a.Type() == opentile.AssociatedThumbnail {
+			hasThumb = true
+		}
+	}
+	srcTlr.Close()
+	if !hasThumb {
+		t.Skip("source has no thumbnail")
+	}
+
+	out := filepath.Join(t.TempDir(), "crop.tiff")
+	if b, err := exec.Command(bin, "crop", "--rect", "500,500,2000,2000", "-o", out, src).CombinedOutput(); err != nil {
+		t.Fatalf("crop: %v\n%s", err, b)
+	}
+	outTlr, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("open out: %v", err)
+	}
+	defer outTlr.Close()
+
+	var thumb opentile.AssociatedImage
+	for _, a := range outTlr.AssociatedImages() {
+		if a.Type() == opentile.AssociatedThumbnail {
+			thumb = a
+		}
+	}
+	if thumb == nil {
+		t.Fatal("output has no thumbnail (regeneration dropped it)")
+	}
+	aspect := float64(thumb.Size().W) / float64(thumb.Size().H)
+	if aspect < 0.9 || aspect > 1.1 {
+		t.Errorf("thumbnail aspect %.3f not ≈ 1.0 (square crop) — likely passed through, not regenerated", aspect)
+	}
+	if _, err := thumb.Decode(decoder.DecodeOptions{Format: decoder.PixelFormatRGB}); err != nil {
+		t.Errorf("output thumbnail does not decode: %v", err)
+	}
+	var haveLabel, haveOverview bool
+	for _, a := range outTlr.AssociatedImages() {
+		switch a.Type() {
+		case opentile.AssociatedLabel:
+			haveLabel = true
+		case opentile.AssociatedOverview:
+			haveOverview = true
+		}
+	}
+	if !haveLabel || !haveOverview {
+		t.Errorf("passthrough associated missing: label=%v overview=%v", haveLabel, haveOverview)
+	}
+}
+
 // TestCrop_ReencodeVariants checks the default (re-encode) crop produces a valid,
 // re-openable SVS with the exact requested extent and preserved MPP/magnification
 // across SVS source variants (JPEG2000, 512px tiles, 4:4:4). No ImageScope oracle
