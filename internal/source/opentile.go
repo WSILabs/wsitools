@@ -154,6 +154,9 @@ func (a *opentileAssociated) Compression() Compression {
 func (a *opentileAssociated) IFDOffset() (int64, bool) {
 	return a.slide.AssociatedIFDOffset(a.a)
 }
+func (a *opentileAssociated) Source() (opentile.AssociatedSource, bool) {
+	return a.slide.AssociatedSourceOf(a.a)
+}
 
 func mapOpentileCompression(c opentile.Compression) Compression {
 	switch c {

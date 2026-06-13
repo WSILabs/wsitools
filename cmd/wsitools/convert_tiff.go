@@ -772,22 +772,17 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 		if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Type()) == "" {
 			continue
 		}
-		bs, err := a.Bytes()
+		spec, err := faithfulStrippedSpec(a)
 		if err != nil {
+			if errors.Is(err, errSkipAssociated) {
+				slog.Warn("skipping associated", "type", a.Type(), "reason", err)
+				continue
+			}
 			return fmt.Errorf("associated %s: %w", a.Type(), err)
 		}
-		spec := streamwriter.StrippedSpec{
-			Width:           uint32(a.Size().X),
-			Height:          uint32(a.Size().Y),
-			RowsPerStrip:    uint32(a.Size().Y),
-			BitsPerSample:   []uint16{8, 8, 8},
-			SamplesPerPixel: 3,
-			Photometric:     2,
-			Compression:     mapCompressionForOutput(a.Compression()),
-			StripBytes:      bs,
-			NewSubfileType:  newSubfileTypeForAssoc(container, a.Type()),
-			WSIImageType:    a.Type(),
-		}
+		spec.BitsPerSample = []uint16{8, 8, 8}
+		spec.NewSubfileType = newSubfileTypeForAssoc(container, a.Type())
+		spec.WSIImageType = a.Type()
 		// SVS-shaped output: emit Aperio-flavored NewSubfileType via
 		// ExtraTags (macro=9, label=1). Clear spec.NewSubfileType so the
 		// writer doesn't also emit a default value — EntryBuilder doesn't
@@ -825,6 +820,8 @@ func mapCompressionForOutput(c source.Compression) uint16 {
 		return tiff.CompressionLZW
 	case source.CompressionJPEG2000:
 		return tiff.CompressionJPEG2000
+	case source.CompressionDeflate:
+		return tiff.CompressionDeflate
 	}
 	return tiff.CompressionNone
 }

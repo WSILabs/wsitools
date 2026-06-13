@@ -37,10 +37,21 @@ type levelLayoutInput struct {
 
 // associatedLayoutInput is one associated image (label/macro/thumbnail/overview).
 type associatedLayoutInput struct {
-	Bytes         uint32 // total length
+	StripBytes    []uint32 // per-strip compressed lengths, in document order
+	JPEGTables    uint32   // len of JPEGTables (0 if none)
+	Predictor     uint16   // tag 317 (emitted only when > 1)
 	Width, Height uint32
 	Compression   uint16
 	Type          string // canonical WSIImageType value
+}
+
+// totalBytes returns the sum of all strip lengths (the associated data area).
+func (a associatedLayoutInput) totalBytes() uint64 {
+	var n uint64
+	for _, b := range a.StripBytes {
+		n += uint64(b)
+	}
+	return n
 }
 
 type layoutInput struct {
@@ -70,15 +81,15 @@ type associatedLayoutPlan struct {
 
 // layoutPlan is the complete head-block + tile-data layout for the file.
 type layoutPlan struct {
-	BigTIFF         bool
-	HeaderSize      uint64 // 8 (classic) or 16 (BigTIFF)
-	GhostOffset     uint64 // == HeaderSize
-	GhostSize       uint64
-	FirstIFDOffset  uint64 // immediately after ghost
-	Levels          []levelLayoutPlan
-	Associated      []associatedLayoutPlan
-	HeadBlockEnd    uint64 // first byte of pyramid tile data area
-	FileSize        uint64 // total file size including all tile + associated data
+	BigTIFF        bool
+	HeaderSize     uint64 // 8 (classic) or 16 (BigTIFF)
+	GhostOffset    uint64 // == HeaderSize
+	GhostSize      uint64
+	FirstIFDOffset uint64 // immediately after ghost
+	Levels         []levelLayoutPlan
+	Associated     []associatedLayoutPlan
+	HeadBlockEnd   uint64 // first byte of pyramid tile data area
+	FileSize       uint64 // total file size including all tile + associated data
 }
 
 const (
@@ -147,7 +158,7 @@ func planLayout(in layoutInput) (layoutPlan, error) {
 	for i, a := range in.Associated {
 		cursor = alignUp(cursor, tileAlign)
 		plan.Associated[i].DataOffset = cursor
-		cursor += uint64(a.Bytes)
+		cursor += a.totalBytes()
 	}
 
 	plan.FileSize = cursor
@@ -168,7 +179,7 @@ func decideBigTIFF(in layoutInput) (bool, error) {
 		}
 	}
 	for _, a := range in.Associated {
-		total += uint64(a.Bytes)
+		total += a.totalBytes()
 	}
 	total += uint64(in.MetaBytes) + 64*1024 // metadata + safety margin
 	// Promote when predicted size > 2 GiB (leaves 2 GiB cushion under the 4 GiB classic ceiling).
@@ -218,12 +229,33 @@ func ifdSizeForLevel(lv levelLayoutInput, big bool) (uint64, uint64) {
 	return ifd, external
 }
 
+// ifdSizeForAssociated returns (ifd_record_size, external_arrays_size) for an
+// associated-image IFD. Mirrors ifdSizeForLevel: the multi-strip arrays,
+// JPEGTables, and classic-TIFF external BitsPerSample/WSIImageType all live in
+// the external area. Predictor (317) is a single inline SHORT — no external.
 func ifdSizeForAssociated(a associatedLayoutInput, big bool) (uint64, uint64) {
 	tagCount := countTagsForAssociated(a)
 	ifd := uint64(tiff.IFDRecordSize(tagCount, big))
-	// Associated images use StripOffsets/StripByteCounts (1 entry each, typically inline).
-	// Reserve 64 bytes external for safety (BitsPerSample array, etc.).
-	return ifd, 64
+	var external uint64
+	offsetFieldSize := uint64(4)
+	if big {
+		offsetFieldSize = 8
+	}
+	n := uint64(len(a.StripBytes))
+	external += n * offsetFieldSize // StripOffsets
+	external += n * offsetFieldSize // StripByteCounts
+	external += uint64(a.JPEGTables)
+	if !big {
+		external += 6 // BitsPerSample: 3 SHORTs = 6 bytes (> 4-byte classic inline cap)
+		// WSIImageType ASCII: len(Type)+1 (NUL), padded to even; external when
+		// > 4-byte classic inline cap.
+		wt := uint64(len(a.Type) + 1)
+		if wt%2 != 0 {
+			wt++
+		}
+		external += wt
+	}
+	return ifd, external
 }
 
 // countTagsForLevel returns the count of TIFF directory entries we will emit
@@ -248,11 +280,18 @@ func countTagsForLevel(lv levelLayoutInput) int {
 	return n
 }
 
-func countTagsForAssociated(_ associatedLayoutInput) int {
+func countTagsForAssociated(a associatedLayoutInput) int {
 	// NewSubfileType, ImageWidth, ImageLength, BitsPerSample, Compression,
 	// PhotometricInterpretation, SamplesPerPixel, PlanarConfig, StripOffsets,
 	// StripByteCounts, RowsPerStrip, WSIImageType. (12)
-	return 12
+	n := 12
+	if a.Predictor > 1 {
+		n++ // Predictor (317)
+	}
+	if a.JPEGTables > 0 {
+		n++ // JPEGTables (347)
+	}
+	return n
 }
 
 func alignUp(v, align uint64) uint64 {
