@@ -8,6 +8,21 @@ import (
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
+// levelJPEGTables returns the source level's raw JPEGTables (TIFF tag 347), the
+// shared DQT/DHT prefix referenced by every abbreviated tile. The streamwriter
+// writes LevelSpec.JPEGTables verbatim into tag 347, so a byte-identical copy
+// must use the RAW tag-347 payload here. NOTE: Level.TilePrefix() is NOT this —
+// it returns a derived splice prefix (tables reshaped for in-place JPEG
+// splicing, e.g. with APP14), which would mismatch the source's tag 347.
+func levelJPEGTables(l *opentile.Level) []byte {
+	if tags, ok := l.TIFFTags(); ok {
+		if t, ok := tags.Tag(347); ok {
+			return t.Raw
+		}
+	}
+	return nil
+}
+
 // levelPhotometric returns the source level's PhotometricInterpretation (TIFF
 // tag 262) so a verbatim tile copy declares the same colorspace the source did
 // (e.g. 2=RGB or 6=YCbCr). A re-encode path can hardcode RGB, but a byte-copy
@@ -25,10 +40,15 @@ func levelPhotometric(l *opentile.Level) uint16 {
 }
 
 // writeLosslessL0 emits pyramid level 0 by copying a contiguous block of source
-// L0 tiles VERBATIM (byte-identical compressed bytes), propagating the source
-// level's shared codec prefix (JPEG tables, tag 347) and photometric. The crop
-// origin must be tile-aligned (see snapRectToTiles) so output tile (ox,oy) maps
-// 1:1 onto source tile (stx0+ox, sty0+oy). outW/outH are the snapped L0 dims.
+// L0 tiles VERBATIM, reproducing the source's on-disk storage byte-for-byte: the
+// abbreviated tile BODIES (TileBodyInto — the bytes as stored, WITHOUT the shared
+// JPEG-tables prefix) plus the level's raw shared tables carried once in tag 347
+// (JPEGTables=levelJPEGTables). This mirrors how encodeAndWriteLevel writes abbreviated
+// tiles + a shared tables blob. (Do NOT use Level.Tile here: it splices the
+// prefix+APP14 into each tile, which — combined with the tag-347 JPEGTables —
+// would double the tables on read-back.) The crop origin must be tile-aligned
+// (see snapRectToTiles) so output tile (ox,oy) maps 1:1 onto source tile
+// (stx0+ox, sty0+oy). outW/outH are the snapped L0 dims.
 //
 // It mirrors encodeAndWriteLevel's concurrent NextReady drain (so non-row-major
 // --tile-order still works and the reorder buffer never deadlocks on large
@@ -43,7 +63,7 @@ func writeLosslessL0(w *streamwriter.Writer, srcL0 *opentile.Level, stx0, sty0, 
 		Photometric:     levelPhotometric(srcL0), // match source (verbatim copy must not relabel)
 		SamplesPerPixel: 3,                       // SVS L0 is always 3×8-bit
 		BitsPerSample:   []uint16{8, 8, 8},
-		JPEGTables:      srcL0.TilePrefix(), // shared tag-347 tables (nil if none)
+		JPEGTables:      levelJPEGTables(srcL0), // raw tag-347 (NOT TilePrefix; see above)
 		NewSubfileType:  0,
 		WSIImageType:    tiff.WSIImageTypePyramid,
 	})
@@ -71,19 +91,21 @@ func writeLosslessL0(w *streamwriter.Writer, srcL0 *opentile.Level, stx0, sty0, 
 		}
 	}()
 
+	// Scratch buffer reused across the sequential submit loop; each tile's bytes
+	// are copied into a fresh slice before WriteTile, since the reorder buffer
+	// holds the slice for the deferred (concurrent) write.
+	scratch := make([]byte, srcL0.TileBodyMaxSize())
 	var submitErr error
 	for oy := 0; oy < outTilesY && submitErr == nil; oy++ {
 		for ox := 0; ox < outTilesX; ox++ {
-			// Level.Tile allocates a fresh []byte per call (opentile-go
-			// level_reads.go: ImageRawTile), so the slice stays stable while the
-			// reorder buffer holds it for the deferred write. Do NOT switch to
-			// the buffer-reusing TileInto here without adding a copy.
-			tile, err := srcL0.Tile(stx0+ox, sty0+oy)
+			n, err := srcL0.TileBodyInto(stx0+ox, sty0+oy, scratch)
 			if err != nil {
-				submitErr = fmt.Errorf("read source tile (%d,%d): %w", stx0+ox, sty0+oy, err)
+				submitErr = fmt.Errorf("read source tile body (%d,%d): %w", stx0+ox, sty0+oy, err)
 				break
 			}
-			if err := lh.WriteTile(uint32(ox), uint32(oy), tile); err != nil {
+			body := make([]byte, n)
+			copy(body, scratch[:n])
+			if err := lh.WriteTile(uint32(ox), uint32(oy), body); err != nil {
 				submitErr = err
 				break
 			}
