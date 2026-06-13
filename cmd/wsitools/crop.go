@@ -87,6 +87,32 @@ func cropPyramidLevels(l0W, l0H, tileSize int) int {
 	return n
 }
 
+// snapRectToTiles snaps a requested L0 rect to the tile grid for a lossless
+// crop: origin DOWN to the enclosing tile boundary, far edge UP (clamped to the
+// image), producing the tile-aligned bounding box of the request. Returns the
+// snapped rect, the source tile-coordinate origin of the block (stx0,sty0), and
+// the output tile-grid dimensions (outTilesX,outTilesY). A tile-aligned origin
+// means output tile (ox,oy) maps 1:1 onto source tile (stx0+ox, sty0+oy).
+func snapRectToTiles(x, y, w, h, tileW, tileH, baseW, baseH int) (snapX, snapY, snapW, snapH, stx0, sty0, outTilesX, outTilesY int) {
+	snapX = (x / tileW) * tileW
+	snapY = (y / tileH) * tileH
+	endX := ((x + w + tileW - 1) / tileW) * tileW
+	endY := ((y + h + tileH - 1) / tileH) * tileH
+	if endX > baseW {
+		endX = baseW
+	}
+	if endY > baseH {
+		endY = baseH
+	}
+	snapW = endX - snapX
+	snapH = endY - snapY
+	stx0 = snapX / tileW
+	sty0 = snapY / tileH
+	outTilesX = (snapW + tileW - 1) / tileW
+	outTilesY = (snapH + tileH - 1) / tileH
+	return
+}
+
 // validateCropBounds ensures the rect lies fully inside an l0W×l0H level.
 func validateCropBounds(x, y, w, h, l0W, l0H int) error {
 	if x < 0 || y < 0 {

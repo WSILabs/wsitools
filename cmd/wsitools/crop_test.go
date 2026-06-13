@@ -29,6 +29,35 @@ func TestValidateCropBounds(t *testing.T) {
 	}
 }
 
+func TestSnapRectToTiles(t *testing.T) {
+	// Unaligned rect, base larger than the bbox: snaps to the enclosing tile box.
+	snapX, snapY, snapW, snapH, stx0, sty0, ntx, nty := snapRectToTiles(100, 80, 300, 300, 256, 256, 4096, 4096)
+	if snapX != 0 || snapY != 0 || snapW != 512 || snapH != 512 {
+		t.Errorf("unaligned snap = %d,%d %dx%d, want 0,0 512x512", snapX, snapY, snapW, snapH)
+	}
+	if stx0 != 0 || sty0 != 0 || ntx != 2 || nty != 2 {
+		t.Errorf("unaligned tiles = stx0=%d sty0=%d ntx=%d nty=%d, want 0,0,2,2", stx0, sty0, ntx, nty)
+	}
+
+	// Already tile-aligned: snapped == requested.
+	snapX, snapY, snapW, snapH, stx0, sty0, ntx, nty = snapRectToTiles(256, 512, 512, 256, 256, 256, 4096, 4096)
+	if snapX != 256 || snapY != 512 || snapW != 512 || snapH != 256 {
+		t.Errorf("aligned snap = %d,%d %dx%d, want 256,512 512x256", snapX, snapY, snapW, snapH)
+	}
+	if stx0 != 1 || sty0 != 2 || ntx != 2 || nty != 1 {
+		t.Errorf("aligned tiles = stx0=%d sty0=%d ntx=%d nty=%d, want 1,2,2,1", stx0, sty0, ntx, nty)
+	}
+
+	// Edge clamp: far edge would exceed the image → clamped; last tile partial.
+	snapX, snapY, snapW, snapH, _, _, ntx, nty = snapRectToTiles(400, 400, 150, 150, 256, 256, 600, 600)
+	if snapX != 256 || snapY != 256 || snapW != 344 || snapH != 344 {
+		t.Errorf("edge snap = %d,%d %dx%d, want 256,256 344x344", snapX, snapY, snapW, snapH)
+	}
+	if ntx != 2 || nty != 2 {
+		t.Errorf("edge tiles = %dx%d, want 2x2 (last partial)", ntx, nty)
+	}
+}
+
 func TestHalveRaster(t *testing.T) {
 	w, h := 4, 4
 	raster := make([]byte, w*h*3)
