@@ -41,7 +41,7 @@ func TestDumpIFDs_JSON(t *testing.T) {
 		Format string `json:"format"`
 		IFDs   []struct {
 			Index           int    `json:"index"`
-			Kind            string `json:"kind"`
+			ImageType       string `json:"image_type"`
 			Width           uint64 `json:"width"`
 			Height          uint64 `json:"height"`
 			Compression     uint64 `json:"compression_tag"`
@@ -60,7 +60,7 @@ func TestDumpIFDs_JSON(t *testing.T) {
 	// At least one IFD should be classified as a pyramid level.
 	foundPyramid := false
 	for _, ifd := range got.IFDs {
-		if ifd.Kind == "pyramid" {
+		if ifd.ImageType == "pyramid" {
 			foundPyramid = true
 			break
 		}

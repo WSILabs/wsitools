@@ -198,7 +198,7 @@ func isValidFactor(f int) bool {
 // of (W*H/factor^2) bytes for an RGB raster across all output levels at JPEG
 // compressed roughly 1/8 average → divide by 8. If that exceeds 2 GiB,
 // promote to BigTIFF.
-func predictBigTIFFNeeded(srcL0 opentile.Level, levels []opentile.Level, factor int) bool {
+func predictBigTIFFNeeded(srcL0 *opentile.Level, levels []*opentile.Level, factor int) bool {
 	var total int64
 	for _, l := range levels {
 		w := int64(l.Size.W / factor)
@@ -277,7 +277,7 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	}
 	slog.Debug("materialising output L0 raster", "out_w", outW, "out_h", outH, "raster_mb", rasterBytes/(1024*1024))
 	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeReducedL0(ctx, src, srcL0, outL0, outW, outH, factor); err != nil {
+	if err := downscale.MaterializeReducedL0(ctx, srcL0, outL0, outW, outH, factor); err != nil {
 		if progress != nil {
 			progress.Wait()
 		}
@@ -519,8 +519,8 @@ func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty int) ([]byte,
 // as a single-strip IFD. NewSubfileType is set per the SVS reader classifier
 // convention: thumbnail=0, label=1 (reduced bit), overview/macro=9 (reduced +
 // macro bit). Compression tag mirrors the source.
-func writeOneAssociated(w *streamwriter.Writer, slide *opentile.Slide, a opentile.AssociatedImage) error {
-	spec, err := faithfulStrippedSpecOT(slide, a)
+func writeOneAssociated(w *streamwriter.Writer, a opentile.AssociatedImage) error {
+	spec, err := faithfulStrippedSpecOT(a)
 	if err != nil {
 		if errors.Is(err, errSkipAssociated) {
 			slog.Warn("skipping associated image", "type", a.Type(), "reason", err)

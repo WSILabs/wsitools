@@ -61,16 +61,16 @@ func (s *opentileSource) Close() error                   { return s.t.Close() }
 func (s *opentileSource) Levels() []Level {
 	out := make([]Level, 0, len(s.t.Levels()))
 	for i, lvl := range s.t.Levels() {
-		out = append(out, &opentileLevel{lvl: lvl, slide: s.t, index: i})
+		out = append(out, &opentileLevel{lvl: lvl, index: i})
 	}
 	return out
 }
 
 func (s *opentileSource) Associated() []AssociatedImage {
-	src := s.t.Associated()
+	src := s.t.AssociatedImages()
 	out := make([]AssociatedImage, 0, len(src))
 	for _, a := range src {
-		out = append(out, &opentileAssociated{a: a, slide: s.t})
+		out = append(out, &opentileAssociated{a: a})
 	}
 	return out
 }
@@ -91,9 +91,9 @@ func (s *opentileSource) Metadata() Metadata {
 	// Cross-format scale: opentile-go normalizes every format's native
 	// pixel size into MicronsPerPixelX/Y. Prefer that; fall back to the
 	// SVS-specific struct only when the cross-format value is absent.
-	m.MPPX = md.MicronsPerPixelX
-	m.MPPY = md.MicronsPerPixelY
-	m.MPP = md.MicronsPerPixel // opentile's symmetric value (0 if asymmetric)
+	m.MPPX = md.MPP.X
+	m.MPPY = md.MPP.Y
+	m.MPP = md.MPP.Symmetric() // single value if X==Y, else 0
 	if smd, ok := svsfmt.MetadataOf(s.t); ok {
 		if m.MPPX == 0 && smd.MPP != 0 {
 			m.MPPX, m.MPPY, m.MPP = smd.MPP, smd.MPP, smd.MPP
@@ -107,8 +107,7 @@ func (s *opentileSource) Metadata() Metadata {
 }
 
 type opentileLevel struct {
-	lvl   opentile.Level
-	slide *opentile.Slide
+	lvl   *opentile.Level
 	index int
 }
 
@@ -122,10 +121,10 @@ func (l *opentileLevel) TileSize() image.Point {
 func (l *opentileLevel) Grid() image.Point {
 	return image.Point{X: l.lvl.Grid.W, Y: l.lvl.Grid.H}
 }
-func (l *opentileLevel) TileMaxSize() int { return l.slide.TileMaxSize(l.index) }
+func (l *opentileLevel) TileMaxSize() int { return l.lvl.TileMaxSize() }
 
 func (l *opentileLevel) TileInto(x, y int, dst []byte) (int, error) {
-	return l.slide.RawTileInto(l.index, x, y, dst)
+	return l.lvl.TileInto(x, y, dst)
 }
 
 func (l *opentileLevel) Compression() Compression {
@@ -133,12 +132,11 @@ func (l *opentileLevel) Compression() Compression {
 }
 
 type opentileAssociated struct {
-	a     opentile.AssociatedImage
-	slide *opentile.Slide
+	a opentile.AssociatedImage
 }
 
 func (a *opentileAssociated) Type() string {
-	return a.a.Type()
+	return string(a.a.Type())
 }
 func (a *opentileAssociated) Size() image.Point {
 	sz := a.a.Size()
@@ -152,10 +150,10 @@ func (a *opentileAssociated) Compression() Compression {
 	return mapOpentileCompression(a.a.Compression())
 }
 func (a *opentileAssociated) IFDOffset() (int64, bool) {
-	return a.slide.AssociatedIFDOffset(a.a)
+	return a.a.IFDOffset()
 }
-func (a *opentileAssociated) Source() (opentile.AssociatedSource, bool) {
-	return a.slide.AssociatedSourceOf(a.a)
+func (a *opentileAssociated) Source() (opentile.AssociatedEncoding, bool) {
+	return a.a.Encoding()
 }
 
 func mapOpentileCompression(c opentile.Compression) Compression {

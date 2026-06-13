@@ -69,8 +69,8 @@ func TestDownsample_CMU1SmallRegion(t *testing.T) {
 	}
 
 	srcL0, outL0 := srcTlr.Levels()[0], outTlr.Levels()[0]
-	if outL0.Size().W != srcL0.Size().W/2 || outL0.Size().H != srcL0.Size().H/2 {
-		t.Errorf("L0 size: got %vx%v, want %vx%v", outL0.Size().W, outL0.Size().H, srcL0.Size().W/2, srcL0.Size().H/2)
+	if outL0.Size.W != srcL0.Size.W/2 || outL0.Size.H != srcL0.Size.H/2 {
+		t.Errorf("L0 size: got %vx%v, want %vx%v", outL0.Size.W, outL0.Size.H, srcL0.Size.W/2, srcL0.Size.H/2)
 	}
 
 	if md, ok := svsfmt.MetadataOf(outTlr); ok {
@@ -88,17 +88,17 @@ func TestDownsample_CMU1SmallRegion(t *testing.T) {
 	// so raw byte equality does not hold for JPEG kinds. LZW (label) bytes are
 	// passthrough verbatim and do compare equal, but we don't test byte equality here
 	// to keep the assertion robust across different wsiwriter strip layouts.
-	srcAssoc := srcTlr.Associated()
-	outAssoc := outTlr.Associated()
+	srcAssoc := srcTlr.AssociatedImages()
+	outAssoc := outTlr.AssociatedImages()
 	if len(srcAssoc) != len(outAssoc) {
 		t.Errorf("associated count: got %d, want %d", len(outAssoc), len(srcAssoc))
 	}
 	for i := range outAssoc {
 		bs, err := outAssoc[i].Bytes()
 		if err != nil {
-			t.Errorf("associated[%d] (%s) Bytes() error: %v", i, outAssoc[i].Kind(), err)
+			t.Errorf("associated[%d] (%s) Bytes() error: %v", i, outAssoc[i].Type(), err)
 		} else if len(bs) == 0 {
-			t.Errorf("associated[%d] (%s) Bytes() returned empty", i, outAssoc[i].Kind())
+			t.Errorf("associated[%d] (%s) Bytes() returned empty", i, outAssoc[i].Type())
 		}
 	}
 }
@@ -176,12 +176,12 @@ func TestDownsample_AssociatedKindRoundTrip(t *testing.T) {
 	defer outTlr.Close()
 
 	srcKinds := map[string]bool{}
-	for _, a := range srcTlr.Associated() {
-		srcKinds[a.Kind()] = true
+	for _, a := range srcTlr.AssociatedImages() {
+		srcKinds[string(a.Type())] = true
 	}
 	outKinds := map[string]bool{}
-	for _, a := range outTlr.Associated() {
-		outKinds[a.Kind()] = true
+	for _, a := range outTlr.AssociatedImages() {
+		outKinds[string(a.Type())] = true
 	}
 	for k := range srcKinds {
 		if !outKinds[k] {

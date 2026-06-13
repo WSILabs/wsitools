@@ -18,7 +18,7 @@ import (
 // is reduced codec-agnostically (see DecodeReducedTile): codec-domain scaled
 // decode where the source codec supports it (JPEG IDCT fast-scale, JP2K/HTJ2K
 // wavelet resolution decode), else full-decode + chained 2x2 box-average.
-func MaterializeReducedL0(ctx context.Context, src *opentile.Slide, srcL0 opentile.Level, outL0 []byte, outW, outH, factor int) error {
+func MaterializeReducedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []byte, outW, outH, factor int) error {
 	srcCompression := srcL0.Compression
 	srcGrid := srcL0.Grid
 	srcTileW := srcL0.TileSize.W
@@ -35,7 +35,7 @@ func MaterializeReducedL0(ctx context.Context, src *opentile.Slide, srcL0 openti
 		return fmt.Errorf("no decoder registered for source compression %s", srcCompression)
 	}
 
-	tileBuf := make([]byte, src.TileMaxSize(srcL0.Index))
+	tileBuf := make([]byte, srcL0.TileMaxSize())
 
 	for ty := 0; ty < srcGrid.H; ty++ {
 		for tx := 0; tx < srcGrid.W; tx++ {
@@ -44,7 +44,7 @@ func MaterializeReducedL0(ctx context.Context, src *opentile.Slide, srcL0 openti
 				return ctx.Err()
 			default:
 			}
-			n, err := src.RawTileInto(srcL0.Index, tx, ty, tileBuf)
+			n, err := srcL0.TileInto(tx, ty, tileBuf)
 			if err != nil {
 				return fmt.Errorf("read source tile (%d,%d): %w", tx, ty, err)
 			}

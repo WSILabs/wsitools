@@ -432,9 +432,9 @@ func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cf
 	if workers > 0 {
 		stripOpts = append(stripOpts, opentile.WithStripWorkers(workers))
 	}
-	it := slide.ScaledStrips(
-		image.Rect(0, 0, cfg.Width, cfg.Height),
-		image.Point{X: cfg.Width, Y: cfg.Height},
+	it := slide.Pyramid(0).ScaledStrips(
+		opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: cfg.Width, H: cfg.Height}},
+		opentile.Size{W: cfg.Width, H: cfg.Height},
 		cfg.TileSize,
 		stripOpts...,
 	)

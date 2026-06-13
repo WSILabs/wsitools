@@ -43,7 +43,7 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 
 	name := strings.TrimSuffix(filepath.Base(cvOutput), ".szi")
 
-	images := slide.Images()
+	images := slide.Pyramids()
 	if len(images) == 0 || len(images[0].Levels) == 0 {
 		return fmt.Errorf("slide has no pyramid levels")
 	}

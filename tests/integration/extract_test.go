@@ -16,7 +16,7 @@ func TestExtract_LabelAsPNG(t *testing.T) {
 	bin := buildOnce(t)
 
 	out := filepath.Join(t.TempDir(), "label.png")
-	cmd := exec.Command(bin, "extract", "--kind", "label", "-o", out, src)
+	cmd := exec.Command(bin, "extract", "--type", "label", "-o", out, src)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("extract: %v\n%s", err, b)
 	}
@@ -40,7 +40,7 @@ func TestExtract_MacroAsJPEG_PassThrough(t *testing.T) {
 	bin := buildOnce(t)
 
 	out := filepath.Join(t.TempDir(), "overview.jpg")
-	cmd := exec.Command(bin, "extract", "--kind", "overview", "-o", out, "--format", "jpeg", src)
+	cmd := exec.Command(bin, "extract", "--type", "overview", "-o", out, "--format", "jpeg", src)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("extract: %v\n%s", err, b)
 	}
@@ -59,8 +59,8 @@ func TestExtract_UnknownKind_Errors(t *testing.T) {
 	bin := buildOnce(t)
 
 	out := filepath.Join(t.TempDir(), "x.png")
-	cmd := exec.Command(bin, "extract", "--kind", "nonexistent", "-o", out, src)
+	cmd := exec.Command(bin, "extract", "--type", "nonexistent", "-o", out, src)
 	if b, err := cmd.CombinedOutput(); err == nil {
-		t.Fatalf("expected error for unknown --kind, got success:\n%s", b)
+		t.Fatalf("expected error for unknown --type, got success:\n%s", b)
 	}
 }
