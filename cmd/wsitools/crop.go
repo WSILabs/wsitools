@@ -31,6 +31,7 @@ var (
 	cropBigTIFF   string
 	cropForce     bool
 	cropNoAssoc   bool
+	cropLossless  bool
 )
 
 var cropCmd = &cobra.Command{
@@ -44,7 +45,12 @@ rebuilt for the cropped extent.
 The crop is a full re-encode (one JPEG generation) — it matches how Aperio
 ImageScope crops. The ImageDescription records the crop geometry and the
 source's provenance chain; the thumbnail is regenerated to the crop aspect;
-label, macro, overview, and ICC profile pass through unchanged.`,
+label, macro, overview, and ICC profile pass through unchanged.
+
+With --lossless, the crop is snapped to the L0 tile grid and the full-resolution
+tiles are copied verbatim (byte-identical); the output is a tile-aligned superset
+of the requested rect (up to ~255px larger per edge), and the command prints the
+effective snapped rect when the input is not already tile-aligned.`,
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
 	SilenceErrors: false,
@@ -54,7 +60,7 @@ label, macro, overview, and ICC profile pass through unchanged.`,
 			return err
 		}
 		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
-			cropQuality, cropWorkers, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, time.Now())
+			cropQuality, cropWorkers, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, time.Now())
 	},
 }
 
@@ -71,6 +77,7 @@ func init() {
 	cropCmd.Flags().StringVar(&cropBigTIFF, "bigtiff", "auto", "BigTIFF mode: auto|on|off")
 	cropCmd.Flags().BoolVarP(&cropForce, "force", "f", false, "Overwrite existing output")
 	cropCmd.Flags().BoolVar(&cropNoAssoc, "no-associated", false, "Skip label/macro/thumbnail/overview")
+	cropCmd.Flags().BoolVar(&cropLossless, "lossless", false, "Lossless crop: snap to the tile grid and copy L0 tiles verbatim (output is a tile-aligned superset of the rect)")
 	rootCmd.AddCommand(cropCmd)
 }
 
@@ -130,7 +137,7 @@ func validateCropBounds(x, y, w, h, l0W, l0H int) error {
 // runCrop takes all options as explicit parameters (no global-flag reads),
 // mirroring downsampleToSVS, so it stays testable and reusable. The cobra RunE
 // closure resolves the flag globals and passes them in.
-func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers int, tileOrderName, bigtiffFlag string, force, noAssociated bool, start time.Time) error {
+func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, start time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -192,7 +199,17 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return fmt.Errorf("--quality must be in [1,100], got %d", quality)
 	}
 
-	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, x, y, w, h, outputTileSize, outputTileSize, quality)
+	// Effective rect: lossless snaps the request to the tile grid (origin down,
+	// extent up) so L0 tiles copy verbatim; the default path uses the exact rect.
+	ex, ey, ew, eh := x, y, w, h
+	var stx0, sty0, outTilesX, outTilesY int
+	if lossless {
+		ex, ey, ew, eh, stx0, sty0, outTilesX, outTilesY = snapRectToTiles(x, y, w, h, srcL0.TileSize.W, srcL0.TileSize.H, baseW, baseH)
+		if ex != x || ey != y || ew != w || eh != h {
+			fmt.Printf("lossless: snapped crop to %d,%d %dx%d (tile-aligned)\n", ex, ey, ew, eh)
+		}
+	}
+	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, ex, ey, ew, eh, outputTileSize, outputTileSize, quality)
 
 	var bigtiffMode tiff.BigTIFFMode
 	switch bigtiffFlag {
@@ -206,7 +223,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		// so a >4 GiB raster (~500 MiB L0 JPEG plus its pyramid) is where the
 		// 32-bit TIFF offset space starts to be at risk; below it, classic TIFF
 		// is safe.
-		if int64(w)*int64(h)*3 > (int64(4) << 30) {
+		if int64(ew)*int64(eh)*3 > (int64(4) << 30) {
 			bigtiffMode = tiff.BigTIFFOn
 		} else {
 			bigtiffMode = tiff.BigTIFFOff
@@ -241,12 +258,12 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		}
 	}()
 
-	rasterBytes := int64(w) * int64(h) * 3
+	rasterBytes := int64(ew) * int64(eh) * 3
 	if rasterBytes < 0 {
 		return fmt.Errorf("cropped L0 raster size overflows int64")
 	}
 	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, x, y, w, h); err != nil {
+	if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, ex, ey, ew, eh); err != nil {
 		return fmt.Errorf("materialize cropped L0: %w", err)
 	}
 
@@ -262,18 +279,41 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		}
 	}
 
-	// The thumbnail is regenerated (not passed through) and interleaved between
-	// L0 and L1 via the hook. --no-associated leaves the hook nil.
-	var postL0Hook func() error
-	if !noAssociated {
-		postL0Hook = func() error {
-			return regenCropThumbnail(wtr, outL0, w, h, quality)
+	nLevels := cropPyramidLevels(ew, eh, outputTileSize)
+	if lossless {
+		// Strategy B (lossless): copy L0 tiles verbatim, rebuild lower levels.
+		// L0: verbatim source-tile-block copy (byte-identical full-res data).
+		if err := writeLosslessL0(wtr, srcL0, stx0, sty0, outTilesX, outTilesY, ew, eh); err != nil {
+			return fmt.Errorf("write lossless L0: %w", err)
 		}
-	}
-
-	nLevels := cropPyramidLevels(w, h, outputTileSize)
-	if err := buildPyramidFromRaster(ctx, wtr, outL0, w, h, nLevels, quality, workers, postL0Hook); err != nil {
-		return fmt.Errorf("build pyramid: %w", err)
+		// Thumbnail between L0 and L1 (regenerated from the decoded crop).
+		if !noAssociated {
+			if err := regenCropThumbnail(wtr, outL0, ew, eh, quality); err != nil {
+				return fmt.Errorf("regenerate thumbnail: %w", err)
+			}
+		}
+		// Lower levels: rebuild from the once-halved raster (re-encode).
+		if nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(outL0, ew, eh)
+			if err != nil {
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRaster(ctx, wtr, l1, l1W, l1H, nLevels-1, quality, workers, nil); err != nil {
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		// Strategy A: re-encode every level from the decoded raster; thumbnail
+		// interleaved after L0 via the post-L0 hook.
+		var postL0Hook func() error
+		if !noAssociated {
+			postL0Hook = func() error {
+				return regenCropThumbnail(wtr, outL0, ew, eh, quality)
+			}
+		}
+		if err := buildPyramidFromRaster(ctx, wtr, outL0, ew, eh, nLevels, quality, workers, postL0Hook); err != nil {
+			return fmt.Errorf("build pyramid: %w", err)
+		}
 	}
 
 	if label != nil {
