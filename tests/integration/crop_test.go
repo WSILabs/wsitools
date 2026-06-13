@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -172,5 +173,100 @@ func TestCrop_SmallRegionTileAligned(t *testing.T) {
 	l0 := tlr.Levels()[0]
 	if l0.Size.W != 512 || l0.Size.H != 512 {
 		t.Errorf("L0 = %dx%d, want 512x512", l0.Size.W, l0.Size.H)
+	}
+}
+
+// TestCropLossless_ByteIdentity verifies --lossless copies L0 tiles byte-for-byte
+// from the source onto a tile-aligned superset of the requested rect.
+func TestCropLossless_ByteIdentity(t *testing.T) {
+	td := testdir(t)
+	src := filepath.Join(td, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %s", src)
+	}
+	bin := buildOnce(t)
+
+	srcTlr, err := opentile.OpenFile(src)
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	defer srcTlr.Close()
+	srcL0 := srcTlr.Levels()[0]
+	tileW, tileH := srcL0.TileSize.W, srcL0.TileSize.H
+	baseW, baseH := srcL0.Size.W, srcL0.Size.H
+
+	cases := []struct {
+		name        string
+		x, y, w, h int
+	}{
+		{"unaligned", 300, 200, 400, 400},
+		{"aligned", tileW, tileH, 2 * tileW, 2 * tileH},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			if c.x+c.w > baseW || c.y+c.h > baseH {
+				t.Skipf("rect exceeds source %dx%d", baseW, baseH)
+			}
+			out := filepath.Join(t.TempDir(), "lossless.svs")
+			cmd := exec.Command(bin, "crop", "--lossless",
+				"--rect", fmt.Sprintf("%d,%d,%d,%d", c.x, c.y, c.w, c.h), "-o", out, src)
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("crop --lossless: %v\n%s", err, b)
+			}
+
+			// Expected snap (mirror snapRectToTiles).
+			snapX := (c.x / tileW) * tileW
+			snapY := (c.y / tileH) * tileH
+			endX := ((c.x + c.w + tileW - 1) / tileW) * tileW
+			endY := ((c.y + c.h + tileH - 1) / tileH) * tileH
+			if endX > baseW {
+				endX = baseW
+			}
+			if endY > baseH {
+				endY = baseH
+			}
+			snapW, snapH := endX-snapX, endY-snapY
+			stx0, sty0 := snapX/tileW, snapY/tileH
+
+			outTlr, err := opentile.OpenFile(out)
+			if err != nil {
+				t.Fatalf("open out: %v", err)
+			}
+			defer outTlr.Close()
+			if outTlr.Format() != opentile.FormatSVS {
+				t.Errorf("format = %v, want svs", outTlr.Format())
+			}
+			outL0 := outTlr.Levels()[0]
+			if outL0.Size.W != snapW || outL0.Size.H != snapH {
+				t.Fatalf("L0 = %dx%d, want snapped %dx%d", outL0.Size.W, outL0.Size.H, snapW, snapH)
+			}
+			if !bytesEqual(outL0.TilePrefix(), srcL0.TilePrefix()) {
+				t.Errorf("TilePrefix differs (shared JPEG tables not preserved)")
+			}
+
+			outTilesX := (snapW + tileW - 1) / tileW
+			outTilesY := (snapH + tileH - 1) / tileH
+			for oy := 0; oy < outTilesY; oy++ {
+				for ox := 0; ox < outTilesX; ox++ {
+					ob, err := outL0.Tile(ox, oy)
+					if err != nil {
+						t.Fatalf("out tile (%d,%d): %v", ox, oy, err)
+					}
+					sb, err := srcL0.Tile(stx0+ox, sty0+oy)
+					if err != nil {
+						t.Fatalf("src tile (%d,%d): %v", stx0+ox, sty0+oy, err)
+					}
+					if !bytesEqual(ob, sb) {
+						t.Fatalf("tile (%d,%d) NOT byte-identical to src (%d,%d): %d vs %d bytes",
+							ox, oy, stx0+ox, sty0+oy, len(ob), len(sb))
+					}
+				}
+			}
+
+			if md := outTlr.Metadata(); md.MPP.X == 0 || md.Magnification == 0 {
+				t.Errorf("lost MPP/Mag: MPP=%v Mag=%v", md.MPP, md.Magnification)
+			}
+		})
 	}
 }
