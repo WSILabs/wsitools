@@ -71,17 +71,13 @@ func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) 
 			replaced = true
 			continue
 		}
-		bs, err := a.Bytes()
+		spec, err := faithfulCOGWSISpec(a)
 		if err != nil {
-			return fmt.Errorf("read associated %s: %w", a.Type(), err)
-		}
-		spec := cogwsiwriter.AssociatedSpec{
-			Type:        a.Type(),
-			Width:       uint32(a.Size().X),
-			Height:      uint32(a.Size().Y),
-			Compression: compressionTagFor(a.Compression()),
-			Photometric: 2,
-			Bytes:       bs,
+			if errors.Is(err, errSkipAssociated) {
+				slog.Warn("skipping associated", "type", a.Type(), "reason", err)
+				continue
+			}
+			return err
 		}
 		if err := w.AddAssociated(spec); err != nil {
 			if errors.Is(err, cogwsiwriter.ErrInvalidAssocType) {

@@ -28,17 +28,17 @@ import (
 	"strconv"
 	"time"
 
-	opentile "github.com/wsilabs/opentile-go"
-	_ "github.com/wsilabs/opentile-go/formats/all"
 	"github.com/spf13/cobra"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
+	opentile "github.com/wsilabs/opentile-go"
+	_ "github.com/wsilabs/opentile-go/formats/all"
 
 	otdecoder "github.com/wsilabs/opentile-go/decoder"
 	otresample "github.com/wsilabs/opentile-go/resample"
 	codec "github.com/wsilabs/wsitools/internal/codec"
-	"github.com/wsilabs/wsitools/internal/downscale"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
+	"github.com/wsilabs/wsitools/internal/downscale"
 	"github.com/wsilabs/wsitools/internal/pipeline"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
@@ -55,13 +55,13 @@ const (
 )
 
 var (
-	dsOutput     string
-	dsFactor     int
-	dsTargetMag  int
-	dsQuality    int
-	dsJobs       int
-	dsForce      bool
-	dsTileOrder  string
+	dsOutput    string
+	dsFactor    int
+	dsTargetMag int
+	dsQuality   int
+	dsJobs      int
+	dsForce     bool
+	dsTileOrder string
 )
 
 var downsampleCmd = &cobra.Command{
@@ -516,10 +516,10 @@ func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty int) ([]byte,
 // as a single-strip IFD. NewSubfileType is set per the SVS reader classifier
 // convention: thumbnail=0, label=1 (reduced bit), overview/macro=9 (reduced +
 // macro bit). Compression tag mirrors the source.
-func writeOneAssociated(w *streamwriter.Writer, a opentile.AssociatedImage) error {
-	bs, err := a.Bytes()
+func writeOneAssociated(w *streamwriter.Writer, slide *opentile.Slide, a opentile.AssociatedImage) error {
+	spec, err := faithfulStrippedSpecOT(slide, a)
 	if err != nil {
-		return fmt.Errorf("associated %q bytes: %w", a.Type(), err)
+		return fmt.Errorf("associated %q: %w", a.Type(), err)
 	}
 	var subfileType uint32
 	var wsiImageType string
@@ -540,39 +540,11 @@ func writeOneAssociated(w *streamwriter.Writer, a opentile.AssociatedImage) erro
 		subfileType = 0
 		wsiImageType = tiff.WSIImageTypeAssociated
 	}
-	comp, photo, err := mapAssociatedCompression(a.Compression())
-	if err != nil {
-		return fmt.Errorf("associated %q compression: %w", a.Type(), err)
-	}
-	if err := w.AddStripped(streamwriter.StrippedSpec{
-		Width:           uint32(a.Size().W),
-		Height:          uint32(a.Size().H),
-		RowsPerStrip:    uint32(a.Size().H),
-		BitsPerSample:   []uint16{8, 8, 8},
-		SamplesPerPixel: 3,
-		Photometric:     photo,
-		Compression:     comp,
-		StripBytes:      bs,
-		NewSubfileType:  subfileType,
-		WSIImageType:    wsiImageType,
-	}); err != nil {
+	spec.BitsPerSample = []uint16{8, 8, 8}
+	spec.NewSubfileType = subfileType
+	spec.WSIImageType = wsiImageType
+	if err := w.AddStripped(spec); err != nil {
 		return fmt.Errorf("AddStripped %q: %w", a.Type(), err)
 	}
 	return nil
-}
-
-// mapAssociatedCompression maps an opentile.Compression to (TIFF tag 259
-// value, TIFF tag 262 PhotometricInterpretation). Photometric is RGB (=2)
-// for JPEG/LZW/None — Aperio stores label/macro/thumbnail in this shape.
-func mapAssociatedCompression(c opentile.Compression) (uint16, uint16, error) {
-	switch c {
-	case opentile.CompressionJPEG:
-		return tiff.CompressionJPEG, 2, nil
-	case opentile.CompressionLZW:
-		return tiff.CompressionLZW, 2, nil
-	case opentile.CompressionNone:
-		return tiff.CompressionNone, 2, nil
-	default:
-		return 0, 0, fmt.Errorf("unsupported associated compression: %s", c)
-	}
 }

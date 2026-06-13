@@ -22,15 +22,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
+	"github.com/spf13/cobra"
 	opentile "github.com/wsilabs/opentile-go"
 	_ "github.com/wsilabs/opentile-go/formats/all"
-	"github.com/spf13/cobra"
 
 	codec "github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
@@ -270,7 +271,7 @@ func downsampleToSVS(
 		if thumbnail == nil {
 			return nil
 		}
-		return writeOneAssociated(w, thumbnail)
+		return writeOneAssociated(w, src, thumbnail)
 	}
 
 	if err := buildPyramid(ctx, src, w, factor, quality, workers, postL0Hook); err != nil {
@@ -278,12 +279,12 @@ func downsampleToSVS(
 	}
 
 	if label != nil {
-		if err := writeOneAssociated(w, label); err != nil {
+		if err := writeOneAssociated(w, src, label); err != nil {
 			return fmt.Errorf("write associated label: %w", err)
 		}
 	}
 	if macro != nil {
-		if err := writeOneAssociated(w, macro); err != nil {
+		if err := writeOneAssociated(w, src, macro); err != nil {
 			return fmt.Errorf("write associated macro/overview: %w", err)
 		}
 	}
@@ -449,7 +450,7 @@ func downsampleToTIFF(
 
 	if !noAssociated {
 		for _, a := range src.Associated() {
-			if err := writeOneAssociated(w, a); err != nil {
+			if err := writeOneAssociated(w, src, a); err != nil {
 				return fmt.Errorf("write associated %s: %w", a.Type(), err)
 			}
 		}
@@ -603,19 +604,15 @@ func downsampleToCOGWSI(
 
 	if !noAssociated {
 		for _, a := range src.Associated() {
-			bs, err := a.Bytes()
+			spec, err := faithfulCOGWSISpecOT(src, a)
 			if err != nil {
 				aborted = true
-				return fmt.Errorf("read associated %s: %w", a.Type(), err)
+				if errors.Is(err, errSkipAssociated) {
+					return fmt.Errorf("associated %s: %w", a.Type(), err)
+				}
+				return err
 			}
-			if err := w.AddAssociated(cogwsiwriter.AssociatedSpec{
-				Type:        a.Type(),
-				Width:       uint32(a.Size().W),
-				Height:      uint32(a.Size().H),
-				Compression: opentile.CompressionToTIFFTag(a.Compression()),
-				Photometric: 2,
-				Bytes:       bs,
-			}); err != nil {
+			if err := w.AddAssociated(spec); err != nil {
 				aborted = true
 				return fmt.Errorf("add associated %s: %w", a.Type(), err)
 			}
@@ -807,7 +804,7 @@ func downsampleToOMETIFF(
 			if omeAssocName(a.Type()) == "" {
 				continue
 			}
-			if err := writeOneAssociated(w, a); err != nil {
+			if err := writeOneAssociated(w, src, a); err != nil {
 				return fmt.Errorf("write associated %s: %w", a.Type(), err)
 			}
 		}
