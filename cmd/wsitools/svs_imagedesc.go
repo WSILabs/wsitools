@@ -118,6 +118,52 @@ func formatAperioFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
+// Quality extracts the JPEG quality (the "Q=<n>" token) from the geometry line,
+// e.g. "... JPEG/RGB Q=30". Returns ok=false if absent or unparseable.
+func (d *AperioDescription) Quality() (int, bool) {
+	i := strings.Index(d.GeometryLine, "Q=")
+	if i < 0 {
+		return 0, false
+	}
+	rest := d.GeometryLine[i+2:]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	q, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0, false
+	}
+	return q, true
+}
+
+// BuildCropImageDescription constructs the ImageDescription (tag 270) for a
+// crop, following Aperio ImageScope's recipe (docs/aperio-svs-crop-analysis.md):
+//
+//	Aperio Image Library v<wsitools-version>
+//	<baseW>x<baseH> [x,y cropWxcropH] (tileWxtileH) JPEG/RGB Q=q;<SOURCE-DESC-VERBATIM>|OriginalWidth = baseW|OriginalHeight = baseH
+//
+// The new header line keeps the literal "Aperio Image Library v" prefix so
+// opentile-go's SVS detector (matchSVS: HasPrefix "Aperio") recognizes the
+// output. The entire source description is appended verbatim after the ';'
+// (the provenance chain), so MPP/AppMag/ImageID/Left/Top and all scanner fields
+// are preserved unchanged. A fresh OriginalWidth/OriginalHeight pair (the
+// pre-crop base dims) is appended at the end.
+func BuildCropImageDescription(srcDesc string, baseW, baseH, x, y, cropW, cropH, tileW, tileH, quality int) string {
+	chain := strings.ReplaceAll(srcDesc, "\r\n", "\n")
+	var b strings.Builder
+	b.WriteString("Aperio Image Library v")
+	b.WriteString(Version)
+	b.WriteString("\r\n")
+	fmt.Fprintf(&b, "%dx%d [%d,%d %dx%d] (%dx%d) JPEG/RGB Q=%d;", baseW, baseH, x, y, cropW, cropH, tileW, tileH, quality)
+	b.WriteString(chain)
+	fmt.Fprintf(&b, "|OriginalWidth = %d|OriginalHeight = %d", baseW, baseH)
+	return b.String()
+}
+
 // SyntheticAperioDescription builds an Aperio-shaped ImageDescription
 // for SVS output written by wsitools from a non-SVS source. Follows
 // the third-party-vendor convention (e.g. Grundium's "Aperio Image,

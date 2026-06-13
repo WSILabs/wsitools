@@ -228,18 +228,31 @@ func countTilesForLevel(w, h int) int {
 func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writer, factor, quality, workers int, postL0Hook func() error) error {
 	srcLevels := src.Levels()
 	srcL0 := srcLevels[0]
+	outW := srcL0.Size.W / factor
+	outH := srcL0.Size.H / factor
 
-	srcW := srcL0.Size.W
-	srcH := srcL0.Size.H
-	outW := srcW / factor
-	outH := srcH / factor
+	rasterBytes := int64(outW) * int64(outH) * 3
+	if rasterBytes < 0 {
+		return fmt.Errorf("output L0 raster size overflows int64")
+	}
+	slog.Debug("materialising output L0 raster", "out_w", outW, "out_h", outH, "raster_mb", rasterBytes/(1024*1024))
+	outL0 := make([]byte, rasterBytes)
+	if err := downscale.MaterializeReducedL0(ctx, srcL0, outL0, outW, outH, factor); err != nil {
+		return err
+	}
+	// downsample keeps one output level per source level (unchanged behaviour).
+	return buildPyramidFromRaster(ctx, w, outL0, outW, outH, len(srcLevels), quality, workers, postL0Hook)
+}
 
-	// Compute total tile count across all output levels upfront for the
-	// progress bar.
-	nLevels := len(srcLevels)
+// buildPyramidFromRaster encodes an in-memory RGB888 L0 raster into a tiled
+// JPEG pyramid via the streamwriter, box-halving between levels. nLevels is the
+// total number of pyramid levels to emit (L0 included). postL0Hook runs
+// immediately after L0 (used to interleave the thumbnail IFD). bar may be nil.
+func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, workers int, postL0Hook func() error) error {
+	// Total tile count across all output levels for the progress bar.
 	var totalTiles int64
 	{
-		lw, lh := outW, outH
+		lw, lh := l0W, l0H
 		for lvl := 0; lvl < nLevels; lvl++ {
 			totalTiles += int64(countTilesForLevel(lw, lh))
 			if lvl < nLevels-1 {
@@ -252,7 +265,6 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 		}
 	}
 
-	// Set up progress bar on stderr (suppressed when --quiet).
 	var progress *mpb.Progress
 	var bar *mpb.Bar
 	if !flagQuiet {
@@ -270,26 +282,8 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 		)
 	}
 
-	// 1. Materialise output L0 raster from source L0.
-	rasterBytes := int64(outW) * int64(outH) * 3
-	if rasterBytes < 0 {
-		return fmt.Errorf("output L0 raster size overflows int64")
-	}
-	slog.Debug("materialising output L0 raster", "out_w", outW, "out_h", outH, "raster_mb", rasterBytes/(1024*1024))
-	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeReducedL0(ctx, srcL0, outL0, outW, outH, factor); err != nil {
-		if progress != nil {
-			progress.Wait()
-		}
-		return err
-	}
-
-	// 2. Determine output level count: keep one level per source level. For
-	// each level, encode the in-memory raster into 256x256 JPEG tiles and
-	// write via the wsiwriter level handle. Build the next-level raster via
-	// 2x2 area-average.
-	currentRaster := outL0
-	currentW, currentH := outW, outH
+	currentRaster := l0
+	currentW, currentH := l0W, l0H
 
 	for outLvl := 0; outLvl < nLevels; outLvl++ {
 		lvlStart := time.Now()
@@ -304,16 +298,10 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 		}
 
 		if flagVerbose {
-			slog.Info("encoded level",
-				"level", outLvl,
-				"w", currentW,
-				"h", currentH,
-				"tiles", tiles,
-				"elapsed", time.Since(lvlStart).Round(time.Millisecond).String(),
-			)
+			slog.Info("encoded level", "level", outLvl, "w", currentW, "h", currentH, "tiles", tiles,
+				"elapsed", time.Since(lvlStart).Round(time.Millisecond).String())
 		}
 
-		// Aperio IFD ordering: thumbnail goes between L0 and L1.
 		if outLvl == 0 && postL0Hook != nil {
 			if err := postL0Hook(); err != nil {
 				if progress != nil {
@@ -324,11 +312,6 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 		}
 
 		if outLvl < nLevels-1 {
-			// Area2x2 requires even dimensions; pad by 1 if odd so the last
-			// row/column is duplicated (cheap mirror padding via simple +1
-			// allocation grows). For v0.1 we just truncate to even bounds and
-			// drop the last odd row/column — acceptable error of <1 pixel at
-			// the slide edge per level.
 			evenW := currentW &^ 1
 			evenH := currentH &^ 1
 			if evenW != currentW || evenH != currentH {
@@ -353,8 +336,6 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 			currentW /= 2
 			currentH /= 2
 			if currentW == 0 || currentH == 0 {
-				// No more useful resolution; stop early. (Possible for very
-				// shallow source pyramids combined with large factor.)
 				break
 			}
 		}
