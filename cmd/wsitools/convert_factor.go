@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -606,10 +607,11 @@ func downsampleToCOGWSI(
 		for _, a := range src.Associated() {
 			spec, err := faithfulCOGWSISpecOT(src, a)
 			if err != nil {
-				aborted = true
 				if errors.Is(err, errSkipAssociated) {
-					return fmt.Errorf("associated %s: %w", a.Type(), err)
+					slog.Warn("skipping associated image", "type", a.Type(), "reason", err)
+					continue
 				}
+				aborted = true
 				return err
 			}
 			if err := w.AddAssociated(spec); err != nil {

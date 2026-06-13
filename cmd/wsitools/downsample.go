@@ -12,8 +12,10 @@
 //     level's in-memory raster.
 //   - For each output level, the raster is re-tiled into 256x256 chunks and
 //     encoded via the JPEG codec, written to the output via streamwriter.
-//   - Associated images (label, macro, thumbnail/overview) are passed through
-//     verbatim via opentile-go's AssociatedImage.Bytes().
+//   - Associated images (label, macro, thumbnail/overview) are copied
+//     byte-faithfully via opentile-go's AssociatedSourceOf (verbatim source
+//     strips + Predictor/JPEGTables), falling back to decode+re-encode when no
+//     faithful source form is available.
 //
 // Memory: a 40x slide L0 (50K x 30K) needs ~4.5 GB; a 100K x 60K source needs
 // ~18 GB. v0.1 accepts this; v0.2 streams the L0 raster in row strips.
@@ -21,6 +23,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -519,6 +522,10 @@ func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty int) ([]byte,
 func writeOneAssociated(w *streamwriter.Writer, slide *opentile.Slide, a opentile.AssociatedImage) error {
 	spec, err := faithfulStrippedSpecOT(slide, a)
 	if err != nil {
+		if errors.Is(err, errSkipAssociated) {
+			slog.Warn("skipping associated image", "type", a.Type(), "reason", err)
+			return nil
+		}
 		return fmt.Errorf("associated %q: %w", a.Type(), err)
 	}
 	var subfileType uint32
