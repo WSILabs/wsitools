@@ -6,9 +6,9 @@ import (
 	"github.com/wsilabs/wsitools/internal/tiff"
 )
 
-// StrippedSpec describes a single-strip image (label/macro/thumbnail/overview
-// or any non-tiled associated image). The caller provides already-encoded
-// strip bytes.
+// StrippedSpec describes a stripped (non-tiled) image — label/macro/thumbnail/
+// overview or any associated image. The caller provides already-encoded strip
+// bytes (one or more strips via Strips).
 type StrippedSpec struct {
 	Width, Height   uint32
 	RowsPerStrip    uint32
@@ -36,8 +36,8 @@ type StrippedSpec struct {
 	ExtraTags      []tiff.RawTag
 }
 
-// AddStripped appends a single-strip IFD to the writer. Strip bytes are
-// written immediately; the IFD is deferred until Close.
+// AddStripped appends a stripped (one or more strips) IFD to the writer. Strip
+// bytes are written immediately; the IFD is deferred until Close.
 func (w *Writer) AddStripped(s StrippedSpec) error {
 	if w.closed {
 		return fmt.Errorf("streamwriter: writer is closed")
