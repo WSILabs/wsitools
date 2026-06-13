@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
 	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
@@ -154,7 +157,68 @@ func cropToOMETIFF(ctx context.Context, src *opentile.Slide, input, output strin
 	return nil
 }
 
-// cropToCOGWSI is implemented in the next task.
+// cropToCOGWSI writes the cropped L0 + rebuilt pyramid as a COG-WSI TIFF,
+// mirroring downsampleToCOGWSI with an exact-extent cropped L0 and preserved
+// MPP/magnification.
 func cropToCOGWSI(ctx context.Context, src *opentile.Slide, input, output string, l0 []byte, l0W, l0H, nLevels, quality, workers int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated bool, start time.Time) error {
-	return fmt.Errorf("crop cog-wsi: implemented in the next task")
+	mppX, mppY, mag := cropSourceScale(input, src)
+
+	bigTIFFMode, err := parseBigTIFFFlag(bigtiffFlag)
+	if err != nil {
+		if bigtiffFlag == "" {
+			bigTIFFMode = cogwsiwriter.BigTIFFAuto
+		} else {
+			return err
+		}
+	}
+
+	w, err := cogwsiwriter.Create(output, cogwsiwriter.Options{
+		BigTIFF:      bigTIFFMode,
+		ToolsVersion: Version,
+		DefaultOrder: order,
+		Metadata: cogwsiwriter.Metadata{
+			MPPX:            mppX,
+			MPPY:            mppY,
+			Magnification:   mag,
+			ICCProfile:      src.ICCProfile(),
+			SourceFormat:    string(src.Format()),
+			SourceImageDesc: fmt.Sprintf("wsitools/%s crop source=%s", Version, src.Format()),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create writer: %w", err)
+	}
+	aborted := false
+	defer func() {
+		if aborted {
+			w.Abort()
+		}
+	}()
+
+	if err := buildPyramidFromRasterCOGWSI(ctx, w, l0, l0W, l0H, nLevels, quality); err != nil {
+		aborted = true
+		return fmt.Errorf("build pyramid: %w", err)
+	}
+	if !noAssociated {
+		for _, a := range src.AssociatedImages() {
+			spec, err := faithfulCOGWSISpecOT(a)
+			if err != nil {
+				if errors.Is(err, errSkipAssociated) {
+					slog.Warn("skipping associated image", "type", a.Type(), "reason", err)
+					continue
+				}
+				aborted = true
+				return err
+			}
+			if err := w.AddAssociated(spec); err != nil {
+				aborted = true
+				return fmt.Errorf("add associated %s: %w", a.Type(), err)
+			}
+		}
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close writer: %w", err)
+	}
+	reportWrote(output, start)
+	return nil
 }
