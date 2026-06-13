@@ -128,7 +128,9 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   40x → 20x), **format-preserving**: the output is the same container as the
   source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,
   COG-WSI→COG-WSI). Regenerates the full pyramid from the new base, scales MPP
-  ×N / magnification ÷N, and passes associated images through verbatim. Sources
+  ×N / magnification ÷N, and copies associated images **byte-faithfully**
+  (verbatim source strips + Predictor/JPEGTables, via opentile-go
+  `AssociatedSourceOf`). Sources
   with no matching writer error with a pointer to `convert`. To downsample
   *into a different* container, use `convert --to {svs,tiff,ome-tiff,cog-wsi}
   --factor N` (`dzi`/`szi` not yet supported).

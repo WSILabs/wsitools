@@ -4,6 +4,25 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`convert --to {cog-wsi, svs, tiff, ome-tiff}` (and `--factor`) corrupted
+  associated images** (wsitools#1). The associated-image passthrough copied
+  opentile-go's `AssociatedImage.Bytes()` verbatim into a single standalone
+  strip, which drops the source's **Predictor (317)** tag for LZW labels and the
+  **JPEGTables (347)** for abbreviated-JPEG thumbnails — so a conforming reader
+  decoded an LZW label to garbage (or truncated) and an abbreviated thumbnail to
+  a broken JPEG. Associated images are now copied **byte-faithfully** via
+  opentile-go **v0.39.0** `Slide.AssociatedSourceOf` (#22): the source IFD's
+  verbatim strips plus the exact tags (Compression / Predictor / JPEGTables /
+  RowsPerStrip / Photometric), emitted through new multi-strip support in
+  `cogwsiwriter` and `streamwriter`. Synthesized/tiled associated images (which
+  have no faithful single-IFD source form) fall back to decode → re-encode. The
+  `associated replace`/`remove` and DICOM paths were unaffected. opentile-go
+  bumped v0.38.1 → v0.39.0. (The OME-TIFF *reader* in opentile-go still can't
+  decode LZW / multi-strip associated images on read-back — a separate
+  limitation; the bytes written are faithful.)
+
 ### Added
 
 - Experimental `convert --to dicom` — **DICOM-WSI writer, Phase 0 spike.** Emits

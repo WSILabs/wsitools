@@ -219,6 +219,20 @@ queued, deferred, or under consideration.
     associated images out of scope). Plus TILED_SPARSE, Concatenations (P2)
     and fluorescence (P3).
 - **`convert --to dzi --skip-blanks <threshold>`** — drop tiles whose pixels are within `threshold` of uniform background (e.g. white margin around the tissue). OpenSeadragon treats missing DZI tiles as background. Could cut 30-50% of encodes on tissue slides where slide-background dominates the L_max grid. NOT applicable to `--to szi` (SZI spec forbids sparse tile trees). DZI-only. ~200 LOC. v0.17 confirmation: libvips defaults to NOT skipping blanks either — this is a NEW capability, not catch-up.
+- ✅ **DONE (2026-06-12): faithful associated-image copy across TIFF writers**
+  (wsitools#1). `convert --to {cog-wsi,svs,tiff,ome-tiff}` + `--factor` corrupted
+  associated images: the `AssociatedImage.Bytes()` passthrough wrote a single
+  standalone strip that dropped the source's `Predictor (317)` (LZW labels →
+  garbage/truncation) and `JPEGTables (347)` (abbreviated-JPEG thumbnails →
+  undecodable). Now copied byte-faithfully via opentile-go **v0.39.0**
+  `Slide.AssociatedSourceOf` (#22): verbatim source strips + exact tags, through
+  new multi-strip support in `cogwsiwriter`/`streamwriter`; ok=false (synthesized/
+  tiled) falls back to decode→re-encode. The 5 corrupt `cog-wsi/*_cog-wsi.tiff`
+  fixtures were regenerated + verified. Root cause was NOT the LZW encoder (it
+  round-trips byte-perfect) and NOT a regression. opentile-go→v0.39.0. Spec/plan:
+  `docs/superpowers/{specs,plans}/2026-06-12-associated-faithful-copy*`. (OME-TIFF
+  reader still can't decode LZW/multi-strip associated on read-back — separate
+  upstream limitation; the written bytes are faithful.)
 - ✅ **DONE (2026-06-05): unify downsample/convert scaling.** `convert --factor N`
   / `--target-mag M` ships for `svs|tiff|ome-tiff|cog-wsi` (reduce-then-rebuild
   via the shared `internal/downscale` engine, per-target MPP×N / mag÷N scaling).
