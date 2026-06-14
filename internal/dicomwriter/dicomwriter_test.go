@@ -256,6 +256,32 @@ func TestWriteVolumeInstance_JPEGSourceTransferSyntax(t *testing.T) {
 	}
 }
 
+func TestWriteInstance_L0ImageTypeOverride(t *testing.T) {
+	src := openDICOMFixture(t, "scan_621_grundium_dicom")
+	defer src.Close()
+
+	var out bytes.Buffer
+	// L0 with an explicit DERIVED/RESAMPLED override (downsample semantics).
+	if err := WriteVolumeInstance(&out, src, 0, Options{
+		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"},
+	}); err != nil {
+		t.Fatalf("WriteVolumeInstance: %v", err)
+	}
+	ds, err := dicom.Parse(bytes.NewReader(out.Bytes()), int64(out.Len()), nil)
+	if err != nil {
+		t.Fatalf("dicom.Parse: %v", err)
+	}
+	e, err := ds.FindElementByTag(tag.ImageType)
+	if err != nil {
+		t.Fatalf("ImageType missing: %v", err)
+	}
+	got, _ := e.Value.GetValue().([]string)
+	want := []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
+	if len(got) != 4 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
+		t.Errorf("ImageType = %v, want %v", got, want)
+	}
+}
+
 // TestWriteVolumeInstance_HTJ2KSourceRejected confirms an HTJ2K DICOM source fails
 // LOUD (frame-copy unsupported) rather than silently mislabeling HTJ2K frames as
 // JPEG-baseline.
@@ -267,5 +293,56 @@ func TestWriteVolumeInstance_HTJ2KSourceRejected(t *testing.T) {
 	var out bytes.Buffer
 	if err := WriteVolumeInstance(&out, src, level, Options{}); err == nil {
 		t.Fatalf("expected error for HTJ2K DICOM source (frame-copy unsupported), got success")
+	}
+}
+
+// TestWritePyramid_DerivedLowerLevelsResampled guards that a derived (transform)
+// DICOM pyramid — signaled by Options.L0ImageType — stamps RESAMPLED on every
+// reduced level, not NONE. Regression guard: a DICOM source's lower levels used
+// to hit the verbatim-re-emission "dicom → NONE" branch even when derived.
+func TestWritePyramid_DerivedLowerLevelsResampled(t *testing.T) {
+	src := openDICOMFixture(t, "scan_621_grundium_dicom")
+	defer src.Close()
+	n := len(src.Levels())
+	if n < 2 {
+		t.Skip("need >= 2 levels")
+	}
+
+	bufs := map[string]*bytes.Buffer{}
+	factory := func(name string) (io.WriteCloser, error) {
+		b := &bytes.Buffer{}
+		bufs[name] = b
+		return nopWriteCloser{b}, nil
+	}
+	l0Type := []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
+	if err := WritePyramid(src, Options{L0ImageType: l0Type}, factory); err != nil {
+		t.Fatalf("WritePyramid: %v", err)
+	}
+
+	imageTypeOf := func(level int) []string {
+		b := bufs[fmt.Sprintf("level-%d", level)]
+		if b == nil {
+			t.Fatalf("level %d not written", level)
+		}
+		ds, err := dicom.Parse(bytes.NewReader(b.Bytes()), int64(b.Len()), nil)
+		if err != nil {
+			t.Fatalf("parse level %d: %v", level, err)
+		}
+		e, err := ds.FindElementByTag(tag.ImageType)
+		if err != nil {
+			t.Fatalf("level %d ImageType missing: %v", level, err)
+		}
+		v, _ := e.Value.GetValue().([]string)
+		return v
+	}
+
+	if got := imageTypeOf(0); len(got) != 4 || got[3] != "RESAMPLED" {
+		t.Errorf("L0 ImageType = %v, want override %v", got, l0Type)
+	}
+	for level := 1; level < n; level++ {
+		got := imageTypeOf(level)
+		if len(got) != 4 || got[3] != "RESAMPLED" {
+			t.Errorf("level %d ImageType = %v, want [3]=RESAMPLED (derived lower level)", level, got)
+		}
 	}
 }

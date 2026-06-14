@@ -79,9 +79,10 @@ The output container matches the source format:
   OME-TIFF   → ome-tiff
   Generic-TIFF → tiff (plain pyramidal TIFF)
   COG-WSI    → cog-wsi
+  DICOM      → dicom (a pyramid directory of level-<n>.dcm instances)
 
 For formats without a matching writer (NDPI, Philips-TIFF, BIF, IFE,
-Leica SCN, DICOM, SZI, …) use 'convert --to {svs|tiff|ome-tiff|cog-wsi}
+Leica SCN, SZI, …) use 'convert --to {svs|tiff|ome-tiff|cog-wsi}
 --factor N' to downsample into a different container.
 
 Examples:
@@ -482,28 +483,7 @@ func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []b
 // doesn't extend that far. Always returns a fresh outputTileSize×outputTileSize
 // buffer for the encoder.
 func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty int) ([]byte, error) {
-	tile := make([]byte, outputTileSize*outputTileSize*3)
-	x0 := tx * outputTileSize
-	y0 := ty * outputTileSize
-	if x0 >= rasterW || y0 >= rasterH {
-		return tile, nil // empty edge — full zero pad
-	}
-	copyW := outputTileSize
-	if x0+copyW > rasterW {
-		copyW = rasterW - x0
-	}
-	copyH := outputTileSize
-	if y0+copyH > rasterH {
-		copyH = rasterH - y0
-	}
-	srcStride := rasterW * 3
-	dstStride := outputTileSize * 3
-	for y := 0; y < copyH; y++ {
-		srcOff := (y0+y)*srcStride + x0*3
-		dstOff := y * dstStride
-		copy(tile[dstOff:dstOff+copyW*3], raster[srcOff:srcOff+copyW*3])
-	}
-	return tile, nil
+	return downscale.ExtractTile(raster, rasterW, rasterH, tx, ty, outputTileSize), nil
 }
 
 // writeOneAssociated writes a single associated image verbatim into the output

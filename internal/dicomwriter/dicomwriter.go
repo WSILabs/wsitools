@@ -18,8 +18,11 @@ import (
 
 // Options controls the DICOM write. Associated enables emitting the slide's
 // associated images (label/overview/thumbnail/…) as separate instances.
+// L0ImageType, when non-nil, overrides level 0's ImageType (4 values) — used by
+// transform emitters (downsample/crop) where L0 is no longer ORIGINAL.
 type Options struct {
-	Associated bool
+	Associated  bool
+	L0ImageType []string
 }
 
 // errSkipAssociated marks an associated image that can't be tile-copied (e.g. an
@@ -54,8 +57,8 @@ func newSharedUIDs() sharedUIDs {
 // level `level` to w, copying the source's compressed JPEG tiles verbatim. The
 // source's selected level must carry JPEG-baseline tiles (DICOM sources always
 // do; non-DICOM sources are codec-gated in buildDescriptor).
-func WriteVolumeInstance(w io.Writer, src source.Source, level int, _ Options) error {
-	return writeInstance(w, src, level, newSharedUIDs())
+func WriteVolumeInstance(w io.Writer, src source.Source, level int, opts Options) error {
+	return writeInstance(w, src, level, newSharedUIDs(), opts)
 }
 
 // WritePyramid emits the full resolution pyramid (one WSM VOLUME instance per
@@ -72,7 +75,7 @@ func WritePyramid(src source.Source, opts Options, newWriter func(name string) (
 		if err != nil {
 			return fmt.Errorf("open writer for %s: %w", name, err)
 		}
-		werr := writeInstance(w, src, level, shared)
+		werr := writeInstance(w, src, level, shared, opts)
 		cerr := w.Close()
 		if werr != nil {
 			return fmt.Errorf("write %s: %w", name, werr)
@@ -232,7 +235,7 @@ func tightRGB(di *decoder.Image) []byte {
 
 // writeInstance assembles + writes one WSM VOLUME instance for src level `level`
 // (InstanceNumber level+1) to w, using the shared UIDs and a fresh SOPInstanceUID.
-func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs) error {
+func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs, opts Options) error {
 	if level < 0 || level >= len(src.Levels()) {
 		return fmt.Errorf("level %d out of range (0..%d)", level, len(src.Levels())-1)
 	}
@@ -258,8 +261,18 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs)
 
 	// ImageType: a DICOM source re-emission is DERIVED at every level (P0); a
 	// non-DICOM level 0 is the native acquisition (ORIGINAL), reduced levels DERIVED.
+	// opts.L0ImageType, when non-nil, marks a derived transform pyramid (downsample/
+	// crop): L0 carries the override and every reduced level below it is a resampled
+	// derivative (DERIVED/…/RESAMPLED), regardless of source format. This precedes the
+	// dicom branch so a DICOM-source derived pyramid does not mis-stamp its lowers NONE.
 	var imageType []string
 	switch {
+	case level == 0 && opts.L0ImageType != nil:
+		imageType = opts.L0ImageType
+	case opts.L0ImageType != nil:
+		// Derived transform pyramid (downsample/crop): every reduced level below
+		// L0 is a resampled derivative, regardless of source format.
+		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
 	case src.Format() == "dicom":
 		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}
 	case level == 0:

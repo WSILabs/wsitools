@@ -20,7 +20,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 
 | # | Item | Where | Conf | Effort | Impact |
 |---|---|---|---|---|---|
-| A1 | **DICOM transform dead-end** — no `downsample`, no `crop`, no `--factor` into DICOM. Shared enabler = a *derived-pyramid `source.Source` adapter* feeding `WritePyramid`; unlocks DICOM downsample **and** DICOM re-encode crop together. | `downsample.go:137`, `crop.go:177`, `convert.go:92` | [confirmed] | L | High |
+| A1 | ~~**DICOM transform dead-end**~~ **DONE** (branch feat/dicom-derived-pyramid-adapter) — `convert --to dicom --factor`, `downsample --factor <dicom>` (format-preserving), and `crop <dicom>` (re-encode + `--lossless`) via `internal/derivedsource` → `WritePyramid`. dciodvfy-validated. | `internal/derivedsource/`, `cmd/wsitools/convert_factor.go`, `cmd/wsitools/crop.go` | [confirmed] | L | High |
 | A2 | ~~**`convert --to svs --factor` rejects non-SVS sources**~~ **DONE** (merge 7203c00) — `downsampleToSVS` now resolves MPP/mag from the Aperio doc (SVS) or opentile metadata (any other source) and synthesizes an Aperio description via `SyntheticAperioDescription`, matching its siblings. | `convert_factor.go` | [confirmed] | S | Med |
 | A3 | **`convert --to dzi/szi --factor` deferred.** Wire `factor` into the descent generator's L0 dims. | `convert.go:92`, `convert_factor.go:86` | [confirmed] | S–M | Low–Med |
 | A4 | **`convert --to dicom` frame-copies JPEG/JP2K only** — AVIF/WebP/JXL/HTJ2K/LZW levels rejected. Needs decode→re-encode-to-JPEG fallback. | `dicomwriter.go:398` | [confirmed] | M | Med |
@@ -79,9 +79,9 @@ additionally supports dzi/szi/dicom as one-shot targets.
 | ~~**A2** lift SVS-only on `--to svs --factor`~~ | — | — | **DONE** (merge 7203c00) |
 | ~~**D1** run integration suite in CI~~ | — | — | **DONE** (PR #4, merge eea2da4) |
 | ~~**B3** wire-or-delete `aperioapp14` orphan~~ | — | — | **DONE** (merge 89f06f3, deleted) |
-| **A1 / DICOM adapter** | High (L) | **Highest** | Unlocks DICOM downsample + crop |
+| ~~**A1 / DICOM adapter**~~ | — | — | **DONE** (branch feat/dicom-derived-pyramid-adapter) |
 | **D2** DICOM CI fixture | Med (cross-repo) | High | Unblocks the largest untested surface |
 
 **Suggested order:** ~~lowest-risk correctness first (C1, A2)~~ → ~~the high-impact
-CI unlock (D1)~~ → ~~the `aperioapp14` cleanup (B3)~~ **all done** → next the big
-DICOM adapter (A1) when ready, then the DICOM CI fixture (D2).
+CI unlock (D1)~~ → ~~the `aperioapp14` cleanup (B3)~~ → ~~the big DICOM adapter
+(A1)~~ **all done** → next the DICOM CI fixture (D2).

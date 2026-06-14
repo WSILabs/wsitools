@@ -144,6 +144,28 @@ func TestMapOpentileCompression_NovelCodecs(t *testing.T) {
 	}
 }
 
+func TestOpenWithSlide_ReturnsBothHandles(t *testing.T) {
+	td := testdir(t)
+	p := filepath.Join(td, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(p); err != nil {
+		t.Skip("no svs fixture")
+	}
+	src, slide, err := OpenWithSlide(p)
+	if err != nil {
+		t.Fatalf("OpenWithSlide: %v", err)
+	}
+	defer src.Close()
+	if slide == nil {
+		t.Fatal("OpenWithSlide returned nil slide")
+	}
+	if src.Format() != string(opentile.FormatSVS) {
+		t.Errorf("Format = %q, want svs", src.Format())
+	}
+	if len(src.Levels()) != len(slide.Levels()) {
+		t.Errorf("source Levels = %d, slide Levels = %d", len(src.Levels()), len(slide.Levels()))
+	}
+}
+
 // TestLevel_TileInto_RoundTrip opens a known SVS fixture and verifies
 // that TileInto fills a buffer with the same bytes the underlying
 // opentile.Level returns.

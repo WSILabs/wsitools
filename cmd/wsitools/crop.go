@@ -175,7 +175,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 
 	target, ok := downsampleTargetForFormat(string(src.Format()))
 	if !ok {
-		return fmt.Errorf("crop: unsupported source format %q (supported: svs, ome-tiff, tiff, cog-wsi)", src.Format())
+		return fmt.Errorf("crop: unsupported source format %q (supported: svs, ome-tiff, tiff, cog-wsi, dicom)", src.Format())
 	}
 
 	srcL0 := src.Levels()[0]
@@ -235,6 +235,8 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return cropToOMETIFF(p)
 	case "cog-wsi":
 		return cropToCOGWSI(p)
+	case "dicom":
+		return cropToDICOM(p)
 	default:
 		return fmt.Errorf("crop: target %q not implemented", target)
 	}

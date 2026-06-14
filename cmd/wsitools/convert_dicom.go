@@ -75,11 +75,13 @@ func writeDICOMSingle(src source.Source, start time.Time) error {
 	return nil
 }
 
-// writeDICOMPyramid emits the full pyramid into cvOutput (a directory) as
-// level-<n>.dcm. It writes into a temp sibling dir and renames into place so a
-// failed run never leaves a partial pyramid.
-func writeDICOMPyramid(src source.Source, start time.Time) error {
-	parent := filepath.Dir(cvOutput)
+// emitDICOM writes a full DICOM-WSM pyramid for src into outDir (one
+// level-<n>.dcm per instance, plus associated images). It writes into a temp
+// sibling dir and renames into place so a failed run never leaves a partial
+// pyramid. Shared by writeDICOMPyramid (convert --to dicom) and the
+// downsample/crop DICOM emitters.
+func emitDICOM(src source.Source, opts dicomwriter.Options, outDir string, force bool) error {
+	parent := filepath.Dir(outDir)
 	tmp, err := os.MkdirTemp(parent, ".wsitools-dcm-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
@@ -87,21 +89,30 @@ func writeDICOMPyramid(src source.Source, start time.Time) error {
 	factory := func(name string) (io.WriteCloser, error) {
 		return os.Create(filepath.Join(tmp, name+".dcm"))
 	}
-	if err := dicomwriter.WritePyramid(src, dicomwriter.Options{Associated: !cvNoAssociated}, factory); err != nil {
+	if err := dicomwriter.WritePyramid(src, opts, factory); err != nil {
 		_ = os.RemoveAll(tmp)
 		return fmt.Errorf("write DICOM pyramid: %w", err)
 	}
-	if cvForce {
-		if err := os.RemoveAll(cvOutput); err != nil {
+	if force {
+		if err := os.RemoveAll(outDir); err != nil {
 			_ = os.RemoveAll(tmp)
-			return fmt.Errorf("remove existing %s: %w", cvOutput, err)
+			return fmt.Errorf("remove existing %s: %w", outDir, err)
 		}
 	}
-	if err := os.Rename(tmp, cvOutput); err != nil {
+	if err := os.Rename(tmp, outDir); err != nil {
 		_ = os.RemoveAll(tmp)
-		return fmt.Errorf("finalize %s: %w", cvOutput, err)
+		return fmt.Errorf("finalize %s: %w", outDir, err)
 	}
+	return nil
+}
 
+// writeDICOMPyramid emits the full pyramid into cvOutput (a directory) as
+// level-<n>.dcm. It writes into a temp sibling dir and renames into place so a
+// failed run never leaves a partial pyramid.
+func writeDICOMPyramid(src source.Source, start time.Time) error {
+	if err := emitDICOM(src, dicomwriter.Options{Associated: !cvNoAssociated}, cvOutput, cvForce); err != nil {
+		return err
+	}
 	entries, _ := os.ReadDir(cvOutput)
 	n := 0
 	var total int64
