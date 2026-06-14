@@ -55,6 +55,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 | D4 | **Windows CI job runs no tests** (build+vet only); HTJ2K untested on Windows (`-tags nohtj2k`). | `ci.yml` | [confirmed] | M | Med |
 | D5 | **dciodvfy not in CI** → DICOM conformance never auto-validated. | `ci.yml` | [confirmed] | S–M | Med |
 | D6 | **CI `-timeout 5m`** vs heavy `-race cmd/wsitools` → false-FAIL risk under load (CLAUDE.md suggests 30m). | `ci.yml` | [check] | S | Low |
+| D7 | **No cross-implementation conformance check vs `wsidicomizer`** — dciodvfy validates our WSM against the IOD in isolation but not against the ecosystem reference. Convert the CC0 `CMU-1-Small-Region.svs` → DICOM with both our `convert --to dicom` (non-`--factor`) and `wsidicomizer`, then **diff the WSM datasets attribute-by-attribute** (DimensionOrganization/TILED_FULL, TotalPixelMatrix dims+origin, per-frame positions, Optical Path, Shared/Per-Frame Functional Groups, PixelSpacing, ImageType, TransferSyntax, SOP/Series structure). Surfaces metadata-completeness gaps dciodvfy stays silent on. Speed/size = secondary data point only (apples-to-oranges: Go+libjpeg-turbo+parallel vs Python). Only the base `--to dicom` path is comparable — wsidicomizer has no downsample/crop analog. Needs a Python env (wsidicomizer + openslide). | new (one-off study) | [confirmed] | M | Med–High |
 
 ## E. Determinism (likely already resolved — verify, then refresh memory)
 
