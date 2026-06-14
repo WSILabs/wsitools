@@ -3,8 +3,9 @@
 Go-based utilities for whole-slide imaging (WSI) files used in digital
 pathology. CLI bundles read-side inspection (`info`, `dump-ifds`, `extract`,
 `hash`, `region`), write-side conversion (`convert --to {cog-wsi, dzi,
-szi, svs, tiff, ome-tiff}`, `downsample`), and diagnostics (`doctor`,
-`version`).
+szi, svs, tiff, ome-tiff, dicom}`, `downsample`, `crop`), associated-image
+editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
+(`doctor`, `version`).
 
 ## Module path
 
@@ -23,6 +24,17 @@ szi, svs, tiff, ome-tiff}`, `downsample`), and diagnostics (`doctor`,
   - `internal/tiff/cogwsiwriter` — spool-and-finalize COG-WSI writer;
     backs `convert --to cog-wsi`.
   Both are pure Go; cgo only inside codec wrappers.
+- DICOM-WSM writer = `internal/dicomwriter` (`WritePyramid`/`WriteVolumeInstance`,
+  built on `suyashkumar/dicom`); backs `convert --to dicom`. It reads compressed
+  frames verbatim from a `source.Source` and emits TILED_FULL WSM instances.
+- DICOM as a transform TARGET (`convert --to dicom --factor`, `downsample
+  <dicom>`, `crop <dicom>` ± `--lossless`) = `internal/derivedsource`: a
+  synthesized `source.Source` over a reduced/cropped pyramid (rasterLevel
+  re-encodes tiles via a worker pool; passthroughLevel copies verbatim L0 frames
+  for lossless crop) fed to `WritePyramid`. Re-encoded levels are JPEG-baseline
+  (no JP2K/HTJ2K encoder). `crop`/`downsample`/`convert --factor` for the TIFF
+  family live in `cmd/wsitools` (crop.go/crop_formats.go, downsample.go,
+  convert_factor.go).
 - Tile-ordering strategies (row-major / hilbert / morton) =
   `internal/tiff/tileorder`, used by the COG-WSI writer's finalize pass.
 - DZI/SZI writers = `internal/dzi`, `internal/szi`. `convert --to dzi|szi`
@@ -49,9 +61,11 @@ szi, svs, tiff, ome-tiff}`, `downsample`), and diagnostics (`doctor`,
 - `make test` runs with `-race -count=1`.
 - Integration tests gated by `WSI_TOOLS_TESTDIR` env var (default
   `./sample_files`).
-- CI downloads CMU-1-Small-Region.svs + CMU-1.ndpi from
-  `wsilabs/wsi-fixtures` v1 and runs the integration suite on every push
-  and PR (see `.github/workflows/ci.yml`).
+- CI downloads fixtures from `wsilabs/wsi-fixtures` **v5** (`svs.tar`,
+  `ndpi.tar`, `cog-wsi.tar`, `dicom.tar` — incl. the 3DHISTECH JP2K/HTJ2K and
+  scan_621 Grundium DICOM-WSM fixtures), verifies them against
+  `.github/fixtures.sha256`, and runs both the unit suite and the
+  `-tags integration` suite on every push and PR (see `.github/workflows/ci.yml`).
 - For local work, soft-link to opentile-go's fixture pool:
 
   ```sh

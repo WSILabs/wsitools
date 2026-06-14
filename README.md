@@ -16,7 +16,7 @@ digital pathology.
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 
-## What's here (v0.21)
+## What's here (v0.23)
 
 **Inspection**
 
@@ -123,17 +123,32 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   the slide's **associated images** (label/overview/thumbnail, macro→overview) are
   also emitted as single-frame instances in the same Series at `<dir>/<type>.dcm`
   (e.g. `label.dcm`); `--no-associated` skips them, and `--level N` emits none.
-  >8-bit / `.jp2`-boxed JPEG 2000 are later slices.
+  >8-bit / `.jp2`-boxed JPEG 2000 are later slices. DICOM is also a **transform
+  target**: `convert --to dicom --factor N` reduces *any* source into a DICOM
+  pyramid, and `downsample <dicom>` / `crop <dicom>` (re-encode, plus
+  `crop --lossless` verbatim-L0 frame-copy) emit a reduced/cropped DICOM
+  directly (a `<dir>/level-<n>.dcm` pyramid; see `crop` / `downsample` below).
+  Re-encoded levels are **JPEG-baseline** (no JP2K/HTJ2K encoder yet); the tile
+  encode runs on a `--jobs` worker pool.
 - `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
   40x → 20x), **format-preserving**: the output is the same container as the
   source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,
-  COG-WSI→COG-WSI). Regenerates the full pyramid from the new base, scales MPP
+  COG-WSI→COG-WSI, **DICOM→DICOM** — a `level-<n>.dcm` pyramid directory).
+  Regenerates the full pyramid from the new base, scales MPP
   ×N / magnification ÷N, and copies associated images **byte-faithfully**
   (verbatim source strips + Predictor/JPEGTables, via opentile-go
   `AssociatedSourceOf`). Sources
   with no matching writer error with a pointer to `convert`. To downsample
-  *into a different* container, use `convert --to {svs,tiff,ome-tiff,cog-wsi}
-  --factor N` (`dzi`/`szi` not yet supported).
+  *into a different* container, use `convert --to {svs,tiff,ome-tiff,cog-wsi,
+  dicom} --factor N` (`dzi`/`szi` not yet supported).
+- `wsitools crop` — extract a rectangular region (`--rect X,Y,W,H`, level-0
+  coords) into the **same container** as the source (SVS, OME-TIFF,
+  generic-TIFF, COG-WSI, **DICOM**). Default re-encodes the exact extent;
+  `--lossless` snaps the rect to the source tile grid and copies L0 tiles
+  **verbatim** (byte-identical L0; the output is a tile-aligned superset of the
+  rect). Lower pyramid levels are rebuilt from the cropped base; the thumbnail
+  is regenerated from the crop region (label/macro/overview pass through). For a
+  DICOM source the output is a `level-<n>.dcm` pyramid directory.
 
 Source formats accepted: SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE,
 generic-TIFF, NDPI, OME-OneFrame, Leica SCN (single-image), COG-WSI, and
@@ -141,7 +156,7 @@ DICOM-WSI.
 
 ### Format × command support
 
-| Source format | `info` | `region` | `dump-ifds` | `extract`¹ | `hash`² | convert (from)³ | convert (to)⁴ | `downsample` | label/macro remove\|replace⁷ |
+| Source format | `info` | `region` | `dump-ifds` | `extract`¹ | `hash`² | convert (from)³ | convert (to)⁴ | `downsample` / `crop`⁹ | label/macro remove\|replace⁷ |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | SVS           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
 | Philips-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — | — |
@@ -153,19 +168,20 @@ DICOM-WSI.
 | Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
 | COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
 | IFE           | ✓ | ✓ | — | ✓ | ✓ | ✓  | — | — | — |
-| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | P1⁶ | — | — |
+| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | ✓⁶ | ✓⁶ | — |
 
 ¹ `extract` works when the slide carries that associated image (label/macro/thumbnail/overview); run `info` to list which.
 ² `hash`: `--mode pixel` works for every format; the default file-mode is a single-file SHA-256.
 ³ **convert (from)** — readable as a convert source. **✓\*** = striped source: opentile-go synthesizes a tile grid over the source strips, so `convert` decodes + re-encodes (reproducible JPEG tiles) rather than doing a bit-exact tile-copy. The lossless tile-copy fast path applies only to natively-tiled sources (plain ✓).
-⁴ **convert (to)** — available as a convert output **target**. The full target set is `cog-wsi`, `svs`, `tiff` (→ generic-TIFF), `ome-tiff`, `dzi`, `szi`; **DZI and SZI** are output-only pyramid formats (not readable sources, so not listed as rows). All ✓ targets except `dzi`/`szi` also accept `--factor N` / `--target-mag M` to downsample during conversion (scales MPP ×N / magnification ÷N).
+⁴ **convert (to)** — available as a convert output **target**. The full target set is `cog-wsi`, `svs`, `tiff` (→ generic-TIFF), `ome-tiff`, `dicom`, `dzi`, `szi`; **DZI and SZI** are output-only pyramid formats (not readable sources, so not listed as rows). All ✓ targets except `dzi`/`szi` also accept `--factor N` / `--target-mag M` to downsample during conversion (scales MPP ×N / magnification ÷N).
 ⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
-⁶ DICOM-WSI **write** is early — `convert --to dicom` emits conformant WSM VOLUME instances from a DICOM, **JPEG-baseline**, **or JPEG 2000** source (verbatim tile-copy, ICC carried-or-synthesized). JPEG-baseline `PhotometricInterpretation` is marker-driven; JPEG 2000 derives its transfer syntax from source reversibility (`…4.90` lossless / `…4.91` lossy) and its `PhotometricInterpretation` from the codestream SIZ/COD markers (RGB / `YBR_ICT` / `YBR_RCT` / `MONOCHROME2`). It emits a single instance with `--level N`, **or** the **full pyramid** by default as a multi-instance Series (one instance per level, `<dir>/level-<n>.dcm`, shared Series/FrameOfReference, atomic dir output). Full-pyramid mode also emits the slide's **associated images** (label/overview/thumbnail, macro→overview) as single-frame instances in the same Series at `<dir>/<type>.dcm` (per-type `ImageType`/`SpecimenLabelInImage`, SlideLabel module for label/overview). JPEG / JPEG 2000 associated images tile-copy verbatim-encapsulated; an associated image whose codec is **not** a DICOM transfer syntax (e.g. the **LZW label** on every Aperio SVS) is **decoded and stored as an uncompressed native RGB instance** (Explicit VR LE, VR `OB`, lossless — keeps the barcode scannable) rather than skipped, with decoding delegated to opentile-go v0.38.1 (`AssociatedImage.Decode`). `--no-associated` skips them; `--level N` emits none. Validated with `dciodvfy` (0 errors on every level and every associated instance, including the native label) plus pixel round-trips on the RGB JPEG-baseline (CMU-1-Small-Region.svs) and RGB JPEG 2000 (JP2K-33003-1.svs) paths and the native LZW-label transcode; the JP2K YBR / lossless branches are unit-tested only. >8-bit / `.jp2`-boxed JPEG 2000 are later slices.
+⁶ DICOM-WSI **write** is early — `convert --to dicom` emits conformant WSM VOLUME instances from a DICOM, **JPEG-baseline**, **or JPEG 2000** source (verbatim tile-copy, ICC carried-or-synthesized). JPEG-baseline `PhotometricInterpretation` is marker-driven; JPEG 2000 derives its transfer syntax from source reversibility (`…4.90` lossless / `…4.91` lossy) and its `PhotometricInterpretation` from the codestream SIZ/COD markers (RGB / `YBR_ICT` / `YBR_RCT` / `MONOCHROME2`). It emits a single instance with `--level N`, **or** the **full pyramid** by default as a multi-instance Series (one instance per level, `<dir>/level-<n>.dcm`, shared Series/FrameOfReference, atomic dir output). Full-pyramid mode also emits the slide's **associated images** (label/overview/thumbnail, macro→overview) as single-frame instances in the same Series at `<dir>/<type>.dcm` (per-type `ImageType`/`SpecimenLabelInImage`, SlideLabel module for label/overview). JPEG / JPEG 2000 associated images tile-copy verbatim-encapsulated; an associated image whose codec is **not** a DICOM transfer syntax (e.g. the **LZW label** on every Aperio SVS) is **decoded and stored as an uncompressed native RGB instance** (Explicit VR LE, VR `OB`, lossless — keeps the barcode scannable) rather than skipped, with decoding delegated to opentile-go v0.38.1 (`AssociatedImage.Decode`). `--no-associated` skips them; `--level N` emits none. Validated with `dciodvfy` (0 errors on every level and every associated instance, including the native label) plus pixel round-trips on the RGB JPEG-baseline (CMU-1-Small-Region.svs) and RGB JPEG 2000 (JP2K-33003-1.svs) paths and the native LZW-label transcode; the JP2K YBR / lossless branches are unit-tested only. >8-bit / `.jp2`-boxed JPEG 2000 are later slices. DICOM is also a **transform target**: `convert --to dicom --factor N` (any source), `downsample <dicom>`, and `crop <dicom>` (± `--lossless`) emit a reduced/cropped DICOM pyramid via the `internal/derivedsource` adapter — re-encoded levels are JPEG-baseline (parallel `--jobs` encode), a lossless crop's L0 is a verbatim frame-copy, and a crop's thumbnail is regenerated from the crop region.
 ⁷ **label/macro remove|replace** — applies equally to `thumbnail` and `overview`. Pyramid tile bytes are copied verbatim (no decode/re-encode); only the tail IFD is rewritten.
 ⁸ **OME-TIFF editing is lossy** — rebuilds the file via `streamwriter` and regenerates a minimal OME-XML (instrument/acquisition/channel/vendor `OriginalMetadata` not preserved; pyramid pixels, geometry/MPP/magnification, ICC, and the other associated images are). An always-on runtime warning fires on every OME-TIFF edit. Associated replacements are **JPEG-only** (opentile-go's OME-TIFF reader limitation — LZW/Deflate replacements would be unreadable). See [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). For faithful OME metadata carry-through, use [Bio-Formats](https://www.openmicroscopy.org/bio-formats/).
+⁹ **`downsample` / `crop`** — both are **format-preserving** transforms sharing one support set (the ✓ rows; for DICOM see ⁶). `downsample` reduces by `--factor N` / `--target-mag M`; `crop` extracts `--rect X,Y,W,H` (level-0 coords), default re-encoding the exact extent or `--lossless` snapping to the tile grid and copying L0 tiles verbatim (byte-identical L0). To transform *into a different* container, use `convert --to <target> --factor N`.
 
 `downsample` is **format-preserving** — it reduces a slide and emits the same
-container it read (the ✓ rows: SVS, OME-TIFF, generic-TIFF, COG-WSI). Other
+container it read (the ✓ rows: SVS, OME-TIFF, generic-TIFF, COG-WSI, DICOM). Other
 source formats error with a pointer to `convert --to … --factor`.
 
 Striped sources produce reproducible but synthesized JPEG tiles in the output
