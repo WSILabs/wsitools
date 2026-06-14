@@ -75,6 +75,17 @@ jobs:
           WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
         run: go test ./... -race -count=1 -timeout 5m
 
+      # End-to-end CLI suite (tests/integration, //go:build integration). These
+      # shell out to a freshly built wsitools binary, so the harness runs
+      # without -race (the work happens in the subprocess); -timeout is generous
+      # per CLAUDE.md's heavy-suite guidance. Tests skip gracefully when a
+      # fixture isn't among the three CI pulls (see fixtures.sha256), so the
+      # suite exercises every path those fixtures reach and skips the rest.
+      - name: go test (integration)
+        env:
+          WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
+        run: go test -tags integration ./tests/integration/... -count=1 -timeout 30m
+
   build-windows:
     name: build (Windows)
     runs-on: windows-latest
