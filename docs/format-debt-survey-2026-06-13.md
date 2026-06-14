@@ -49,7 +49,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 
 | # | Item | Where | Conf | Effort | Impact |
 |---|---|---|---|---|---|
-| D1 | **Integration suite never runs in CI** — `tests/integration/*.go` are `//go:build integration`; `ci.yml` runs `go test ./...` **without** `-tags integration`. So the crop parity oracle, byte-identity matrix, format-preserving matrix, and downsample regression all run **local-only**. | `.github/workflows/ci.yml`, `tests/integration/` | [confirmed firsthand] | S–M | High |
+| D1 | ~~**Integration suite never runs in CI**~~ **DONE** (PR #4, merge eea2da4) — added a `go test (integration)` step (`-tags integration ./tests/integration/...`) to the macOS job; tests skip gracefully on fixtures absent from the 3 CI pulls. CI-verified green (`ok … 10.5s`). | `.github/workflows/ci.yml` | [confirmed firsthand] | S–M | High |
 | D2 | **No DICOM CI fixture** — ~15 tests skip; the entire DICOM read+write surface (largest recent feature) has zero CI coverage. (Already filed as wsi-fixtures backfill.) | `.github/fixtures.sha256` | [confirmed] | M (cross-repo) | High |
 | D3 | **No JP2K-SVS / OME-TIFF / Leica-SCN / generic-TIFF CI fixtures** → those paths skip in CI. | fixtures.sha256 | [confirmed] | M | Med |
 | D4 | **Windows CI job runs no tests** (build+vet only); HTJ2K untested on Windows (`-tags nohtj2k`). | `ci.yml` | [confirmed] | M | Med |
@@ -77,10 +77,11 @@ additionally supports dzi/szi/dicom as one-shot targets.
 |---|---|---|---|
 | ~~**C1** fix DICOM stray-0-byte-file~~ | — | — | **DONE** (merge 0ede7fd) |
 | ~~**A2** lift SVS-only on `--to svs --factor`~~ | — | — | **DONE** (merge 7203c00) |
-| **D1** run integration suite in CI | Low–Med | **High** | The crop oracles currently guard nothing in CI |
+| ~~**D1** run integration suite in CI~~ | — | — | **DONE** (PR #4, merge eea2da4) |
 | **B3** wire-or-delete `aperioapp14` orphan | Lowest (S) | Low | Pure cleanup |
 | **A1 / DICOM adapter** | High (L) | **Highest** | Unlocks DICOM downsample + crop |
 | **D2** DICOM CI fixture | Med (cross-repo) | High | Unblocks the largest untested surface |
 
-**Suggested order:** ~~lowest-risk correctness first (C1, A2)~~ **done** → next the
-high-impact CI unlock (D1), then the big DICOM adapter (A1) when ready.
+**Suggested order:** ~~lowest-risk correctness first (C1, A2)~~ → ~~the high-impact
+CI unlock (D1)~~ **all done** → next the big DICOM adapter (A1) when ready, with
+the `aperioapp14` orphan (B3) as a quick cleanup in between.
