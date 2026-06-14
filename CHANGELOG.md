@@ -16,6 +16,21 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **`convert --to svs --factor` rejected non-SVS sources.** It required a
+  parseable Aperio `ImageDescription`, an asymmetry vs the tiff/ome-tiff/cog-wsi
+  targets (which accept any source). It now resolves MPP/magnification from the
+  Aperio doc when the source is SVS, else from opentile metadata, and synthesizes
+  an Aperio-shaped description via `SyntheticAperioDescription` for non-SVS
+  sources — so e.g. `convert --to svs --factor 2 <cog-wsi>` works and re-detects
+  as SVS. (Survey A2.)
+
+- **`convert --to dicom` left a stray 0-byte `.dcm` when an associated image was
+  skipped.** `WritePyramid` created the output file before the skip check, so an
+  associated image that couldn't be emitted (bytes/codec/decode failure) left an
+  empty `<type>.dcm` in the series. The writer now buffers each associated
+  instance and only opens the output once it has a complete instance to commit;
+  a skip opens no file. (Survey C1.)
+
 - **`convert --to {cog-wsi, svs, tiff, ome-tiff}` (and `--factor`) corrupted
   associated images** (wsitools#1). The associated-image passthrough copied
   opentile-go's `AssociatedImage.Bytes()` verbatim into a single standalone
@@ -42,7 +57,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   presents a derived pyramid as a `source.Source` to the existing
   `dicomwriter.WritePyramid`; re-encoded levels are JPEG-baseline (no JP2K/HTJ2K
   encoder yet). Output `-o` is a pyramid **directory** (as `convert --to dicom`
-  already is). dciodvfy-validated. (Survey A1.)
+  already is). The tile re-encode runs on a **worker pool** (`--jobs`), and a
+  `crop`'s **thumbnail is regenerated** from the crop region rather than carrying
+  the stale whole-slide thumbnail. dciodvfy-validated. (Survey A1.)
+
+- **CI now covers the DICOM read + write/transform surface.** The
+  `-tags integration` end-to-end suite runs in CI (previously local-only), and
+  `wsilabs/wsi-fixtures` **v5** adds `dicom.tar` (3DHISTECH JP2K/HTJ2K under CC0,
+  scan_621 Grundium under CC-BY-4.0) so the DICOM tests execute instead of
+  skipping. (Survey D1, D2.)
 
 - Experimental `convert --to dicom` — **DICOM-WSI writer, Phase 0 spike.** Emits
   one conformant DICOM VL Whole Slide Microscopy (WSM) **VOLUME** instance from a
