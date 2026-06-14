@@ -339,6 +339,16 @@ func cropToDICOM(p cropEmitParams) error {
 	assoc := src.Associated()
 	if p.noAssociated {
 		assoc = nil
+	} else {
+		// Replace the whole-slide thumbnail with one rendered from the crop L0
+		// (the snapped region for --lossless, the exact extent otherwise) so the
+		// emitted thumbnail reflects the crop, not the full slide. label/macro/
+		// overview pass through (they describe the whole physical slide).
+		var rerr error
+		assoc, rerr = regenCropThumbnailAssoc(assoc, p.l0, p.l0W, p.l0H, p.quality)
+		if rerr != nil {
+			return fmt.Errorf("regenerate crop thumbnail: %w", rerr)
+		}
 	}
 
 	var ds source.Source
@@ -350,10 +360,10 @@ func cropToDICOM(p cropEmitParams) error {
 		}
 		ds, err = derivedsource.WithLosslessL0(
 			src.Levels()[0], p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H,
-			p.l0, p.nLevels, outputTileSize, p.quality, src.Format(), md, assoc)
+			p.l0, p.nLevels, outputTileSize, p.quality, p.workers, src.Format(), md, assoc)
 	} else {
 		ds, err = derivedsource.FromReducedL0(
-			p.l0, p.l0W, p.l0H, p.nLevels, outputTileSize, p.quality, src.Format(), md, assoc)
+			p.l0, p.l0W, p.l0H, p.nLevels, outputTileSize, p.quality, p.workers, src.Format(), md, assoc)
 	}
 	if err != nil {
 		return fmt.Errorf("build derived source: %w", err)
