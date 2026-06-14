@@ -256,6 +256,32 @@ func TestWriteVolumeInstance_JPEGSourceTransferSyntax(t *testing.T) {
 	}
 }
 
+func TestWriteInstance_L0ImageTypeOverride(t *testing.T) {
+	src := openDICOMFixture(t, "scan_621_grundium_dicom")
+	defer src.Close()
+
+	var out bytes.Buffer
+	// L0 with an explicit DERIVED/RESAMPLED override (downsample semantics).
+	if err := WriteVolumeInstance(&out, src, 0, Options{
+		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"},
+	}); err != nil {
+		t.Fatalf("WriteVolumeInstance: %v", err)
+	}
+	ds, err := dicom.Parse(bytes.NewReader(out.Bytes()), int64(out.Len()), nil)
+	if err != nil {
+		t.Fatalf("dicom.Parse: %v", err)
+	}
+	e, err := ds.FindElementByTag(tag.ImageType)
+	if err != nil {
+		t.Fatalf("ImageType missing: %v", err)
+	}
+	got, _ := e.Value.GetValue().([]string)
+	want := []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
+	if len(got) != 4 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
+		t.Errorf("ImageType = %v, want %v", got, want)
+	}
+}
+
 // TestWriteVolumeInstance_HTJ2KSourceRejected confirms an HTJ2K DICOM source fails
 // LOUD (frame-copy unsupported) rather than silently mislabeling HTJ2K frames as
 // JPEG-baseline.
