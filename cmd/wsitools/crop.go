@@ -215,16 +215,20 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	}
 	nLevels := cropPyramidLevels(w, h, outputTileSize)
 
+	p := cropEmitParams{
+		ctx: ctx, src: src, srcL0: srcL0, input: input, output: output,
+		l0: outL0, l0W: w, l0H: h, nLevels: nLevels, quality: q, workers: workers,
+		order: order, bigtiffFlag: bigtiffFlag, noAssociated: noAssociated,
+		lossless: false, start: start,
+	}
 	switch target {
 	case "tiff":
-		return cropToTIFF(ctx, src, input, output, outL0, w, h, nLevels, q, workers, order, bigtiffFlag, noAssociated, start)
+		return cropToTIFF(p)
 	case "ome-tiff":
-		return cropToOMETIFF(ctx, src, input, output, outL0, w, h, nLevels, q, workers, order, bigtiffFlag, noAssociated, start)
+		return cropToOMETIFF(p)
 	case "cog-wsi":
-		return cropToCOGWSI(ctx, src, input, output, outL0, w, h, nLevels, q, workers, order, bigtiffFlag, noAssociated, start)
+		return cropToCOGWSI(p)
 	default:
-		// Unreachable while downsampleTargetForFormat returns exactly
-		// svs/tiff/ome-tiff/cog-wsi (svs handled above); defensive guard.
 		return fmt.Errorf("crop: target %q not implemented", target)
 	}
 }
