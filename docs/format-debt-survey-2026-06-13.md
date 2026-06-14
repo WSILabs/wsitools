@@ -50,7 +50,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 | # | Item | Where | Conf | Effort | Impact |
 |---|---|---|---|---|---|
 | D1 | ~~**Integration suite never runs in CI**~~ **DONE** (PR #4, merge eea2da4) — added a `go test (integration)` step (`-tags integration ./tests/integration/...`) to the macOS job; tests skip gracefully on fixtures absent from the 3 CI pulls. CI-verified green (`ok … 10.5s`). | `.github/workflows/ci.yml` | [confirmed firsthand] | S–M | High |
-| D2 | **No DICOM CI fixture** — ~15 tests skip; the entire DICOM read+write surface (largest recent feature) has zero CI coverage. (Already filed as wsi-fixtures backfill.) | `.github/fixtures.sha256` | [confirmed] | M (cross-repo) | High |
+| D2 | ~~**No DICOM CI fixture**~~ **DONE** (PR #5, merge c51cd7b) — wsi-fixtures **v5** adds `dicom.tar`: 3DHISTECH-JP2K/HTJ2K (CC0) + scan_621_grundium_dicom (CC-BY-4.0, attribution). CI pulls it + 16 instance SHAs; the DICOM unit + integration tests now RUN in CI (integration 10.5s→33.8s). | `.github/fixtures.sha256`, `ci.yml` | [confirmed firsthand] | M (cross-repo) | High |
 | D3 | **No JP2K-SVS / OME-TIFF / Leica-SCN / generic-TIFF CI fixtures** → those paths skip in CI. | fixtures.sha256 | [confirmed] | M | Med |
 | D4 | **Windows CI job runs no tests** (build+vet only); HTJ2K untested on Windows (`-tags nohtj2k`). | `ci.yml` | [confirmed] | M | Med |
 | D5 | **dciodvfy not in CI** → DICOM conformance never auto-validated. | `ci.yml` | [confirmed] | S–M | Med |
@@ -79,9 +79,9 @@ additionally supports dzi/szi/dicom as one-shot targets.
 | ~~**A2** lift SVS-only on `--to svs --factor`~~ | — | — | **DONE** (merge 7203c00) |
 | ~~**D1** run integration suite in CI~~ | — | — | **DONE** (PR #4, merge eea2da4) |
 | ~~**B3** wire-or-delete `aperioapp14` orphan~~ | — | — | **DONE** (merge 89f06f3, deleted) |
-| ~~**A1 / DICOM adapter**~~ | — | — | **DONE** (branch feat/dicom-derived-pyramid-adapter) |
-| **D2** DICOM CI fixture | Med (cross-repo) | High | Unblocks the largest untested surface |
+| ~~**A1 / DICOM adapter**~~ | — | — | **DONE** (merge 1e0a103) |
+| ~~**D2** DICOM CI fixture~~ | — | — | **DONE** (PR #5, merge c51cd7b; wsi-fixtures v5) |
 
 **Suggested order:** ~~lowest-risk correctness first (C1, A2)~~ → ~~the high-impact
 CI unlock (D1)~~ → ~~the `aperioapp14` cleanup (B3)~~ → ~~the big DICOM adapter
-(A1)~~ **all done** → next the DICOM CI fixture (D2).
+(A1)~~ → ~~the DICOM CI fixture (D2)~~ **all the top candidates done.**
