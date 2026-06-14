@@ -37,6 +37,8 @@ import (
 
 	codec "github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
+	"github.com/wsilabs/wsitools/internal/derivedsource"
+	"github.com/wsilabs/wsitools/internal/dicomwriter"
 	"github.com/wsilabs/wsitools/internal/downscale"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
@@ -58,6 +60,8 @@ func downsampleTargetForFormat(format string) (string, bool) {
 		return "tiff", true
 	case opentile.FormatCOGWSI:
 		return "cog-wsi", true
+	case opentile.FormatDICOM:
+		return "dicom", true
 	default:
 		return "", false
 	}
@@ -83,6 +87,8 @@ func dispatchDownsampleByTarget(
 		return downsampleToCOGWSI(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
 	case "ome-tiff":
 		return downsampleToOMETIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+	case "dicom":
+		return downsampleToDICOM(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
 	default:
 		return fmt.Errorf("--factor for --to %s not yet implemented", target)
 	}
@@ -849,6 +855,106 @@ func downsampleToOMETIFF(
 		outSizeStr = formatBytes(fi.Size())
 	}
 	fmt.Printf("wrote %s (%s)\n", output, outSizeStr)
+	return nil
+}
+
+// downsampleToDICOM is the reduce-then-rebuild body for both
+// `convert --to dicom --factor N` and `downsample --factor N <dicom>`. It
+// materializes a reduced L0 raster, wraps it (plus box-halved lowers) as a
+// derived source.Source, and emits a DICOM-WSM pyramid directory. tileOrderName
+// and bigtiffFlag are accepted for dispatch-signature uniformity and ignored
+// (DICOM has no TIFF tile order / BigTIFF).
+func downsampleToDICOM(ctx context.Context, input, output string, factor, targetMag, quality, workers int, tileOrderName string, force bool, bigtiffFlag string, noAssociated bool) error {
+	_ = tileOrderName
+	_ = bigtiffFlag
+	_ = workers
+	if quality < 1 || quality > 100 {
+		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
+	}
+	if _, err := os.Stat(input); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
+	if !force {
+		if _, err := os.Stat(output); err == nil {
+			return fmt.Errorf("output exists (use --force to overwrite): %s", output)
+		}
+	}
+
+	absIn, _ := filepath.Abs(input)
+	absOut, _ := filepath.Abs(output)
+	if absIn == absOut {
+		return fmt.Errorf("input and output paths are the same")
+	}
+
+	src, slide, err := source.OpenWithSlide(input)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer src.Close()
+	md := src.Metadata()
+
+	// Resolve --target-mag against the source magnification, then validate.
+	srcMag := md.Magnification
+	if targetMag > 0 {
+		if srcMag <= 0 {
+			return fmt.Errorf("--target-mag set but source magnification is unknown/zero")
+		}
+		ratio := srcMag / float64(targetMag)
+		f := int(ratio + 0.0001)
+		if !isValidFactor(f) || float64(f) != ratio {
+			return fmt.Errorf("source mag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", srcMag, targetMag, ratio)
+		}
+		factor = f
+	}
+	if !isValidFactor(factor) {
+		return fmt.Errorf("--factor must be one of {2,4,8,16}, got %d", factor)
+	}
+
+	srcL0 := slide.Levels()[0]
+	outW := srcL0.Size.W / factor
+	outH := srcL0.Size.H / factor
+	if outW <= 0 || outH <= 0 {
+		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outW, outH, factor)
+	}
+
+	rasterBytes := int64(outW) * int64(outH) * 3
+	if rasterBytes < 0 {
+		return fmt.Errorf("output L0 raster size overflows int64")
+	}
+	l0 := make([]byte, rasterBytes)
+	if err := downscale.MaterializeReducedL0(ctx, srcL0, l0, outW, outH, factor); err != nil {
+		return fmt.Errorf("materialize reduced L0: %w", err)
+	}
+
+	// Scale metadata: MPP grows by factor, magnification shrinks by it.
+	if md.MPPX != 0 {
+		md.MPPX *= float64(factor)
+	}
+	if md.MPPY != 0 {
+		md.MPPY *= float64(factor)
+	}
+	if md.MPP != 0 {
+		md.MPP *= float64(factor)
+	}
+	if md.Magnification != 0 {
+		md.Magnification /= float64(factor)
+	}
+
+	assoc := src.Associated()
+	if noAssociated {
+		assoc = nil
+	}
+	ds, err := derivedsource.FromReducedL0(l0, outW, outH, len(slide.Levels()), outputTileSize, quality, src.Format(), md, assoc)
+	if err != nil {
+		return fmt.Errorf("build derived source: %w", err)
+	}
+	if err := emitDICOM(ds, dicomwriter.Options{
+		Associated:  !noAssociated,
+		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"},
+	}, output, force); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s\n", output)
 	return nil
 }
 
