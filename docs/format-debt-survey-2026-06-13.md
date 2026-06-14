@@ -21,7 +21,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 | # | Item | Where | Conf | Effort | Impact |
 |---|---|---|---|---|---|
 | A1 | **DICOM transform dead-end** — no `downsample`, no `crop`, no `--factor` into DICOM. Shared enabler = a *derived-pyramid `source.Source` adapter* feeding `WritePyramid`; unlocks DICOM downsample **and** DICOM re-encode crop together. | `downsample.go:137`, `crop.go:177`, `convert.go:92` | [confirmed] | L | High |
-| A2 | **`convert --to svs --factor` rejects non-SVS sources** (asymmetric vs tiff/ome-tiff/cog-wsi, which accept any source). Fix: fall back to `SyntheticAperioDescription` like `downsampleToTIFF` does. | `convert_factor.go:163` | [confirmed] | S | Med |
+| A2 | ~~**`convert --to svs --factor` rejects non-SVS sources**~~ **DONE** (merge 7203c00) — `downsampleToSVS` now resolves MPP/mag from the Aperio doc (SVS) or opentile metadata (any other source) and synthesizes an Aperio description via `SyntheticAperioDescription`, matching its siblings. | `convert_factor.go` | [confirmed] | S | Med |
 | A3 | **`convert --to dzi/szi --factor` deferred.** Wire `factor` into the descent generator's L0 dims. | `convert.go:92`, `convert_factor.go:86` | [confirmed] | S–M | Low–Med |
 | A4 | **`convert --to dicom` frame-copies JPEG/JP2K only** — AVIF/WebP/JXL/HTJ2K/LZW levels rejected. Needs decode→re-encode-to-JPEG fallback. | `dicomwriter.go:398` | [confirmed] | M | Med |
 | A5 | **Read-only formats** (ndpi, leica-scn, bif, philips-tiff, ife, szi) have no format-preserving writer → transforms force a container change (documented in the error text). | `convert_factor.go:50` | [confirmed] | L each | Low |
@@ -39,7 +39,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 
 | # | Item | Where | Conf | Effort | Impact |
 |---|---|---|---|---|---|
-| C1 | **DICOM associated-skip leaves a stray 0-byte `.dcm`** — `newWriter(name)` creates the file before the skip check; on skip it `continue`s without removing it. | `dicomwriter.go:88-101` | [likely] | S | Med |
+| C1 | ~~**DICOM associated-skip leaves a stray 0-byte `.dcm`**~~ **DONE** (merge 0ede7fd) — `WritePyramid` now buffers each associated instance and only opens the writer once it has a complete instance to commit; a skip opens no file. Guarded by `TestWritePyramid_SkipAssociatedLeavesNoFile`. | `dicomwriter.go` | [confirmed] | S | Med |
 | C2 | **`internal/tiff/edit` rejects SubIFD-pyramid TIFFs** ("Slice 2") — so `associated remove/replace` can't operate on the OME-TIFFs the writer itself now produces. | `internal/tiff/edit/parse.go:49` | [confirmed] | M | Med |
 | C3 | **`native.go` force-overrides PixelData VR `OW→OB`** to work around a `suyashkumar/dicom` hardcode — brittle; breaks to grayscale silently if upstream changes. | `internal/dicomwriter/native.go:52` | [confirmed] | S (add guard/test) | Low–Med |
 | C4 | **`associated replace` on SVS works only for `label`** (thumbnail/macro/overview rejected — abbreviated-JPEG reconstruction). | `cmd/wsitools/associated.go:251` | [confirmed] | M | Low |
@@ -75,12 +75,12 @@ additionally supports dzi/szi/dicom as one-shot targets.
 
 | Candidate | Effort/Risk | Impact | Notes |
 |---|---|---|---|
-| **C1** fix DICOM stray-0-byte-file | **Lowest** (S, isolated) | Med | Clean correctness fix, like the TS bug |
-| **A2** lift SVS-only on `--to svs --factor` | Low (S, one fn) | Med | Removes a real asymmetry; needs a test |
+| ~~**C1** fix DICOM stray-0-byte-file~~ | — | — | **DONE** (merge 0ede7fd) |
+| ~~**A2** lift SVS-only on `--to svs --factor`~~ | — | — | **DONE** (merge 7203c00) |
 | **D1** run integration suite in CI | Low–Med | **High** | The crop oracles currently guard nothing in CI |
 | **B3** wire-or-delete `aperioapp14` orphan | Lowest (S) | Low | Pure cleanup |
 | **A1 / DICOM adapter** | High (L) | **Highest** | Unlocks DICOM downsample + crop |
 | **D2** DICOM CI fixture | Med (cross-repo) | High | Unblocks the largest untested surface |
 
-**Suggested order:** lowest-risk correctness first (C1, A2), then the high-impact CI
-unlock (D1), then the big DICOM adapter (A1) when ready.
+**Suggested order:** ~~lowest-risk correctness first (C1, A2)~~ **done** → next the
+high-impact CI unlock (D1), then the big DICOM adapter (A1) when ready.
