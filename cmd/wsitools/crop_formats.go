@@ -9,6 +9,8 @@ import (
 	"time"
 
 	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/wsitools/internal/derivedsource"
+	"github.com/wsilabs/wsitools/internal/dicomwriter"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
@@ -322,5 +324,49 @@ func cropToCOGWSI(p cropEmitParams) error {
 		return fmt.Errorf("close writer: %w", err)
 	}
 	reportWrote(p.output, p.start)
+	return nil
+}
+
+// cropToDICOM emits a cropped DICOM-WSM pyramid. Default (p.lossless == false):
+// the cropped L0 raster + box-halved lowers are JPEG re-encoded. Lossless: L0 is
+// a passthrough over the source's verbatim frames for the tile-snapped region
+// (p.stx0/p.sty0 offset, p.outTilesX/Y grid), and lower levels are re-encoded
+// from the decoded snapped raster. Crop preserves L0 MPP/magnification, so the
+// derived source's metadata is the source's unchanged.
+func cropToDICOM(p cropEmitParams) error {
+	src := source.FromSlide(p.src, p.input)
+	md := src.Metadata()
+	assoc := src.Associated()
+	if p.noAssociated {
+		assoc = nil
+	}
+
+	var ds source.Source
+	var err error
+	if p.lossless {
+		comp := src.Levels()[0].Compression()
+		if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 {
+			return fmt.Errorf("--lossless into DICOM needs JPEG or JPEG 2000 source frames; got %s", comp)
+		}
+		ds, err = derivedsource.WithLosslessL0(
+			src.Levels()[0], p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H,
+			p.l0, p.nLevels, outputTileSize, p.quality, src.Format(), md, assoc)
+	} else {
+		ds, err = derivedsource.FromReducedL0(
+			p.l0, p.l0W, p.l0H, p.nLevels, outputTileSize, p.quality, src.Format(), md, assoc)
+	}
+	if err != nil {
+		return fmt.Errorf("build derived source: %w", err)
+	}
+
+	if err := emitDICOM(ds, dicomwriter.Options{
+		Associated: !p.noAssociated,
+		// Crop extracts a spatial region at full resolution: ImageType[3]=NONE,
+		// not RESAMPLED (which downsample uses to signal spatial reduction).
+		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+	}, p.output, cropForce); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s\n", p.output)
 	return nil
 }

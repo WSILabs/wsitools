@@ -87,3 +87,31 @@ func TestConvertDICOM_FactorRejectsLevel(t *testing.T) {
 		t.Errorf("expected 'mutually exclusive' in output, got:\n%s", o)
 	}
 }
+
+func TestCropDICOM_ReEncode(t *testing.T) {
+	bin := buildOnce(t)
+	src := dicomFixture(t, "scan_621_grundium_dicom")
+	out := filepath.Join(t.TempDir(), "crop.dcmdir")
+	if o, err := runCLI(bin, "crop", "--rect", "0,0,512,512", "-f", "-o", out, src); err != nil {
+		t.Fatalf("crop <dicom>: %v\n%s", err, o)
+	}
+	if n := countDCM(t, out); n < 1 {
+		t.Errorf("output has %d .dcm instances, want >= 1", n)
+	}
+}
+
+func TestCropDICOM_Lossless(t *testing.T) {
+	bin := buildOnce(t)
+	src := dicomFixture(t, "scan_621_grundium_dicom")
+	out := filepath.Join(t.TempDir(), "croplossless.dcmdir")
+	// Lossless snaps the rect up to the source tile grid; output is a tile-
+	// aligned superset of the requested region.
+	if o, err := runCLI(bin, "crop", "--rect", "0,0,512,512", "--lossless", "-f", "-o", out, src); err != nil {
+		t.Fatalf("crop --lossless <dicom>: %v\n%s", err, o)
+	}
+	if n := countDCM(t, out); n < 1 {
+		t.Errorf("output has %d .dcm instances, want >= 1", n)
+	}
+	// The L0-frame byte-identity oracle is run by the controller (needs to parse
+	// DICOM frames + compare to the source); this test just guards the CLI path.
+}
