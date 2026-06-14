@@ -162,6 +162,31 @@ func TestDownsamplePreservesCOGWSI(t *testing.T) {
 	}
 }
 
+// convert --to svs --factor accepts a NON-SVS source (cross-format reduce),
+// matching its tiff/ome-tiff/cog-wsi siblings. The output must re-detect as SVS
+// and carry scaled metadata synthesized from the source's opentile metadata.
+// Guards A2 (the old code rejected src.Format() != SVS).
+func TestConvertFactorSVSFromNonSVS(t *testing.T) {
+	bin := stripedBinary(t)
+	// cog-wsi source: non-SVS format, Aperio Make, MPP 0.499, 20x.
+	src := filepath.Join(testDir(t), "cog-wsi", "CMU-1-Small-Region_cog-wsi.tiff")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "o.svs")
+	if o, err := runBin(bin, "convert", "--to", "svs", "--factor", "2", "-f", "-o", out, src); err != nil {
+		t.Fatalf("convert --to svs --factor 2 from cog-wsi: %v\n%s", err, o)
+	}
+	info, _ := runBin(bin, "info", out)
+	if !strings.Contains(string(info), "Format:  svs") {
+		t.Errorf("expected svs output (re-detected), got:\n%s", info)
+	}
+	// 20x source / factor 2 → 10x.
+	if !strings.Contains(string(info), "Magnification: 10x") {
+		t.Errorf("expected Magnification 10x (source 20x / factor 2), got:\n%s", info)
+	}
+}
+
 // downsample of a non-writable source format errors with a pointer to convert.
 func TestDownsampleRejectsNonWritableFormat(t *testing.T) {
 	bin := stripedBinary(t)

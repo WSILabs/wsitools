@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -154,35 +155,40 @@ func downsampleToSVS(
 		return fmt.Errorf("input and output paths are the same")
 	}
 
-	// Open source via opentile-go (SVS-only for now).
 	src, err := opentile.OpenFile(input)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer src.Close()
-	if src.Format() != opentile.FormatSVS {
-		return fmt.Errorf("--factor SVS output supports SVS sources only; got %s", src.Format())
-	}
 
-	// Parse source ImageDescription.
-	rawDesc, err := source.ReadSourceImageDescription(input)
-	if err != nil {
-		return fmt.Errorf("read source ImageDescription: %w", err)
-	}
-	desc, err := ParseImageDescription(rawDesc)
-	if err != nil {
-		return fmt.Errorf("parse source ImageDescription: %w", err)
+	// Resolve source MPP and magnification. Prefer the source's Aperio
+	// ImageDescription (SVS sources) so AppMag/MPP and every scanner property
+	// round-trip verbatim via MutateForDownsample; fall back to opentile
+	// metadata for any other source, mirroring the tiff/ome-tiff/cog-wsi
+	// siblings. A non-SVS source has no Aperio document to mutate, so its
+	// output description is synthesized below.
+	var srcMPP, srcMag float64
+	rawDesc, _ := source.ReadSourceImageDescription(input)
+	desc, descErr := ParseImageDescription(rawDesc)
+	svsSource := src.Format() == opentile.FormatSVS && descErr == nil
+	if svsSource {
+		srcMPP = desc.MPP
+		srcMag = desc.AppMag
+	} else {
+		md := src.Metadata()
+		srcMPP = md.MPP.X
+		srcMag = md.Magnification
 	}
 
 	// Resolve --target-mag if set.
 	if targetMag > 0 {
-		if desc.AppMag <= 0 {
+		if srcMag <= 0 {
 			return fmt.Errorf("--target-mag set but source AppMag is unknown/zero")
 		}
-		ratio := desc.AppMag / float64(targetMag)
+		ratio := srcMag / float64(targetMag)
 		f := int(ratio + 0.0001)
 		if !isValidFactor(f) || float64(f) != ratio {
-			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", desc.AppMag, targetMag, ratio)
+			return fmt.Errorf("source AppMag %g / target %d = %g is not a valid power-of-2 in {2,4,8,16}", srcMag, targetMag, ratio)
 		}
 		factor = f
 	}
@@ -200,8 +206,29 @@ func downsampleToSVS(
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outW, outH, factor)
 	}
 
-	// Mutate the ImageDescription for the new magnification + geometry.
-	desc.MutateForDownsample(factor, uint32(outW), uint32(outH))
+	// Scaled output metadata: MPP grows by factor, magnification shrinks by it.
+	outMPP := srcMPP * float64(factor)
+	outMag := srcMag / float64(factor)
+
+	// Build the output Aperio ImageDescription. An SVS source's description is
+	// mutated in place (preserving every scanner property); any other source
+	// gets a synthetic Aperio-shaped document so the output still re-detects as
+	// SVS — the same fallback convert --to svs uses for non-SVS sources.
+	var imageDesc string
+	if svsSource {
+		desc.MutateForDownsample(factor, uint32(outW), uint32(outH))
+		imageDesc = desc.Encode()
+	} else {
+		md := src.Metadata()
+		srcSoft := strings.TrimSpace(md.ScannerManufacturer + " " + md.ScannerModel)
+		imageDesc = SyntheticAperioDescription(
+			uint32(outW), uint32(outH),
+			outputTileSize, outputTileSize,
+			quality,
+			outMPP, outMag,
+			srcSoft,
+		).Encode()
+	}
 
 	// Predict BigTIFF need.
 	var bigtiffMode tiff.BigTIFFMode
@@ -226,15 +253,15 @@ func downsampleToSVS(
 	// Open writer.
 	w, err := streamwriter.Create(output, streamwriter.Options{
 		BigTIFF:          bigtiffMode,
-		ImageDescription: desc.Encode(),
+		ImageDescription: imageDesc,
 		ToolsVersion:     Version,
 		SourceFormat:     string(src.Format()),
 		FormatName:       "svs",
 		AcceptedOrders:   acceptedOrdersForFormat("svs"),
 		DefaultOrder:     order,
-		MPPX:             desc.MPP,
-		MPPY:             desc.MPP,
-		Magnification:    desc.AppMag,
+		MPPX:             outMPP,
+		MPPY:             outMPP,
+		Magnification:    outMag,
 		ICCProfile:       src.ICCProfile(),
 	})
 	if err != nil {
