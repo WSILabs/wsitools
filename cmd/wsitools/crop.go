@@ -50,11 +50,10 @@ the source's provenance chain, and the thumbnail is regenerated to the crop
 aspect. Associated images (label/macro/overview) and the ICC profile pass
 through unchanged.
 
-With --lossless (SVS only for now), the crop is snapped to the L0 tile grid and
-the full-resolution tiles are copied verbatim (byte-identical); the output is a
-tile-aligned superset of the requested rect (up to ~255px larger per edge), and
-the command prints the effective snapped rect when the input is not already
-tile-aligned.`,
+With --lossless, the crop is snapped to the L0 tile grid and the full-resolution
+tiles are copied verbatim (byte-identical); the output is a tile-aligned superset
+of the requested rect (up to ~255px larger per edge), and the command prints the
+effective snapped rect when the input is not already tile-aligned.`,
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
 	SilenceErrors: false,
@@ -81,7 +80,7 @@ func init() {
 	cropCmd.Flags().StringVar(&cropBigTIFF, "bigtiff", "auto", "BigTIFF mode: auto|on|off")
 	cropCmd.Flags().BoolVarP(&cropForce, "force", "f", false, "Overwrite existing output")
 	cropCmd.Flags().BoolVar(&cropNoAssoc, "no-associated", false, "Skip label/macro/thumbnail/overview")
-	cropCmd.Flags().BoolVar(&cropLossless, "lossless", false, "Lossless crop: snap to the tile grid and copy L0 tiles verbatim (output is a tile-aligned superset of the rect)")
+	cropCmd.Flags().BoolVar(&cropLossless, "lossless", false, "Lossless crop: snap to the tile grid and copy L0 tiles verbatim (byte-identical; output is a tile-aligned superset of the rect)")
 	rootCmd.AddCommand(cropCmd)
 }
 
@@ -184,9 +183,6 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if err := validateCropBounds(x, y, w, h, baseW, baseH); err != nil {
 		return err
 	}
-	if lossless && target != "svs" {
-		return fmt.Errorf("crop --lossless currently supports SVS sources only (other containers: Phase 2b)")
-	}
 	order, err := tileorder.ByName(tileOrderName)
 	if err != nil {
 		return fmt.Errorf("--tile-order: %w", err)
@@ -205,21 +201,32 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if q < 1 || q > 100 {
 		return fmt.Errorf("--quality must be in [1,100], got %d", q)
 	}
-	rasterBytes := int64(w) * int64(h) * 3
+
+	// Effective rect: lossless snaps to the tile grid; re-encode uses exact rect.
+	ex, ey, ew, eh := x, y, w, h
+	var stx0, sty0, outTilesX, outTilesY int
+	if lossless {
+		ex, ey, ew, eh, stx0, sty0, outTilesX, outTilesY = snapRectToTiles(x, y, w, h, srcL0.TileSize.W, srcL0.TileSize.H, baseW, baseH)
+		if ex != x || ey != y || ew != w || eh != h {
+			fmt.Printf("lossless: snapped crop to %d,%d %dx%d (tile-aligned)\n", ex, ey, ew, eh)
+		}
+	}
+	rasterBytes := int64(ew) * int64(eh) * 3
 	if rasterBytes < 0 {
 		return fmt.Errorf("cropped L0 raster size overflows int64")
 	}
 	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, x, y, w, h); err != nil {
+	if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, ex, ey, ew, eh); err != nil {
 		return fmt.Errorf("materialize cropped L0: %w", err)
 	}
-	nLevels := cropPyramidLevels(w, h, outputTileSize)
+	nLevels := cropPyramidLevels(ew, eh, outputTileSize)
 
 	p := cropEmitParams{
 		ctx: ctx, src: src, srcL0: srcL0, input: input, output: output,
-		l0: outL0, l0W: w, l0H: h, nLevels: nLevels, quality: q, workers: workers,
+		l0: outL0, l0W: ew, l0H: eh, nLevels: nLevels, quality: q, workers: workers,
 		order: order, bigtiffFlag: bigtiffFlag, noAssociated: noAssociated,
-		lossless: false, start: start,
+		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
+		start: start,
 	}
 	switch target {
 	case "tiff":

@@ -55,7 +55,7 @@ func reportWrote(output string, start time.Time) {
 
 // cropEmitParams carries everything a per-format crop emitter needs. The
 // lossless, srcL0 and stx0/sty0/outTilesX/outTilesY tile-block fields are used
-// only on the lossless path (added in a later task); re-encode ignores them.
+// only on the lossless path; re-encode ignores them.
 type cropEmitParams struct {
 	ctx          context.Context
 	src          *opentile.Slide
@@ -81,7 +81,11 @@ func cropToTIFF(p cropEmitParams) error {
 	mppX, mppY, mag := cropSourceScale(p.input, p.src)
 	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.l0W, p.l0H)
 
-	imageDesc := fmt.Sprintf("wsi-tools/%s crop source=%s codec=jpeg mpp=%v mag=%vx", Version, p.src.Format(), mppX, mag)
+	codec := "jpeg"
+	if p.lossless {
+		codec = "verbatim" // L0 tiles copied byte-identical; lower levels re-encoded JPEG
+	}
+	imageDesc := fmt.Sprintf("wsi-tools/%s crop source=%s codec=%s mpp=%v mag=%vx", Version, p.src.Format(), codec, mppX, mag)
 	w, err := streamwriter.Create(p.output, streamwriter.Options{
 		BigTIFF:          bigtiffMode,
 		ImageDescription: imageDesc,
@@ -104,8 +108,23 @@ func cropToTIFF(p cropEmitParams) error {
 			w.Abort()
 		}
 	}()
-	if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
-		return fmt.Errorf("build pyramid: %w", err)
+	if p.lossless {
+		if err := writeLosslessL0(w, p.srcL0, p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H); err != nil {
+			return fmt.Errorf("write lossless L0: %w", err)
+		}
+		if p.nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(p.l0, p.l0W, p.l0H)
+			if err != nil {
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
+			return fmt.Errorf("build pyramid: %w", err)
+		}
 	}
 	if !p.noAssociated {
 		for _, a := range p.src.AssociatedImages() {
@@ -173,8 +192,23 @@ func cropToOMETIFF(p cropEmitParams) error {
 			w.Abort()
 		}
 	}()
-	if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
-		return fmt.Errorf("build pyramid: %w", err)
+	if p.lossless {
+		if err := writeLosslessL0(w, p.srcL0, p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H); err != nil {
+			return fmt.Errorf("write lossless L0: %w", err)
+		}
+		if p.nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(p.l0, p.l0W, p.l0H)
+			if err != nil {
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
+			return fmt.Errorf("build pyramid: %w", err)
+		}
 	}
 	if !p.noAssociated {
 		for _, a := range p.src.AssociatedImages() {
@@ -238,9 +272,27 @@ func cropToCOGWSI(p cropEmitParams) error {
 		}
 	}()
 
-	if err := buildPyramidFromRasterCOGWSI(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality); err != nil {
-		aborted = true
-		return fmt.Errorf("build pyramid: %w", err)
+	if p.lossless {
+		if err := writeLosslessL0COGWSI(w, p.srcL0, p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H); err != nil {
+			aborted = true
+			return fmt.Errorf("write lossless L0: %w", err)
+		}
+		if p.nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(p.l0, p.l0W, p.l0H)
+			if err != nil {
+				aborted = true
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality); err != nil {
+				aborted = true
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		if err := buildPyramidFromRasterCOGWSI(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality); err != nil {
+			aborted = true
+			return fmt.Errorf("build pyramid: %w", err)
+		}
 	}
 	if !p.noAssociated {
 		for _, a := range p.src.AssociatedImages() {
