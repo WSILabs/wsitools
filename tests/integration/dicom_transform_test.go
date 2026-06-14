@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,4 +55,35 @@ func TestDownsampleDICOM_Factor2(t *testing.T) {
 		t.Errorf("output has %d .dcm instances, want >= 1", n)
 	}
 	// dciodvfy is run by the controller (conformance gate), not here.
+}
+
+func TestConvertDICOM_FactorFromSVS(t *testing.T) {
+	bin := buildOnce(t)
+	src := filepath.Join(testdir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("no svs fixture")
+	}
+	out := filepath.Join(t.TempDir(), "svs2dcm.dcmdir")
+	if o, err := runCLI(bin, "convert", "--to", "dicom", "--factor", "2", "-f", "-o", out, src); err != nil {
+		t.Fatalf("convert --to dicom --factor 2 <svs>: %v\n%s", err, o)
+	}
+	if n := countDCM(t, out); n < 1 {
+		t.Errorf("output has %d .dcm instances, want >= 1", n)
+	}
+}
+
+func TestConvertDICOM_FactorRejectsLevel(t *testing.T) {
+	bin := buildOnce(t)
+	src := filepath.Join(testdir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("no svs fixture")
+	}
+	out := filepath.Join(t.TempDir(), "x.dcmdir")
+	o, err := runCLI(bin, "convert", "--to", "dicom", "--factor", "2", "--level", "0", "-f", "-o", out, src)
+	if err == nil {
+		t.Fatalf("expected --factor + --level rejection, got success:\n%s", o)
+	}
+	if !strings.Contains(o, "mutually exclusive") {
+		t.Errorf("expected 'mutually exclusive' in output, got:\n%s", o)
+	}
 }

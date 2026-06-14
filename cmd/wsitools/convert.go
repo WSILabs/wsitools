@@ -89,7 +89,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 
 	if cvFactor != 1 || cvTargetMag != 0 {
-		if cvTo == "dzi" || cvTo == "szi" || cvTo == "dicom" {
+		if cvTo == "dzi" || cvTo == "szi" {
 			return fmt.Errorf("--factor/--target-mag not supported for --to %s (yet)", cvTo)
 		}
 		if cvFactor != 1 && !isValidFactor(cvFactor) {
@@ -114,6 +114,12 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	case "szi":
 		return runConvertSZI(cmd, input, start)
 	case "dicom":
+		if cvFactor != 1 || cvTargetMag != 0 {
+			if cmd.Flags().Changed("level") {
+				return fmt.Errorf("--factor/--target-mag and --level are mutually exclusive (--factor emits the full reduced pyramid)")
+			}
+			return runConvertFactor(cmd, input, "dicom", start)
+		}
 		return runConvertDICOM(cmd, input, start)
 	case "":
 		return fmt.Errorf("--to is required")
