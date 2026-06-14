@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	opentile "github.com/wsilabs/opentile-go"
@@ -177,17 +176,21 @@ func TestCrop_SmallRegionTileAligned(t *testing.T) {
 	}
 }
 
-// assertLosslessByteIdentity crops src with --lossless and asserts every output
-// L0 tile is byte-identical to the corresponding source tile, the shared tile
-// prefix (tag 347) matches, and the output L0 dims equal the tile-snapped bbox.
-// Codec/tile-size agnostic: works for JPEG and JPEG2000, 256px and 512px tiles.
-func assertLosslessByteIdentity(t *testing.T, bin, src string, x, y, w, h int) {
+// assertLosslessByteIdentityFmt crops src with --lossless and asserts every
+// output L0 tile is byte-identical to the corresponding source tile, the shared
+// tile prefix (tag 347) matches, the output L0 dims equal the tile-snapped bbox,
+// and the output format matches the source format. The output file is named
+// "lossless.<ext>". Codec/tile-size agnostic: works for JPEG and JPEG2000,
+// 256px and 512px tiles.
+func assertLosslessByteIdentityFmt(t *testing.T, bin, src string, x, y, w, h int, ext string) {
 	t.Helper()
 	srcTlr, err := opentile.OpenFile(src)
 	if err != nil {
 		t.Fatalf("open src: %v", err)
 	}
 	defer srcTlr.Close()
+	srcFormat := srcTlr.Format()
+	srcMD := srcTlr.Metadata()
 	srcL0 := srcTlr.Levels()[0]
 	tileW, tileH := srcL0.TileSize.W, srcL0.TileSize.H
 	baseW, baseH := srcL0.Size.W, srcL0.Size.H
@@ -195,7 +198,7 @@ func assertLosslessByteIdentity(t *testing.T, bin, src string, x, y, w, h int) {
 		t.Skipf("rect %d,%d %dx%d exceeds source %dx%d", x, y, w, h, baseW, baseH)
 	}
 
-	out := filepath.Join(t.TempDir(), "lossless.svs")
+	out := filepath.Join(t.TempDir(), "lossless."+ext)
 	cmd := exec.Command(bin, "crop", "--lossless",
 		"--rect", fmt.Sprintf("%d,%d,%d,%d", x, y, w, h), "-o", out, src)
 	if b, err := cmd.CombinedOutput(); err != nil {
@@ -221,8 +224,8 @@ func assertLosslessByteIdentity(t *testing.T, bin, src string, x, y, w, h int) {
 		t.Fatalf("open out: %v", err)
 	}
 	defer outTlr.Close()
-	if outTlr.Format() != opentile.FormatSVS {
-		t.Errorf("format = %v, want svs", outTlr.Format())
+	if outTlr.Format() != srcFormat {
+		t.Errorf("format not preserved: got %v, want %v", outTlr.Format(), srcFormat)
 	}
 	outL0 := outTlr.Levels()[0]
 	if outL0.Size.W != snapW || outL0.Size.H != snapH {
@@ -255,9 +258,24 @@ func assertLosslessByteIdentity(t *testing.T, bin, src string, x, y, w, h int) {
 		}
 	}
 
-	if md := outTlr.Metadata(); md.MPP.X == 0 || md.Magnification == 0 {
-		t.Errorf("lost MPP/Mag: MPP=%v Mag=%v", md.MPP, md.Magnification)
+	// MPP/magnification preserved (== source). Not "non-zero" — generic-TIFF
+	// legitimately carries no magnification, and lossless preserves that.
+	md := outTlr.Metadata()
+	if md.MPP.X != srcMD.MPP.X || md.MPP.Y != srcMD.MPP.Y {
+		t.Errorf("MPP changed: got %v, want source %v", md.MPP, srcMD.MPP)
 	}
+	if md.Magnification != srcMD.Magnification {
+		t.Errorf("Magnification changed: got %v, want source %v", md.Magnification, srcMD.Magnification)
+	}
+}
+
+// assertLosslessByteIdentity crops src with --lossless and asserts every output
+// L0 tile is byte-identical to the corresponding source tile, the shared tile
+// prefix (tag 347) matches, and the output L0 dims equal the tile-snapped bbox.
+// Codec/tile-size agnostic: works for JPEG and JPEG2000, 256px and 512px tiles.
+func assertLosslessByteIdentity(t *testing.T, bin, src string, x, y, w, h int) {
+	t.Helper()
+	assertLosslessByteIdentityFmt(t, bin, src, x, y, w, h, "svs")
 }
 
 func TestCropLossless_ByteIdentity(t *testing.T) {
@@ -303,6 +321,33 @@ func TestCropLossless_ByteIdentity_Variants(t *testing.T) {
 				t.Skipf("fixture missing: %s (%s)", src, v.note)
 			}
 			assertLosslessByteIdentity(t, bin, src, v.x, v.y, v.w, v.h)
+		})
+	}
+}
+
+// TestCropLossless_FormatPreserving verifies --lossless copies L0 tiles
+// byte-identical for the non-SVS TIFF family, writing back to the source
+// container. Local-only (large fixtures).
+func TestCropLossless_FormatPreserving(t *testing.T) {
+	bin := buildOnce(t)
+	td := testdir(t)
+	cases := []struct {
+		file, ext  string
+		x, y, w, h int
+	}{
+		{"generic-tiff/CMU-1.tiff", "tiff", 500, 500, 2000, 2000},           // 240px tiles
+		{"ome-tiff/Leica-1.ome.tiff", "ome.tiff", 500, 500, 2000, 2000},     // 512px tiles
+		{"cog-wsi/CMU-1_cog-wsi.tiff", "tiff", 500, 500, 2000, 2000},        // writeLosslessL0COGWSI
+		{"cog-wsi/JP2K-33003-1_cog-wsi.tiff", "tiff", 500, 500, 2000, 2000}, // J2K, nil TilePrefix
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.file, func(t *testing.T) {
+			src := filepath.Join(td, c.file)
+			if _, err := os.Stat(src); err != nil {
+				t.Skipf("fixture missing: %s", src)
+			}
+			assertLosslessByteIdentityFmt(t, bin, src, c.x, c.y, c.w, c.h, c.ext)
 		})
 	}
 }
@@ -365,25 +410,6 @@ func TestCrop_FormatPreserving(t *testing.T) {
 				t.Errorf("Magnification changed: got %v, want %v", md.Magnification, srcMD.Magnification)
 			}
 		})
-	}
-}
-
-// TestCropLossless_RejectsNonSVS confirms --lossless errors clearly on a non-SVS
-// source until Phase 2b.
-func TestCropLossless_RejectsNonSVS(t *testing.T) {
-	td := testdir(t)
-	bin := buildOnce(t)
-	src := filepath.Join(td, "generic-tiff", "CMU-1-Small-Region.stripped.tiff")
-	if _, err := os.Stat(src); err != nil {
-		t.Skipf("fixture missing: %s", src)
-	}
-	out := filepath.Join(t.TempDir(), "x.tiff")
-	b, err := exec.Command(bin, "crop", "--lossless", "--rect", "0,0,256,256", "-o", out, src).CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected error for --lossless on non-SVS, got success:\n%s", b)
-	}
-	if !strings.Contains(string(b), "SVS sources only") {
-		t.Errorf("error should mention SVS-only; got:\n%s", b)
 	}
 }
 

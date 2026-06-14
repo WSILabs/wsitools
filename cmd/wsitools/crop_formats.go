@@ -53,23 +53,51 @@ func reportWrote(output string, start time.Time) {
 	fmt.Printf("wrote %s (%s) in %s\n", output, sz, time.Since(start).Round(time.Millisecond))
 }
 
-func cropToTIFF(ctx context.Context, src *opentile.Slide, input, output string, l0 []byte, l0W, l0H, nLevels, quality, workers int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated bool, start time.Time) error {
-	mppX, mppY, mag := cropSourceScale(input, src)
-	bigtiffMode := streamwriterBigTIFF(bigtiffFlag, l0W, l0H)
+// cropEmitParams carries everything a per-format crop emitter needs. The
+// lossless, srcL0 and stx0/sty0/outTilesX/outTilesY tile-block fields are used
+// only on the lossless path; re-encode ignores them.
+type cropEmitParams struct {
+	ctx          context.Context
+	src          *opentile.Slide
+	srcL0        *opentile.Level
+	input        string
+	output       string
+	l0           []byte
+	l0W, l0H     int
+	nLevels      int
+	quality      int
+	workers      int
+	order        tileorder.OrderStrategy
+	bigtiffFlag  string
+	noAssociated bool
+	lossless     bool
+	stx0, sty0   int
+	outTilesX    int
+	outTilesY    int
+	start        time.Time
+}
 
-	imageDesc := fmt.Sprintf("wsi-tools/%s crop source=%s codec=jpeg mpp=%v mag=%vx", Version, src.Format(), mppX, mag)
-	w, err := streamwriter.Create(output, streamwriter.Options{
+func cropToTIFF(p cropEmitParams) error {
+	mppX, mppY, mag := cropSourceScale(p.input, p.src)
+	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.l0W, p.l0H)
+
+	codec := "jpeg"
+	if p.lossless {
+		codec = "verbatim" // L0 tiles copied byte-identical; lower levels re-encoded JPEG
+	}
+	imageDesc := fmt.Sprintf("wsi-tools/%s crop source=%s codec=%s mpp=%v mag=%vx", Version, p.src.Format(), codec, mppX, mag)
+	w, err := streamwriter.Create(p.output, streamwriter.Options{
 		BigTIFF:          bigtiffMode,
 		ImageDescription: imageDesc,
 		ToolsVersion:     Version,
-		SourceFormat:     string(src.Format()),
+		SourceFormat:     string(p.src.Format()),
 		FormatName:       "tiff",
 		AcceptedOrders:   acceptedOrdersForFormat("tiff"),
-		DefaultOrder:     order,
+		DefaultOrder:     p.order,
 		MPPX:             mppX,
 		MPPY:             mppY,
 		Magnification:    mag,
-		ICCProfile:       src.ICCProfile(),
+		ICCProfile:       p.src.ICCProfile(),
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
@@ -80,13 +108,28 @@ func cropToTIFF(ctx context.Context, src *opentile.Slide, input, output string, 
 			w.Abort()
 		}
 	}()
-	if err := buildPyramidFromRaster(ctx, w, l0, l0W, l0H, nLevels, quality, workers, nil); err != nil {
-		return fmt.Errorf("build pyramid: %w", err)
+	if p.lossless {
+		if err := writeLosslessL0(w, p.srcL0, p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H); err != nil {
+			return fmt.Errorf("write lossless L0: %w", err)
+		}
+		if p.nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(p.l0, p.l0W, p.l0H)
+			if err != nil {
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
+			return fmt.Errorf("build pyramid: %w", err)
+		}
 	}
-	if !noAssociated {
-		for _, a := range src.AssociatedImages() {
+	if !p.noAssociated {
+		for _, a := range p.src.AssociatedImages() {
 			if a.Type() == opentile.AssociatedThumbnail {
-				if err := regenCropThumbnail(w, l0, l0W, l0H, quality); err != nil {
+				if err := regenCropThumbnail(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
 					return fmt.Errorf("regenerate thumbnail: %w", err)
 				}
 				continue
@@ -100,18 +143,18 @@ func cropToTIFF(ctx context.Context, src *opentile.Slide, input, output string, 
 		return fmt.Errorf("close writer: %w", err)
 	}
 	closed = true
-	reportWrote(output, start)
+	reportWrote(p.output, p.start)
 	return nil
 }
 
-func cropToOMETIFF(ctx context.Context, src *opentile.Slide, input, output string, l0 []byte, l0W, l0H, nLevels, quality, workers int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated bool, start time.Time) error {
-	mppX, mppY, mag := cropSourceScale(input, src)
-	bigtiffMode := streamwriterBigTIFF(bigtiffFlag, l0W, l0H)
+func cropToOMETIFF(p cropEmitParams) error {
+	mppX, mppY, mag := cropSourceScale(p.input, p.src)
+	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.l0W, p.l0H)
 
-	ttw, tth := thumbDims(l0W, l0H, thumbLongSide)
+	ttw, tth := thumbDims(p.l0W, p.l0H, thumbLongSide)
 	var omeAssocs []OMEAssoc
-	if !noAssociated {
-		for _, a := range src.AssociatedImages() {
+	if !p.noAssociated {
+		for _, a := range p.src.AssociatedImages() {
 			name := omeAssocName(string(a.Type()))
 			if name == "" {
 				continue
@@ -123,20 +166,20 @@ func cropToOMETIFF(ctx context.Context, src *opentile.Slide, input, output strin
 			omeAssocs = append(omeAssocs, OMEAssoc{Name: name, W: aw, H: ah})
 		}
 	}
-	omeXML := SyntheticOMEDescriptionWithMag(uint32(l0W), uint32(l0H), mppX, mppY, mag, "Image", string(src.Format()), omeAssocs)
+	omeXML := SyntheticOMEDescriptionWithMag(uint32(p.l0W), uint32(p.l0H), mppX, mppY, mag, "Image", string(p.src.Format()), omeAssocs)
 
-	w, err := streamwriter.Create(output, streamwriter.Options{
+	w, err := streamwriter.Create(p.output, streamwriter.Options{
 		BigTIFF:              bigtiffMode,
 		ImageDescription:     omeXML,
 		ToolsVersion:         Version,
-		SourceFormat:         string(src.Format()),
+		SourceFormat:         string(p.src.Format()),
 		FormatName:           "ome-tiff",
 		AcceptedOrders:       acceptedOrdersForFormat("ome-tiff"),
-		DefaultOrder:         order,
+		DefaultOrder:         p.order,
 		MPPX:                 mppX,
 		MPPY:                 mppY,
 		Magnification:        mag,
-		ICCProfile:           src.ICCProfile(),
+		ICCProfile:           p.src.ICCProfile(),
 		SubResolutionPyramid: true,
 		SampleFormat:         1,
 	})
@@ -149,16 +192,31 @@ func cropToOMETIFF(ctx context.Context, src *opentile.Slide, input, output strin
 			w.Abort()
 		}
 	}()
-	if err := buildPyramidFromRaster(ctx, w, l0, l0W, l0H, nLevels, quality, workers, nil); err != nil {
-		return fmt.Errorf("build pyramid: %w", err)
+	if p.lossless {
+		if err := writeLosslessL0(w, p.srcL0, p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H); err != nil {
+			return fmt.Errorf("write lossless L0: %w", err)
+		}
+		if p.nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(p.l0, p.l0W, p.l0H)
+			if err != nil {
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
+			return fmt.Errorf("build pyramid: %w", err)
+		}
 	}
-	if !noAssociated {
-		for _, a := range src.AssociatedImages() {
+	if !p.noAssociated {
+		for _, a := range p.src.AssociatedImages() {
 			if omeAssocName(string(a.Type())) == "" {
 				continue
 			}
 			if a.Type() == opentile.AssociatedThumbnail {
-				if err := regenCropThumbnail(w, l0, l0W, l0H, quality); err != nil {
+				if err := regenCropThumbnail(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
 					return fmt.Errorf("regenerate thumbnail: %w", err)
 				}
 				continue
@@ -172,36 +230,36 @@ func cropToOMETIFF(ctx context.Context, src *opentile.Slide, input, output strin
 		return fmt.Errorf("close writer: %w", err)
 	}
 	closed = true
-	reportWrote(output, start)
+	reportWrote(p.output, p.start)
 	return nil
 }
 
 // cropToCOGWSI writes the cropped L0 + rebuilt pyramid as a COG-WSI TIFF,
 // mirroring downsampleToCOGWSI with an exact-extent cropped L0 and preserved
 // MPP/magnification.
-func cropToCOGWSI(ctx context.Context, src *opentile.Slide, input, output string, l0 []byte, l0W, l0H, nLevels, quality, workers int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated bool, start time.Time) error {
-	mppX, mppY, mag := cropSourceScale(input, src)
+func cropToCOGWSI(p cropEmitParams) error {
+	mppX, mppY, mag := cropSourceScale(p.input, p.src)
 
-	bigTIFFMode, err := parseBigTIFFFlag(bigtiffFlag)
+	bigTIFFMode, err := parseBigTIFFFlag(p.bigtiffFlag)
 	if err != nil {
-		if bigtiffFlag == "" {
+		if p.bigtiffFlag == "" {
 			bigTIFFMode = cogwsiwriter.BigTIFFAuto
 		} else {
 			return err
 		}
 	}
 
-	w, err := cogwsiwriter.Create(output, cogwsiwriter.Options{
+	w, err := cogwsiwriter.Create(p.output, cogwsiwriter.Options{
 		BigTIFF:      bigTIFFMode,
 		ToolsVersion: Version,
-		DefaultOrder: order,
+		DefaultOrder: p.order,
 		Metadata: cogwsiwriter.Metadata{
 			MPPX:            mppX,
 			MPPY:            mppY,
 			Magnification:   mag,
-			ICCProfile:      src.ICCProfile(),
-			SourceFormat:    string(src.Format()),
-			SourceImageDesc: fmt.Sprintf("wsitools/%s crop source=%s", Version, src.Format()),
+			ICCProfile:      p.src.ICCProfile(),
+			SourceFormat:    string(p.src.Format()),
+			SourceImageDesc: fmt.Sprintf("wsitools/%s crop source=%s", Version, p.src.Format()),
 		},
 	})
 	if err != nil {
@@ -214,14 +272,32 @@ func cropToCOGWSI(ctx context.Context, src *opentile.Slide, input, output string
 		}
 	}()
 
-	if err := buildPyramidFromRasterCOGWSI(ctx, w, l0, l0W, l0H, nLevels, quality); err != nil {
-		aborted = true
-		return fmt.Errorf("build pyramid: %w", err)
+	if p.lossless {
+		if err := writeLosslessL0COGWSI(w, p.srcL0, p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H); err != nil {
+			aborted = true
+			return fmt.Errorf("write lossless L0: %w", err)
+		}
+		if p.nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(p.l0, p.l0W, p.l0H)
+			if err != nil {
+				aborted = true
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality); err != nil {
+				aborted = true
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		if err := buildPyramidFromRasterCOGWSI(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality); err != nil {
+			aborted = true
+			return fmt.Errorf("build pyramid: %w", err)
+		}
 	}
-	if !noAssociated {
-		for _, a := range src.AssociatedImages() {
+	if !p.noAssociated {
+		for _, a := range p.src.AssociatedImages() {
 			if a.Type() == opentile.AssociatedThumbnail {
-				if err := regenCropThumbnailCOGWSI(w, l0, l0W, l0H, quality); err != nil {
+				if err := regenCropThumbnailCOGWSI(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
 					aborted = true
 					return fmt.Errorf("regenerate thumbnail: %w", err)
 				}
@@ -245,6 +321,6 @@ func cropToCOGWSI(ctx context.Context, src *opentile.Slide, input, output string
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("close writer: %w", err)
 	}
-	reportWrote(output, start)
+	reportWrote(p.output, p.start)
 	return nil
 }

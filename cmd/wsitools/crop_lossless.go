@@ -5,6 +5,7 @@ import (
 
 	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
 
@@ -118,4 +119,42 @@ func writeLosslessL0(w *streamwriter.Writer, srcL0 *opentile.Level, stx0, sty0, 
 		return submitErr
 	}
 	return <-drainErr
+}
+
+// writeLosslessL0COGWSI emits pyramid level 0 into a cogwsiwriter by copying a
+// contiguous block of source L0 tiles VERBATIM (abbreviated bodies via
+// TileBodyInto + raw tag-347 tables + source photometric — same recipe as
+// writeLosslessL0). cogwsiwriter.WriteTile is strict row-major; no concurrent
+// drain (mirrors encodeAndWriteLevelCOGWSI).
+func writeLosslessL0COGWSI(w *cogwsiwriter.Writer, srcL0 *opentile.Level, stx0, sty0, outTilesX, outTilesY, outW, outH int) error {
+	h, err := w.AddLevel(cogwsiwriter.LevelSpec{
+		ImageWidth:      uint32(outW),
+		ImageHeight:     uint32(outH),
+		TileWidth:       uint32(srcL0.TileSize.W),
+		TileHeight:      uint32(srcL0.TileSize.H),
+		Compression:     opentile.CompressionToTIFFTag(srcL0.Compression),
+		Photometric:     levelPhotometric(srcL0),
+		SamplesPerPixel: 3,
+		BitsPerSample:   []uint16{8, 8, 8},
+		JPEGTables:      levelJPEGTables(srcL0),
+		IsL0:            true,
+	})
+	if err != nil {
+		return fmt.Errorf("AddLevel: %w", err)
+	}
+	scratch := make([]byte, srcL0.TileBodyMaxSize())
+	for oy := 0; oy < outTilesY; oy++ {
+		for ox := 0; ox < outTilesX; ox++ {
+			n, err := srcL0.TileBodyInto(stx0+ox, sty0+oy, scratch)
+			if err != nil {
+				return fmt.Errorf("read source tile body (%d,%d): %w", stx0+ox, sty0+oy, err)
+			}
+			body := make([]byte, n)
+			copy(body, scratch[:n])
+			if err := h.WriteTile(uint32(ox), uint32(oy), body); err != nil {
+				return fmt.Errorf("write tile (%d,%d): %w", ox, oy, err)
+			}
+		}
+	}
+	return nil
 }
