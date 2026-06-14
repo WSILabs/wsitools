@@ -66,3 +66,51 @@ func (l *rasterLevel) TileInto(x, y int, dst []byte) (int, error) {
 	}
 	return copy(dst, frame), nil
 }
+
+// derived implements source.Source over a list of synthesized levels.
+type derived struct {
+	format string
+	levels []source.Level
+	md     source.Metadata
+	assoc  []source.AssociatedImage
+}
+
+// derived implements source.Source.
+var _ source.Source = (*derived)(nil)
+
+func (d *derived) Format() string                       { return d.format }
+func (d *derived) Levels() []source.Level               { return d.levels }
+func (d *derived) Associated() []source.AssociatedImage { return d.assoc }
+func (d *derived) Metadata() source.Metadata            { return d.md }
+func (d *derived) SourceImageDescription() string       { return "" }
+func (d *derived) Close() error                         { return nil }
+
+// FromReducedL0 builds an all-raster derived source: L0 is the supplied
+// (reduced or cropped) raster, and nLevels-1 lower levels are produced by box-
+// halving. tileSize/quality drive the JPEG encode; format/md/assoc are carried
+// onto the source (md already factor-scaled by the caller). Used by downsample,
+// convert --factor, and the re-encode crop.
+// Returns fewer than nLevels levels if a box-halved dimension reaches 0 before
+// nLevels iterations.
+func FromReducedL0(l0 []byte, w, h, nLevels, tileSize, quality int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
+	if nLevels < 1 {
+		return nil, fmt.Errorf("derivedsource: nLevels must be at least 1, got %d", nLevels)
+	}
+	levels := make([]source.Level, 0, nLevels)
+	raster, lw, lh := l0, w, h
+	for i := 0; i < nLevels; i++ {
+		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, index: i})
+		if i == nLevels-1 {
+			break
+		}
+		var err error
+		raster, lw, lh, err = downscale.BoxHalve(raster, lw, lh, 2)
+		if err != nil {
+			return nil, fmt.Errorf("derivedsource: halve level %d→%d: %w", i, i+1, err)
+		}
+		if lw == 0 || lh == 0 {
+			break
+		}
+	}
+	return &derived{format: format, levels: levels, md: md, assoc: assoc}, nil
+}
