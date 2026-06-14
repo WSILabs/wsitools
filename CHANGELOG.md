@@ -35,6 +35,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
+- **DICOM is now a transform target.** `convert --to dicom --factor N`,
+  `downsample --factor N <dicom>` (format-preserving), and `crop <dicom>`
+  (re-encode, plus `--lossless` verbatim-L0 frame-copy) emit a reduced/cropped
+  DICOM-WSM pyramid. Implemented via a new `internal/derivedsource` adapter that
+  presents a derived pyramid as a `source.Source` to the existing
+  `dicomwriter.WritePyramid`; re-encoded levels are JPEG-baseline (no JP2K/HTJ2K
+  encoder yet). Output `-o` is a pyramid **directory** (as `convert --to dicom`
+  already is). dciodvfy-validated. (Survey A1.)
+
 - Experimental `convert --to dicom` — **DICOM-WSI writer, Phase 0 spike.** Emits
   one conformant DICOM VL Whole Slide Microscopy (WSM) **VOLUME** instance from a
   **DICOM source**: the source's compressed JPEG frames are copied **verbatim**

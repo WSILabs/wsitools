@@ -79,9 +79,10 @@ The output container matches the source format:
   OME-TIFF   → ome-tiff
   Generic-TIFF → tiff (plain pyramidal TIFF)
   COG-WSI    → cog-wsi
+  DICOM      → dicom (a pyramid directory of level-<n>.dcm instances)
 
 For formats without a matching writer (NDPI, Philips-TIFF, BIF, IFE,
-Leica SCN, DICOM, SZI, …) use 'convert --to {svs|tiff|ome-tiff|cog-wsi}
+Leica SCN, SZI, …) use 'convert --to {svs|tiff|ome-tiff|cog-wsi}
 --factor N' to downsample into a different container.
 
 Examples:
