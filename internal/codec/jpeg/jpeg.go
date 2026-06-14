@@ -6,8 +6,11 @@
 // tiles (no tables; expected to be combined with LevelHeader via
 // TIFF tag 347) when EncodeTile is used.
 //
-// No Adobe APP14 marker; no raw-RGB storage. The Aperio APP14
-// variant lives in internal/codec/aperioapp14.
+// No Adobe APP14 marker; no raw-RGB storage — vanilla decoders render
+// the output correctly. (Aperio's APP14+raw-RGB framing is what real
+// Aperio scanners emit; wsitools does not reproduce it on re-encode.
+// Lossless paths copy source tile bodies verbatim, so they preserve
+// whatever framing the source used.)
 package jpeg
 
 /*

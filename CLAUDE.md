@@ -29,8 +29,9 @@ szi, svs, tiff, ome-tiff}`, `downsample`), and diagnostics (`doctor`,
   uses a single-pass pyramid-descent generator (see `cmd/wsitools/convert_dzi_descent.go`)
   with parallel libjpeg-turbo encoders; ~150× faster than the v0.16 naive path.
 - Codecs = `internal/codec/<codec>/` subpackages, one per codec, registered
-  via `init()`. Vanilla YCbCr JPEG is the default; the Aperio APP14 quirk
-  lives in `internal/codec/aperioapp14`.
+  via `init()`. Vanilla YCbCr JPEG is the default. (wsitools does not
+  reproduce Aperio's APP14+raw-RGB JPEG framing on re-encode; the old
+  `internal/codec/aperioapp14` keep-around encoder was removed unused.)
 - Source layer = `internal/source` (slide open + IFD walk). `WalkIFDs` is
   the slim format-aware walk; `WalkIFDsRaw` captures every directory entry
   for `dump-ifds --raw`.

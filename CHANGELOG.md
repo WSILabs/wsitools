@@ -4,6 +4,16 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Removed
+
+- **`internal/codec/aperioapp14`** — the v0.17-era keep-around encoder that
+  reproduced Aperio's APP14 + raw-RGB JPEG framing. It was never registered as a
+  `codec.Factory`, never imported by anything but its own test, and had zero
+  callers; no planned feature needs Aperio-identical re-encode (lossless paths
+  copy source tile bodies verbatim, preserving whatever framing the source
+  used). Recoverable from git history if a byte-faithful-Aperio path is ever
+  wanted.
+
 ### Fixed
 
 - **`convert --to {cog-wsi, svs, tiff, ome-tiff}` (and `--factor`) corrupted
