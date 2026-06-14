@@ -17,17 +17,28 @@ import (
 // zero tile geometry on level 0 (genuinely unhandled future cases) are
 // rejected with ErrUnsupportedFormat.
 func Open(path string) (Source, error) {
+	src, _, err := OpenWithSlide(path)
+	return src, err
+}
+
+// OpenWithSlide opens the file and returns BOTH the Source wrapper and the raw
+// opentile slide. Callers needing *opentile.Level (raster materialization in the
+// downsample/crop DICOM emitters) use the slide; everything else uses the
+// Source. Applies the same DICOM-dir ambiguity guard and zero-geometry check as
+// the original Open.
+// Close the returned Source (not the slide directly); Source.Close closes the underlying slide.
+func OpenWithSlide(path string) (Source, *opentile.Slide, error) {
 	// Safe-by-default: a directory holding >1 distinct WSM series is ambiguous;
 	// refuse rather than silently opening the dominant one. A single .dcm is
-	// never ambiguous (it anchors to its own SeriesUID), so only check dirs.
+	// never ambiguous, so only check dirs.
 	if fi, statErr := os.Stat(path); statErr == nil && fi.IsDir() {
 		if infos, lerr := dicom.ListWSMSeries(path); lerr == nil && len(infos) > 1 {
-			return nil, &AmbiguousSeriesError{Path: path, Series: infos}
+			return nil, nil, &AmbiguousSeriesError{Path: path, Series: infos}
 		}
 	}
 	t, err := opentile.OpenFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("source: open %s: %w", path, err)
+		return nil, nil, fmt.Errorf("source: open %s: %w", path, err)
 	}
 	// Sanity: confirm opentile-go has synthesized tile geometry for this
 	// format. Striped / single-frame formats (NDPI, OME-OneFrame) are
@@ -39,13 +50,21 @@ func Open(path string) (Source, error) {
 		lvl0 := levels[0]
 		if lvl0.TileSize.W == 0 || lvl0.TileSize.H == 0 {
 			t.Close()
-			return nil, fmt.Errorf("%w: %s reports zero tile geometry on level 0", ErrUnsupportedFormat, t.Format())
+			return nil, nil, fmt.Errorf("%w: %s reports zero tile geometry on level 0", ErrUnsupportedFormat, t.Format())
 		}
 	}
-	// ReadSourceImageDescription returns ("", err) for non-TIFF sources
-	// (e.g. IFE) — silence the error and treat "" as "no description".
+	return FromSlide(t, path), t, nil
+}
+
+// FromSlide wraps an already-open opentile slide as a Source, without reopening
+// the file. Used by callers that already hold a *opentile.Slide (e.g. the crop
+// emitter, whose front-end opened the slide). The returned Source's Close closes
+// the underlying slide.
+func FromSlide(t *opentile.Slide, path string) Source {
+	// ReadSourceImageDescription returns ("", err) for non-TIFF sources (IFE) —
+	// silence the error and treat "" as "no description".
 	desc, _ := ReadSourceImageDescription(path)
-	return &opentileSource{t: t, path: path, desc: desc}, nil
+	return &opentileSource{t: t, path: path, desc: desc}
 }
 
 type opentileSource struct {
