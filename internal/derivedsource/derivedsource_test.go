@@ -111,3 +111,84 @@ func TestFromReducedL0_TruncatesWhenRasterDegenerates(t *testing.T) {
 		t.Errorf("Levels = %d, want 1 (truncated at degenerate dim)", n)
 	}
 }
+
+// fakeLevel is a source.Level whose TileInto returns a deterministic "frame"
+// encoding the (x,y) it was asked for, so passthrough offset mapping is testable
+// without a real codec.
+type fakeLevel struct {
+	tileSize image.Point
+	comp     source.Compression
+}
+
+func (f *fakeLevel) Index() int                      { return 0 }
+func (f *fakeLevel) Size() image.Point               { return image.Point{X: 1000, Y: 1000} }
+func (f *fakeLevel) TileSize() image.Point           { return f.tileSize }
+func (f *fakeLevel) Grid() image.Point               { return image.Point{X: 4, Y: 4} }
+func (f *fakeLevel) Compression() source.Compression { return f.comp }
+func (f *fakeLevel) TileMaxSize() int                { return 8 }
+func (f *fakeLevel) TileInto(x, y int, dst []byte) (int, error) {
+	body := []byte{byte(x), byte(y)}
+	return copy(dst, body), nil
+}
+
+func TestPassthroughLevel_OffsetMappingAndCompression(t *testing.T) {
+	fl := &fakeLevel{tileSize: image.Point{X: 256, Y: 256}, comp: source.CompressionJPEG2000}
+	pl := &passthroughLevel{
+		src:   fl,
+		offX:  2,
+		offY:  3,
+		size:  image.Point{X: 512, Y: 512},
+		grid:  image.Point{X: 2, Y: 2},
+		index: 0,
+	}
+	if pl.Compression() != source.CompressionJPEG2000 {
+		t.Errorf("Compression = %v, want JP2K (source's)", pl.Compression())
+	}
+	if pl.Size() != (image.Point{X: 512, Y: 512}) {
+		t.Errorf("Size = %v, want 512×512 (snapped)", pl.Size())
+	}
+	if pl.TileSize() != (image.Point{X: 256, Y: 256}) {
+		t.Errorf("TileSize = %v, want source 256×256", pl.TileSize())
+	}
+	// Output tile (1,1) must map to source tile (1+2, 1+3) = (3,4).
+	dst := make([]byte, pl.TileMaxSize())
+	n, err := pl.TileInto(1, 1, dst)
+	if err != nil {
+		t.Fatalf("TileInto: %v", err)
+	}
+	if n != 2 || dst[0] != 3 || dst[1] != 4 {
+		t.Errorf("frame = %v (n=%d), want source tile (3,4)", dst[:n], n)
+	}
+}
+
+func TestWithLosslessL0_RejectsZeroLevels(t *testing.T) {
+	fl := &fakeLevel{tileSize: image.Point{X: 4, Y: 4}, comp: source.CompressionJPEG}
+	lower := make([]byte, 8*8*3)
+	if _, err := WithLosslessL0(fl, 0, 0, 2, 2, 8, 8, lower, 0, 4, 90, "dicom", source.Metadata{}, nil); err == nil {
+		t.Fatal("expected error for nLevels=0, got nil")
+	}
+}
+
+func TestWithLosslessL0_MixedLevelKinds(t *testing.T) {
+	fl := &fakeLevel{tileSize: image.Point{X: 4, Y: 4}, comp: source.CompressionJPEG}
+	// snapped region 8×8 raster for the re-encoded lower levels.
+	lower := make([]byte, 8*8*3)
+	md := source.Metadata{MPP: 1.0, Magnification: 20}
+	src, err := WithLosslessL0(fl, 1, 1, 2, 2, 8, 8, lower, 2 /*nLevels*/, 4 /*tileSize*/, 90, "dicom", md, nil)
+	if err != nil {
+		t.Fatalf("WithLosslessL0: %v", err)
+	}
+	lv := src.Levels()
+	if len(lv) != 2 {
+		t.Fatalf("Levels = %d, want 2", len(lv))
+	}
+	if _, ok := lv[0].(*passthroughLevel); !ok {
+		t.Errorf("L0 kind = %T, want *passthroughLevel", lv[0])
+	}
+	if _, ok := lv[1].(*rasterLevel); !ok {
+		t.Errorf("L1 kind = %T, want *rasterLevel", lv[1])
+	}
+	if lv[1].Size() != (image.Point{X: 4, Y: 4}) {
+		t.Errorf("L1 size = %v, want 4×4 (halved from 8×8)", lv[1].Size())
+	}
+}

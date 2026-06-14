@@ -85,6 +85,64 @@ func (d *derived) Metadata() source.Metadata            { return d.md }
 func (d *derived) SourceImageDescription() string       { return "" }
 func (d *derived) Close() error                         { return nil }
 
+// passthroughLevel returns a source level's verbatim compressed frame at a tile
+// offset — the lossless-crop L0. Output tile (x,y) maps to source tile
+// (x+offX, y+offY); Size/Grid report the snapped output geometry; TileSize and
+// Compression are the source's.
+type passthroughLevel struct {
+	src        source.Level
+	offX, offY int
+	size       image.Point
+	grid       image.Point
+	index      int
+}
+
+// passthroughLevel implements source.Level.
+var _ source.Level = (*passthroughLevel)(nil)
+
+func (l *passthroughLevel) Index() int                      { return l.index }
+func (l *passthroughLevel) Size() image.Point               { return l.size }
+func (l *passthroughLevel) Grid() image.Point               { return l.grid }
+func (l *passthroughLevel) TileSize() image.Point           { return l.src.TileSize() }
+func (l *passthroughLevel) Compression() source.Compression { return l.src.Compression() }
+func (l *passthroughLevel) TileMaxSize() int                { return l.src.TileMaxSize() }
+func (l *passthroughLevel) TileInto(x, y int, dst []byte) (int, error) {
+	return l.src.TileInto(x+l.offX, y+l.offY, dst)
+}
+
+// WithLosslessL0 builds a derived source whose L0 is a passthrough over srcL0
+// (verbatim frames for the tile-aligned crop region) and whose nLevels-1 lower
+// levels are box-halved raster levels decoded from the snapped region
+// (lowerRaster, snapW×snapH). Used by crop --lossless into DICOM. Returns fewer
+// than nLevels levels if a box-halved dimension reaches 0.
+func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH int, lowerRaster []byte, nLevels, tileSize, quality int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
+	if nLevels < 1 {
+		return nil, fmt.Errorf("derivedsource: nLevels must be at least 1, got %d", nLevels)
+	}
+	levels := make([]source.Level, 0, nLevels)
+	levels = append(levels, &passthroughLevel{
+		src:   srcL0,
+		offX:  offX,
+		offY:  offY,
+		size:  image.Point{X: snapW, Y: snapH},
+		grid:  image.Point{X: gridW, Y: gridH},
+		index: 0,
+	})
+	raster, lw, lh := lowerRaster, snapW, snapH
+	for i := 1; i < nLevels; i++ {
+		var err error
+		raster, lw, lh, err = downscale.BoxHalve(raster, lw, lh, 2)
+		if err != nil {
+			return nil, fmt.Errorf("derivedsource: halve level %d→%d: %w", i-1, i, err)
+		}
+		if lw == 0 || lh == 0 {
+			break
+		}
+		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, index: i})
+	}
+	return &derived{format: format, levels: levels, md: md, assoc: assoc}, nil
+}
+
 // FromReducedL0 builds an all-raster derived source: L0 is the supplied
 // (reduced or cropped) raster, and nLevels-1 lower levels are produced by box-
 // halving. tileSize/quality drive the JPEG encode; format/md/assoc are carried
