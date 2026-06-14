@@ -11,6 +11,48 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
+// TestRasterLevel_ParallelEncodeTileMapping guards that the worker-pool encode
+// maps each output tile (x,y) to the correct raster region — i.e. no
+// transposition or index race under workers > 1. Each of the 2x2 tiles is a
+// distinct solid gray; after parallel encode, every tile must decode back to
+// its own value.
+func TestRasterLevel_ParallelEncodeTileMapping(t *testing.T) {
+	const ts = 4
+	w, h := 2*ts, 2*ts // 2x2 tiles
+	want := map[[2]int]byte{{0, 0}: 40, {1, 0}: 80, {0, 1}: 120, {1, 1}: 160}
+	raster := make([]byte, w*h*3)
+	for ty := 0; ty < h; ty++ {
+		for tx := 0; tx < w; tx++ {
+			v := want[[2]int{tx / ts, ty / ts}]
+			o := (ty*w + tx) * 3
+			raster[o], raster[o+1], raster[o+2] = v, v, v
+		}
+	}
+	l := &rasterLevel{raster: raster, w: w, h: h, tileSize: ts, quality: 95, workers: 4, index: 0}
+	if g := l.Grid(); g != (image.Point{X: 2, Y: 2}) {
+		t.Fatalf("Grid = %v, want 2x2", g)
+	}
+	for ty := 0; ty < 2; ty++ {
+		for tx := 0; tx < 2; tx++ {
+			dst := make([]byte, l.TileMaxSize())
+			n, err := l.TileInto(tx, ty, dst)
+			if err != nil {
+				t.Fatalf("TileInto(%d,%d): %v", tx, ty, err)
+			}
+			img, err := jpeg.Decode(bytes.NewReader(dst[:n]))
+			if err != nil {
+				t.Fatalf("decode tile (%d,%d): %v", tx, ty, err)
+			}
+			r, _, _, _ := img.At(ts/2, ts/2).RGBA()
+			got := byte(r >> 8)
+			exp := want[[2]int{tx, ty}]
+			if got < exp-12 || got > exp+12 {
+				t.Errorf("tile (%d,%d) center = %d, want ~%d (transposition/race?)", tx, ty, got, exp)
+			}
+		}
+	}
+}
+
 func TestRasterLevel_TileIntoEncodesDecodableJPEG(t *testing.T) {
 	// 4×4 solid mid-gray raster, one 4-px tile.
 	w, h, ts := 4, 4, 4
@@ -61,7 +103,7 @@ func TestFromReducedL0_SourceShape(t *testing.T) {
 		raster[i] = 64
 	}
 	md := source.Metadata{MPPX: 1.0, MPPY: 1.0, MPP: 1.0, Magnification: 10}
-	src, err := FromReducedL0(raster, w, h, 2 /*nLevels*/, 4 /*tileSize*/, 90, "svs", md, nil)
+	src, err := FromReducedL0(raster, w, h, 2 /*nLevels*/, 4 /*tileSize*/, 90, 2 /*workers*/, "svs", md, nil)
 	if err != nil {
 		t.Fatalf("FromReducedL0: %v", err)
 	}
@@ -93,7 +135,7 @@ func TestFromReducedL0_SourceShape(t *testing.T) {
 
 func TestFromReducedL0_RejectsZeroLevels(t *testing.T) {
 	raster := make([]byte, 8*8*3)
-	if _, err := FromReducedL0(raster, 8, 8, 0, 4, 90, "svs", source.Metadata{}, nil); err == nil {
+	if _, err := FromReducedL0(raster, 8, 8, 0, 4, 90, 2, "svs", source.Metadata{}, nil); err == nil {
 		t.Fatal("expected error for nLevels=0, got nil")
 	}
 }
@@ -102,7 +144,7 @@ func TestFromReducedL0_TruncatesWhenRasterDegenerates(t *testing.T) {
 	// 1×1 raster: a box-halve to 0×0 must stop the loop, so asking for 4 levels
 	// yields just the single L0.
 	raster := make([]byte, 1*1*3)
-	src, err := FromReducedL0(raster, 1, 1, 4, 4, 90, "svs", source.Metadata{}, nil)
+	src, err := FromReducedL0(raster, 1, 1, 4, 4, 90, 2, "svs", source.Metadata{}, nil)
 	if err != nil {
 		t.Fatalf("FromReducedL0: %v", err)
 	}
@@ -164,7 +206,7 @@ func TestPassthroughLevel_OffsetMappingAndCompression(t *testing.T) {
 func TestWithLosslessL0_RejectsZeroLevels(t *testing.T) {
 	fl := &fakeLevel{tileSize: image.Point{X: 4, Y: 4}, comp: source.CompressionJPEG}
 	lower := make([]byte, 8*8*3)
-	if _, err := WithLosslessL0(fl, 0, 0, 2, 2, 8, 8, lower, 0, 4, 90, "dicom", source.Metadata{}, nil); err == nil {
+	if _, err := WithLosslessL0(fl, 0, 0, 2, 2, 8, 8, lower, 0, 4, 90, 2, "dicom", source.Metadata{}, nil); err == nil {
 		t.Fatal("expected error for nLevels=0, got nil")
 	}
 }
@@ -174,7 +216,7 @@ func TestWithLosslessL0_MixedLevelKinds(t *testing.T) {
 	// snapped region 8×8 raster for the re-encoded lower levels.
 	lower := make([]byte, 8*8*3)
 	md := source.Metadata{MPP: 1.0, Magnification: 20}
-	src, err := WithLosslessL0(fl, 1, 1, 2, 2, 8, 8, lower, 2 /*nLevels*/, 4 /*tileSize*/, 90, "dicom", md, nil)
+	src, err := WithLosslessL0(fl, 1, 1, 2, 2, 8, 8, lower, 2 /*nLevels*/, 4 /*tileSize*/, 90, 2 /*workers*/, "dicom", md, nil)
 	if err != nil {
 		t.Fatalf("WithLosslessL0: %v", err)
 	}

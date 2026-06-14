@@ -350,10 +350,10 @@ func cropToDICOM(p cropEmitParams) error {
 		}
 		ds, err = derivedsource.WithLosslessL0(
 			src.Levels()[0], p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H,
-			p.l0, p.nLevels, outputTileSize, p.quality, src.Format(), md, assoc)
+			p.l0, p.nLevels, outputTileSize, p.quality, p.workers, src.Format(), md, assoc)
 	} else {
 		ds, err = derivedsource.FromReducedL0(
-			p.l0, p.l0W, p.l0H, p.nLevels, outputTileSize, p.quality, src.Format(), md, assoc)
+			p.l0, p.l0W, p.l0H, p.nLevels, outputTileSize, p.quality, p.workers, src.Format(), md, assoc)
 	}
 	if err != nil {
 		return fmt.Errorf("build derived source: %w", err)

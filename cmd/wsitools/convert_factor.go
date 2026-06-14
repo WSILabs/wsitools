@@ -867,7 +867,9 @@ func downsampleToOMETIFF(
 func downsampleToDICOM(ctx context.Context, input, output string, factor, targetMag, quality, workers int, tileOrderName string, force bool, bigtiffFlag string, noAssociated bool) error {
 	_ = tileOrderName
 	_ = bigtiffFlag
-	_ = workers
+	if workers < 1 {
+		workers = 1
+	}
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
 	}
@@ -944,7 +946,7 @@ func downsampleToDICOM(ctx context.Context, input, output string, factor, target
 	if noAssociated {
 		assoc = nil
 	}
-	ds, err := derivedsource.FromReducedL0(l0, outW, outH, len(slide.Levels()), outputTileSize, quality, src.Format(), md, assoc)
+	ds, err := derivedsource.FromReducedL0(l0, outW, outH, len(slide.Levels()), outputTileSize, quality, workers, src.Format(), md, assoc)
 	if err != nil {
 		return fmt.Errorf("build derived source: %w", err)
 	}

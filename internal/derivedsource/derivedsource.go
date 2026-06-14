@@ -11,6 +11,7 @@ import (
 	"image"
 	"io"
 	"strconv"
+	"sync"
 
 	"github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
@@ -19,14 +20,23 @@ import (
 )
 
 // rasterLevel is one pyramid level backed by an RGB888 raster; tiles are
-// JPEG-baseline encoded on demand as complete (self-contained) frames — the
-// form DICOM encapsulated PixelData requires.
+// JPEG-baseline encoded as complete (self-contained) frames — the form DICOM
+// encapsulated PixelData requires. WritePyramid pulls tiles one at a time, so
+// the level pre-encodes every tile once (lazily, on first TileInto) using a
+// worker pool sized by `workers`, then serves frames from the cache. This
+// parallelizes the CPU-bound JPEG encode across cores while preserving the
+// pull-based Level API.
 type rasterLevel struct {
 	raster   []byte
 	w, h     int
 	tileSize int
 	quality  int
+	workers  int
 	index    int
+
+	once   sync.Once
+	frames [][]byte // [ty*tilesX + tx] → encoded frame; populated by encodeAll
+	encErr error    // first error from the parallel pre-encode, if any
 }
 
 // rasterLevel implements source.Level.
@@ -45,22 +55,83 @@ func (l *rasterLevel) Grid() image.Point {
 	}
 }
 
+// encodeAll JPEG-encodes every tile of this level into l.frames using a worker
+// pool. Each tile index is written by exactly one worker (distinct slice
+// elements), so no per-element locking is needed; l.encErr is mutex-guarded.
+func (l *rasterLevel) encodeAll() {
+	g := l.Grid()
+	l.frames = make([][]byte, g.X*g.Y)
+	workers := l.workers
+	if workers < 1 {
+		workers = 1
+	}
+
+	type job struct{ tx, ty, idx int }
+	jobs := make(chan job)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			enc, err := jpegcodec.New(codec.LevelGeometry{
+				TileWidth:   l.tileSize,
+				TileHeight:  l.tileSize,
+				PixelFormat: codec.PixelFormatRGB8,
+			}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(l.quality)}})
+			if err != nil {
+				mu.Lock()
+				if l.encErr == nil {
+					l.encErr = fmt.Errorf("derivedsource: new jpeg encoder: %w", err)
+				}
+				mu.Unlock()
+			}
+			for j := range jobs {
+				if enc == nil {
+					continue // drain remaining jobs so the producer never blocks
+				}
+				mu.Lock()
+				failed := l.encErr != nil
+				mu.Unlock()
+				if failed {
+					continue
+				}
+				tileRGB := downscale.ExtractTile(l.raster, l.w, l.h, j.tx, j.ty, l.tileSize)
+				frame, err := enc.EncodeStandalone(tileRGB, l.tileSize, l.tileSize)
+				if err != nil {
+					mu.Lock()
+					if l.encErr == nil {
+						l.encErr = fmt.Errorf("derivedsource: encode tile (%d,%d): %w", j.tx, j.ty, err)
+					}
+					mu.Unlock()
+					continue
+				}
+				l.frames[j.idx] = frame
+			}
+		}()
+	}
+	for ty := 0; ty < g.Y; ty++ {
+		for tx := 0; tx < g.X; tx++ {
+			jobs <- job{tx: tx, ty: ty, idx: ty*g.X + tx}
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	// The encoded frames supersede the raster; release it so a level's raster
+	// and its frames don't both pin memory for the rest of the write.
+	l.raster = nil
+}
+
 func (l *rasterLevel) TileInto(x, y int, dst []byte) (int, error) {
-	// One encoder per call: stateless, concurrency-safe, and the table compute
-	// is negligible against the encode itself.
-	enc, err := jpegcodec.New(codec.LevelGeometry{
-		TileWidth:   l.tileSize,
-		TileHeight:  l.tileSize,
-		PixelFormat: codec.PixelFormatRGB8,
-	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(l.quality)}})
-	if err != nil {
-		return 0, fmt.Errorf("derivedsource: new jpeg encoder: %w", err)
+	l.once.Do(l.encodeAll)
+	if l.encErr != nil {
+		return 0, l.encErr
 	}
-	tileRGB := downscale.ExtractTile(l.raster, l.w, l.h, x, y, l.tileSize)
-	frame, err := enc.EncodeStandalone(tileRGB, l.tileSize, l.tileSize)
-	if err != nil {
-		return 0, fmt.Errorf("derivedsource: encode tile (%d,%d): %w", x, y, err)
+	idx := y*l.Grid().X + x
+	if idx < 0 || idx >= len(l.frames) {
+		return 0, fmt.Errorf("derivedsource: tile (%d,%d) out of range", x, y)
 	}
+	frame := l.frames[idx]
 	if len(frame) > len(dst) {
 		return 0, io.ErrShortBuffer
 	}
@@ -115,7 +186,7 @@ func (l *passthroughLevel) TileInto(x, y int, dst []byte) (int, error) {
 // levels are box-halved raster levels decoded from the snapped region
 // (lowerRaster, snapW×snapH). Used by crop --lossless into DICOM. Returns fewer
 // than nLevels levels if a box-halved dimension reaches 0.
-func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH int, lowerRaster []byte, nLevels, tileSize, quality int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
+func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH int, lowerRaster []byte, nLevels, tileSize, quality, workers int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
 	if nLevels < 1 {
 		return nil, fmt.Errorf("derivedsource: nLevels must be at least 1, got %d", nLevels)
 	}
@@ -138,26 +209,26 @@ func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH i
 		if lw == 0 || lh == 0 {
 			break
 		}
-		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, index: i})
+		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, workers: workers, index: i})
 	}
 	return &derived{format: format, levels: levels, md: md, assoc: assoc}, nil
 }
 
 // FromReducedL0 builds an all-raster derived source: L0 is the supplied
 // (reduced or cropped) raster, and nLevels-1 lower levels are produced by box-
-// halving. tileSize/quality drive the JPEG encode; format/md/assoc are carried
-// onto the source (md already factor-scaled by the caller). Used by downsample,
-// convert --factor, and the re-encode crop.
-// Returns fewer than nLevels levels if a box-halved dimension reaches 0 before
-// nLevels iterations.
-func FromReducedL0(l0 []byte, w, h, nLevels, tileSize, quality int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
+// halving. tileSize/quality drive the JPEG encode and workers sizes each level's
+// encode pool; format/md/assoc are carried onto the source (md already
+// factor-scaled by the caller). Used by downsample, convert --factor, and the
+// re-encode crop. Returns fewer than nLevels levels if a box-halved dimension
+// reaches 0 before nLevels iterations.
+func FromReducedL0(l0 []byte, w, h, nLevels, tileSize, quality, workers int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
 	if nLevels < 1 {
 		return nil, fmt.Errorf("derivedsource: nLevels must be at least 1, got %d", nLevels)
 	}
 	levels := make([]source.Level, 0, nLevels)
 	raster, lw, lh := l0, w, h
 	for i := 0; i < nLevels; i++ {
-		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, index: i})
+		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, workers: workers, index: i})
 		if i == nLevels-1 {
 			break
 		}
