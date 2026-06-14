@@ -195,3 +195,77 @@ func TestWritePyramid(t *testing.T) {
 		t.Errorf("got %d distinct SOPInstanceUIDs, want %d", len(sops), n)
 	}
 }
+
+func openDICOMFixture(t *testing.T, name string) source.Source {
+	t.Helper()
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	p := filepath.Join(dir, "dicom", name)
+	if _, err := os.Stat(p); err != nil {
+		t.Skipf("no DICOM fixture at %s", p)
+	}
+	src, err := source.Open(p)
+	if err != nil {
+		t.Skipf("source.Open(%s): %v", name, err)
+	}
+	return src
+}
+
+// TestWriteVolumeInstance_JP2KSourceTransferSyntax guards the fix for the P0 bug:
+// frames are copied VERBATIM, so a JPEG 2000 DICOM source's TransferSyntaxUID must
+// be JPEG 2000 (.90/.91) — the old code hardcoded JPEG-baseline (.50) for every
+// DICOM source, mislabeling J2K frames and producing invalid DICOM.
+func TestWriteVolumeInstance_JP2KSourceTransferSyntax(t *testing.T) {
+	src := openDICOMFixture(t, "3DHISTECH-JP2K")
+	defer src.Close()
+	level := len(src.Levels()) - 1 // smallest
+
+	var out bytes.Buffer
+	if err := WriteVolumeInstance(&out, src, level, Options{}); err != nil {
+		t.Fatalf("WriteVolumeInstance: %v", err)
+	}
+	ds, err := dicom.Parse(bytes.NewReader(out.Bytes()), int64(out.Len()), nil)
+	if err != nil {
+		t.Fatalf("dicom.Parse: %v", err)
+	}
+	// 3DHISTECH-JP2K is reversible (lossless) JPEG 2000 → TS .90.
+	if ts := firstStrA(t, ds, tag.TransferSyntaxUID); ts != jp2kLosslessTS {
+		t.Errorf("TransferSyntaxUID = %q, want %q (JPEG 2000 lossless); J2K frames mislabeled as JPEG-baseline make invalid DICOM", ts, jp2kLosslessTS)
+	}
+}
+
+// TestWriteVolumeInstance_JPEGSourceTransferSyntax guards the unchanged common
+// case: a JPEG-baseline DICOM source keeps TS .50.
+func TestWriteVolumeInstance_JPEGSourceTransferSyntax(t *testing.T) {
+	src := openDICOMFixture(t, "scan_621_grundium_dicom")
+	defer src.Close()
+	level := len(src.Levels()) - 1
+
+	var out bytes.Buffer
+	if err := WriteVolumeInstance(&out, src, level, Options{}); err != nil {
+		t.Fatalf("WriteVolumeInstance: %v", err)
+	}
+	ds, err := dicom.Parse(bytes.NewReader(out.Bytes()), int64(out.Len()), nil)
+	if err != nil {
+		t.Fatalf("dicom.Parse: %v", err)
+	}
+	if ts := firstStrA(t, ds, tag.TransferSyntaxUID); ts != jpegBaselineTS {
+		t.Errorf("TransferSyntaxUID = %q, want %q (JPEG-baseline)", ts, jpegBaselineTS)
+	}
+}
+
+// TestWriteVolumeInstance_HTJ2KSourceRejected confirms an HTJ2K DICOM source fails
+// LOUD (frame-copy unsupported) rather than silently mislabeling HTJ2K frames as
+// JPEG-baseline.
+func TestWriteVolumeInstance_HTJ2KSourceRejected(t *testing.T) {
+	src := openDICOMFixture(t, "3DHISTECH-HTJ2K")
+	defer src.Close()
+	level := len(src.Levels()) - 1
+
+	var out bytes.Buffer
+	if err := WriteVolumeInstance(&out, src, level, Options{}); err == nil {
+		t.Fatalf("expected error for HTJ2K DICOM source (frame-copy unsupported), got success")
+	}
+}

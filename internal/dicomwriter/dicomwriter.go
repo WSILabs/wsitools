@@ -362,15 +362,36 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 		icc = srgbICCProfile
 	}
 	if src.Format() == "dicom" {
-		return ImageDescriptor{
-			TransferSyntax:  jpegBaselineTS,
-			Photometric:     "YBR_FULL_422",
-			SamplesPerPixel: 3,
-			ICCProfile:      icc,
-			Lossy:           true,
-			LossyMethod:     "ISO_10918_1",
-			LossyRatio:      lossyRatio,
-		}, nil
+		// Frames are copied VERBATIM (see encapsulatePixelData), so the
+		// TransferSyntax must match the source frames' actual codec — not a
+		// hardcoded JPEG-baseline. Probe the level's compression.
+		lvl := src.Levels()[level]
+		switch comp := lvl.Compression(); comp {
+		case source.CompressionJPEG:
+			// P0-validated JPEG-baseline WSM descriptor (the common case).
+			return ImageDescriptor{
+				TransferSyntax:  jpegBaselineTS,
+				Photometric:     "YBR_FULL_422",
+				SamplesPerPixel: 3,
+				ICCProfile:      icc,
+				Lossy:           true,
+				LossyMethod:     "ISO_10918_1",
+				LossyRatio:      lossyRatio,
+			}, nil
+		case source.CompressionJPEG2000:
+			// Probe the frame: reversible → .90 (lossless), else .91 (lossy);
+			// derive photometric from the codestream (same path as non-DICOM
+			// J2K frame-copy).
+			buf := make([]byte, lvl.TileMaxSize())
+			n, err := lvl.TileInto(0, 0, buf)
+			if err != nil {
+				return ImageDescriptor{}, fmt.Errorf("read frame (0,0) for codec probe: %w", err)
+			}
+			return codecColor(buf[:n], comp, icc, lossyRatio)
+		default:
+			return ImageDescriptor{}, fmt.Errorf(
+				"--to dicom: DICOM source frames are %s; only JPEG-baseline and JPEG 2000 frame-copy are supported", comp)
+		}
 	}
 	lvl := src.Levels()[level]
 	comp := lvl.Compression()
