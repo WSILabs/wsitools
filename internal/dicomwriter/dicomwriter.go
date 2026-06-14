@@ -1,6 +1,7 @@
 package dicomwriter
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"image"
@@ -86,17 +87,24 @@ func WritePyramid(src source.Source, opts Options, newWriter func(name string) (
 	instanceNumber := len(levels) + 1
 	for _, a := range src.Associated() {
 		name := a.Type()
+		// Buffer the instance first so a skip (or any write error) never leaves a
+		// stray 0-byte file behind: only create the output writer once we have a
+		// complete instance to commit.
+		var buf bytes.Buffer
+		if err := writeAssociated(&buf, src, a, shared, instanceNumber); err != nil {
+			if errors.Is(err, errSkipAssociated) {
+				slog.Warn("skipping associated image", "type", name, "reason", err)
+				continue
+			}
+			return fmt.Errorf("write associated %s: %w", name, err)
+		}
 		w, err := newWriter(name)
 		if err != nil {
 			return fmt.Errorf("open writer for %s: %w", name, err)
 		}
-		werr := writeAssociated(w, src, a, shared, instanceNumber)
+		_, werr := w.Write(buf.Bytes())
 		cerr := w.Close()
 		if werr != nil {
-			if errors.Is(werr, errSkipAssociated) {
-				slog.Warn("skipping associated image", "type", name, "reason", werr)
-				continue
-			}
 			return fmt.Errorf("write associated %s: %w", name, werr)
 		}
 		if cerr != nil {
