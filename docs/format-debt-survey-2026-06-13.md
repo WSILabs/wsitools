@@ -32,7 +32,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 |---|---|---|---|---|---|
 | B1 | **No JPEG2000 encoder** — J2K is decode / tile-copy / DICOM-frame-copy only; never a `--codec` re-encode target. | no `internal/codec/jp2k` | [confirmed] | M–L | Low–Med |
 | B2 | **`iris-proprietary`** — `source.Compression` enum slot with no registered decoder → "no decoder" if ever hit (low real risk today). | `internal/source/source.go:99` | [confirmed] | S | Low |
-| B3 | **`aperioapp14`** — an `Encoder` that is never registered (orphan). Wire it or delete it. | `internal/codec/aperioapp14/` | [confirmed] | S | Low |
+| B3 | ~~**`aperioapp14`** — an `Encoder` that is never registered (orphan).~~ **DONE** (merge 89f06f3) — deleted as speculative dead code (never a Factory, never imported but by its own test, zero callers; no Aperio-identical re-encode planned). | ~~`internal/codec/aperioapp14/`~~ | [confirmed] | S | Low |
 | B4 | **HTJ2K not DICOM-writable** — rejected with a clear error (after the 2026-06-13 TS fix). Real support is future work. | `dicomwriter.go:351` | [confirmed] | M | Low |
 
 ## C. Known live bugs / code debt
@@ -78,10 +78,10 @@ additionally supports dzi/szi/dicom as one-shot targets.
 | ~~**C1** fix DICOM stray-0-byte-file~~ | — | — | **DONE** (merge 0ede7fd) |
 | ~~**A2** lift SVS-only on `--to svs --factor`~~ | — | — | **DONE** (merge 7203c00) |
 | ~~**D1** run integration suite in CI~~ | — | — | **DONE** (PR #4, merge eea2da4) |
-| **B3** wire-or-delete `aperioapp14` orphan | Lowest (S) | Low | Pure cleanup |
+| ~~**B3** wire-or-delete `aperioapp14` orphan~~ | — | — | **DONE** (merge 89f06f3, deleted) |
 | **A1 / DICOM adapter** | High (L) | **Highest** | Unlocks DICOM downsample + crop |
 | **D2** DICOM CI fixture | Med (cross-repo) | High | Unblocks the largest untested surface |
 
 **Suggested order:** ~~lowest-risk correctness first (C1, A2)~~ → ~~the high-impact
-CI unlock (D1)~~ **all done** → next the big DICOM adapter (A1) when ready, with
-the `aperioapp14` orphan (B3) as a quick cleanup in between.
+CI unlock (D1)~~ → ~~the `aperioapp14` cleanup (B3)~~ **all done** → next the big
+DICOM adapter (A1) when ready, then the DICOM CI fixture (D2).
