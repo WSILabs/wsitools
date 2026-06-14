@@ -339,6 +339,16 @@ func cropToDICOM(p cropEmitParams) error {
 	assoc := src.Associated()
 	if p.noAssociated {
 		assoc = nil
+	} else {
+		// Replace the whole-slide thumbnail with one rendered from the crop L0
+		// (the snapped region for --lossless, the exact extent otherwise) so the
+		// emitted thumbnail reflects the crop, not the full slide. label/macro/
+		// overview pass through (they describe the whole physical slide).
+		var rerr error
+		assoc, rerr = regenCropThumbnailAssoc(assoc, p.l0, p.l0W, p.l0H, p.quality)
+		if rerr != nil {
+			return fmt.Errorf("regenerate crop thumbnail: %w", rerr)
+		}
 	}
 
 	var ds source.Source

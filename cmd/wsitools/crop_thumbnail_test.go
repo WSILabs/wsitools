@@ -1,6 +1,73 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"image"
+	"image/jpeg"
+	"testing"
+
+	opentile "github.com/wsilabs/opentile-go"
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
+	"github.com/wsilabs/wsitools/internal/source"
+)
+
+// fakeAssoc is a minimal source.AssociatedImage for testing the thumbnail-regen
+// list transform.
+type fakeAssoc struct{ typ string }
+
+func (f fakeAssoc) Type() string                     { return f.typ }
+func (f fakeAssoc) Size() image.Point                { return image.Point{X: 10, Y: 10} }
+func (f fakeAssoc) Compression() source.Compression  { return source.CompressionJPEG }
+func (f fakeAssoc) Bytes() ([]byte, error)           { return []byte("orig"), nil }
+func (f fakeAssoc) Decode(otdecoder.DecodeOptions) (*otdecoder.Image, error) {
+	return nil, nil
+}
+func (f fakeAssoc) Source() (opentile.AssociatedEncoding, bool) {
+	return opentile.AssociatedEncoding{}, false
+}
+func (f fakeAssoc) IFDOffset() (int64, bool) { return 0, false }
+
+// regenCropThumbnailAssoc replaces the thumbnail in the list with one rendered
+// from the crop L0; everything else passes through.
+func TestRegenCropThumbnailAssoc(t *testing.T) {
+	w, h := 2048, 1024
+	l0 := make([]byte, w*h*3)
+	for i := range l0 {
+		l0[i] = 100
+	}
+	in := []source.AssociatedImage{fakeAssoc{typ: "label"}, fakeAssoc{typ: "thumbnail"}}
+	out, err := regenCropThumbnailAssoc(in, l0, w, h, 90)
+	if err != nil {
+		t.Fatalf("regenCropThumbnailAssoc: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len = %d, want 2", len(out))
+	}
+	// Label passes through unchanged.
+	if out[0].Type() != "label" {
+		t.Errorf("out[0] type = %q, want label (passthrough)", out[0].Type())
+	}
+	// Thumbnail replaced by a synthetic croppedThumbnail rendered from the crop.
+	th, ok := out[1].(*croppedThumbnail)
+	if !ok {
+		t.Fatalf("out[1] = %T, want *croppedThumbnail", out[1])
+	}
+	if th.Type() != "thumbnail" || th.Compression() != source.CompressionJPEG {
+		t.Errorf("regen type/comp = %q/%v, want thumbnail/JPEG", th.Type(), th.Compression())
+	}
+	wantW, wantH := thumbDims(w, h, thumbLongSide) // 1024×512
+	if th.Size() != (image.Point{X: wantW, Y: wantH}) {
+		t.Errorf("regen size = %v, want %dx%d", th.Size(), wantW, wantH)
+	}
+	jb, _ := th.Bytes()
+	img, err := jpeg.Decode(bytes.NewReader(jb))
+	if err != nil {
+		t.Fatalf("regen thumbnail bytes not a decodable JPEG: %v", err)
+	}
+	if img.Bounds().Dx() != wantW || img.Bounds().Dy() != wantH {
+		t.Errorf("decoded regen dims = %v, want %dx%d", img.Bounds(), wantW, wantH)
+	}
+}
 
 func TestRenderCropThumbnail(t *testing.T) {
 	l0 := make([]byte, 2000*1000*3)
