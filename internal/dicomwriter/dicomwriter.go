@@ -261,12 +261,18 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs,
 
 	// ImageType: a DICOM source re-emission is DERIVED at every level (P0); a
 	// non-DICOM level 0 is the native acquisition (ORIGINAL), reduced levels DERIVED.
-	// opts.L0ImageType, when non-nil, overrides level 0 (used by transform emitters
-	// such as downsample/crop where L0 is no longer the original acquisition).
+	// opts.L0ImageType, when non-nil, marks a derived transform pyramid (downsample/
+	// crop): L0 carries the override and every reduced level below it is a resampled
+	// derivative (DERIVED/…/RESAMPLED), regardless of source format. This precedes the
+	// dicom branch so a DICOM-source derived pyramid does not mis-stamp its lowers NONE.
 	var imageType []string
 	switch {
 	case level == 0 && opts.L0ImageType != nil:
 		imageType = opts.L0ImageType
+	case opts.L0ImageType != nil:
+		// Derived transform pyramid (downsample/crop): every reduced level below
+		// L0 is a resampled derivative, regardless of source format.
+		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"}
 	case src.Format() == "dicom":
 		imageType = []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}
 	case level == 0:
