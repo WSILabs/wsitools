@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/suyashkumar/dicom"
-	"github.com/suyashkumar/dicom/pkg/tag"
+	"github.com/WSILabs/dicom"
+	"github.com/WSILabs/dicom/pkg/tag"
 
 	"github.com/wsilabs/wsitools/internal/source"
 )

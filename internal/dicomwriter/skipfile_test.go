@@ -16,10 +16,10 @@ import (
 // returns errSkipAssociated (the skip path).
 type skipAssoc struct{}
 
-func (skipAssoc) Type() string                     { return "label" }
-func (skipAssoc) Size() image.Point                { return image.Point{X: 100, Y: 100} }
-func (skipAssoc) Compression() source.Compression  { return source.CompressionJPEG }
-func (skipAssoc) Bytes() ([]byte, error)           { return nil, errors.New("boom: cannot read bytes") }
+func (skipAssoc) Type() string                    { return "label" }
+func (skipAssoc) Size() image.Point               { return image.Point{X: 100, Y: 100} }
+func (skipAssoc) Compression() source.Compression { return source.CompressionJPEG }
+func (skipAssoc) Bytes() ([]byte, error)          { return nil, errors.New("boom: cannot read bytes") }
 func (skipAssoc) Decode(decoder.DecodeOptions) (*decoder.Image, error) {
 	return nil, errors.New("not called")
 }

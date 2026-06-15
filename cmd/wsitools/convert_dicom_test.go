@@ -504,3 +504,75 @@ func tight(di *decoder.Image) []byte {
 	}
 	return out
 }
+
+// TestHTJ2KToDICOMPixelRoundTrip proves A4a: a DICOM HTJ2K source (3DHISTECH-HTJ2K)
+// re-emits through the dicomwriter as an HTJ2K WSM instance with the correct
+// transfer syntax (…4.201 lossless / …4.203 lossy), verbatim frame-copy. Frames
+// are copied unchanged, so the emitted instance decodes byte-identically to the
+// source. Before A4a the writer rejected HTJ2K source frames.
+func TestHTJ2KToDICOMPixelRoundTrip(t *testing.T) {
+	dir := os.Getenv("WSI_TOOLS_TESTDIR")
+	if dir == "" {
+		dir = "../../sample_files"
+	}
+	htj2k := filepath.Join(dir, "dicom", "3DHISTECH-HTJ2K")
+	if _, err := os.Stat(htj2k); err != nil {
+		t.Skip("no 3DHISTECH-HTJ2K fixture")
+	}
+
+	src, err := source.Open(htj2k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "htj2k.dcm")
+	f, err := os.Create(out)
+	if err != nil {
+		src.Close()
+		t.Fatal(err)
+	}
+	if err := dicomwriter.WriteVolumeInstance(f, src, 0, dicomwriter.Options{}); err != nil {
+		f.Close()
+		src.Close()
+		t.Fatalf("WriteVolumeInstance (HTJ2K): %v", err)
+	}
+	f.Close()
+	src.Close()
+
+	back, err := source.Open(out)
+	if err != nil {
+		t.Fatalf("source.Open(emitted dicom): %v", err)
+	}
+	if back.Format() != "dicom" {
+		t.Errorf("emitted Format = %q, want dicom", back.Format())
+	}
+	if c := back.Levels()[0].Compression(); c != source.CompressionHTJ2K {
+		t.Errorf("emitted L0 compression = %v, want htj2k", c)
+	}
+	back.Close()
+
+	const w, h = 512, 512 // within L0 1792×1888 and the first 1024² tile
+	decodeRGB := func(path string) *decoder.Image {
+		s, err := opentile.OpenFile(path)
+		if err != nil {
+			t.Fatalf("opentile.OpenFile(%s): %v", path, err)
+		}
+		defer s.Close()
+		lv, err := s.Pyramid(0).Level(0)
+		if err != nil {
+			t.Fatalf("Level(0,0) %s: %v", path, err)
+		}
+		img, err := lv.ReadRegion(opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: w, H: h}}, opentile.WithFormat(decoder.PixelFormatRGB))
+		if err != nil {
+			t.Fatalf("ReadRegion(%s): %v", path, err)
+		}
+		return img
+	}
+	srcImg := decodeRGB(htj2k)
+	dcmImg := decodeRGB(out)
+	if srcImg.Width != dcmImg.Width || srcImg.Height != dcmImg.Height {
+		t.Fatalf("dim mismatch: src=%dx%d dcm=%dx%d", srcImg.Width, srcImg.Height, dcmImg.Width, dcmImg.Height)
+	}
+	if !bytes.Equal(srcImg.Pix, dcmImg.Pix) {
+		t.Fatalf("pixel mismatch (photometric/transfer-syntax likely wrong for HTJ2K)")
+	}
+}

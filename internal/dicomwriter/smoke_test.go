@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/suyashkumar/dicom"
-	"github.com/suyashkumar/dicom/pkg/frame"
-	"github.com/suyashkumar/dicom/pkg/tag"
+	"github.com/WSILabs/dicom"
+	"github.com/WSILabs/dicom/pkg/frame"
+	"github.com/WSILabs/dicom/pkg/tag"
 )
 
 // TestEncapsulatedWriteRoundTrip de-risks the suyashkumar/dicom encapsulated
