@@ -13,7 +13,9 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   SIZ/COD codestream markers (the extra CAP marker is length-skipped), so the
   existing `InspectJP2K` + `PhotometricJP2K` derive components / reversibility /
   photometric unchanged. Verified: a full `3DHISTECH-HTJ2K` pyramid converts to
-  5 HTJ2K instances that read back **pixel-identical** to the source.
+  5 HTJ2K instances that read back **pixel-identical** to the source, and
+  `dciodvfy` reports **0 errors** on every instance (it validates the HTJ2K
+  transfer syntax `…4.201`).
 
 ### Changed
 
