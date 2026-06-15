@@ -4,6 +4,18 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Changed
+
+- **opentile-go v0.41.0 → v0.41.1** (no API change) — picks up two decode fixes
+  for **Aperio ImageScope exports** (which re-encode the pyramid + associated
+  images in non-Aperio codecs): tiled **LZW / uncompressed / Deflate** levels now
+  decode (opentile-go #28), and **non-JPEG associated images** (e.g. an
+  uncompressed thumbnail) now decode (#29). Verified through wsitools `region`
+  (tiled-LZW L0) and `extract` (uncompressed thumbnail). CI fixtures bumped to
+  **wsi-fixtures v7**, adding the `590_crop` ImageScope export crops (which guard
+  the above) and a CC0 **OME-TIFF** fixture (`CMU-1-Small-Region.ome.tiff`) that
+  gives the OME-TIFF transform paths CI coverage.
+
 ### Removed
 
 - **`internal/codec/aperioapp14`** — the v0.17-era keep-around encoder that
