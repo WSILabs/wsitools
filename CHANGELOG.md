@@ -4,7 +4,31 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Added
+
+- **`convert --to dicom` now frame-copies HTJ2K sources** (survey A4a / B4). A
+  DICOM source whose frames are **High-Throughput JPEG 2000** is re-emitted
+  verbatim with the matching transfer syntax — `…1.2.4.201` (reversible/lossless)
+  or `…1.2.4.203` (lossy) — instead of being rejected. HTJ2K shares JPEG 2000's
+  SIZ/COD codestream markers (the extra CAP marker is length-skipped), so the
+  existing `InspectJP2K` + `PhotometricJP2K` derive components / reversibility /
+  photometric unchanged. Verified: a full `3DHISTECH-HTJ2K` pyramid converts to
+  5 HTJ2K instances that read back **pixel-identical** to the source, and
+  `dciodvfy` reports **0 errors** on every instance (it validates the HTJ2K
+  transfer syntax `…4.201`).
+
 ### Changed
+
+- **DICOM writer now depends on the `WSILabs/dicom` fork** of
+  `github.com/suyashkumar/dicom` (`v1.1.0-wsilabs.1`, via a direct `require`).
+  Upstream v1.1.0's transfer-syntax UID dictionary predates HTJ2K (Sup 232) and
+  JPEG XL (Sup 235) and exposes no registration API, so `dicom.Write` refused to
+  emit those syntaxes (`UID '…' not found in dictionary`) even though the body
+  encoding is identical Explicit VR LE. The fork adds the HTJ2K (`…4.201–.205`)
+  and JPEG XL (`…4.110/.111/.112`) UIDs and rebrands the module path so it is
+  consumable directly; a weekly GitHub Action tracks upstream and flags when the
+  UIDs land upstream so the fork can be retired. Read-side DICOM (via opentile-go)
+  still uses upstream `suyashkumar/dicom` as an indirect dependency.
 
 - **opentile-go v0.41.0 → v0.41.1** (no API change) — picks up two decode fixes
   for **Aperio ImageScope exports** (which re-encode the pyramid + associated

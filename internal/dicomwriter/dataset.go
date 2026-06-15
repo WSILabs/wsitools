@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/suyashkumar/dicom"
-	"github.com/suyashkumar/dicom/pkg/tag"
+	"github.com/WSILabs/dicom"
+	"github.com/WSILabs/dicom/pkg/tag"
 
 	"github.com/wsilabs/wsitools/internal/source"
 )
@@ -37,10 +37,12 @@ const writerSoftware = "wsitools"
 
 // Transfer syntax + SOP class for the WSM VOLUME instance we emit.
 const (
-	wsmSOPClassUID = "1.2.840.10008.5.1.4.1.1.77.1.6" // VLWholeSlideMicroscopyImageStorage
-	jpegBaselineTS = "1.2.840.10008.1.2.4.50"         // JPEG Baseline (Process 1)
-	jp2kLosslessTS = "1.2.840.10008.1.2.4.90"         // JPEG 2000 (Lossless Only)
-	jp2kTS         = "1.2.840.10008.1.2.4.91"         // JPEG 2000 Image Compression
+	wsmSOPClassUID  = "1.2.840.10008.5.1.4.1.1.77.1.6" // VLWholeSlideMicroscopyImageStorage
+	jpegBaselineTS  = "1.2.840.10008.1.2.4.50"         // JPEG Baseline (Process 1)
+	jp2kLosslessTS  = "1.2.840.10008.1.2.4.90"         // JPEG 2000 (Lossless Only)
+	jp2kTS          = "1.2.840.10008.1.2.4.91"         // JPEG 2000 Image Compression
+	htj2kLosslessTS = "1.2.840.10008.1.2.4.201"        // High-Throughput JPEG 2000 (Lossless Only)
+	htj2kTS         = "1.2.840.10008.1.2.4.203"        // High-Throughput JPEG 2000 Image Compression
 )
 
 // UIDSet holds the generated UIDs for one instance. The caller populates these

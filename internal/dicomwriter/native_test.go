@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/suyashkumar/dicom"
-	"github.com/suyashkumar/dicom/pkg/tag"
+	"github.com/WSILabs/dicom"
+	"github.com/WSILabs/dicom/pkg/tag"
 )
 
 // TestNativePixelDataRoundTrip de-risks the suyashkumar/dicom NATIVE (non-

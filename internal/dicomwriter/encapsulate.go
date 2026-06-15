@@ -3,9 +3,9 @@ package dicomwriter
 import (
 	"fmt"
 
-	"github.com/suyashkumar/dicom"
-	"github.com/suyashkumar/dicom/pkg/frame"
-	"github.com/suyashkumar/dicom/pkg/tag"
+	"github.com/WSILabs/dicom"
+	"github.com/WSILabs/dicom/pkg/frame"
+	"github.com/WSILabs/dicom/pkg/tag"
 
 	"github.com/wsilabs/wsitools/internal/source"
 )

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/suyashkumar/dicom"
-	"github.com/suyashkumar/dicom/pkg/tag"
+	"github.com/WSILabs/dicom"
+	"github.com/WSILabs/dicom/pkg/tag"
 
 	"github.com/wsilabs/wsitools/internal/source"
 )
@@ -282,17 +282,23 @@ func TestWriteInstance_L0ImageTypeOverride(t *testing.T) {
 	}
 }
 
-// TestWriteVolumeInstance_HTJ2KSourceRejected confirms an HTJ2K DICOM source fails
-// LOUD (frame-copy unsupported) rather than silently mislabeling HTJ2K frames as
-// JPEG-baseline.
-func TestWriteVolumeInstance_HTJ2KSourceRejected(t *testing.T) {
+// TestWriteVolumeInstance_HTJ2KSourceAccepted confirms an HTJ2K DICOM source is
+// frame-copied verbatim with a High-Throughput JPEG 2000 transfer syntax
+// (…4.201 lossless / …4.203 lossy), not rejected or mislabeled as JPEG-baseline.
+// (A4a; depends on the WSILabs/dicom fork defining the HTJ2K TS UIDs.)
+func TestWriteVolumeInstance_HTJ2KSourceAccepted(t *testing.T) {
 	src := openDICOMFixture(t, "3DHISTECH-HTJ2K")
 	defer src.Close()
 	level := len(src.Levels()) - 1
 
 	var out bytes.Buffer
-	if err := WriteVolumeInstance(&out, src, level, Options{}); err == nil {
-		t.Fatalf("expected error for HTJ2K DICOM source (frame-copy unsupported), got success")
+	if err := WriteVolumeInstance(&out, src, level, Options{}); err != nil {
+		t.Fatalf("WriteVolumeInstance (HTJ2K source): %v", err)
+	}
+	// The emitted file-meta must declare an HTJ2K transfer syntax (…4.20x),
+	// not JPEG-baseline (…4.50) or JPEG 2000 (…4.9x).
+	if !bytes.Contains(out.Bytes(), []byte("1.2.840.10008.1.2.4.20")) {
+		t.Errorf("emitted instance does not carry an HTJ2K transfer syntax UID (…4.20x)")
 	}
 }
 

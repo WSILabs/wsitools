@@ -5,15 +5,17 @@ go 1.26.2
 require (
 	github.com/hhrutter/lzw v1.0.0
 	github.com/spf13/cobra v1.10.2
-	github.com/suyashkumar/dicom v1.1.0
 	github.com/vbauerster/mpb/v8 v8.12.0
 	github.com/wsilabs/opentile-go v0.41.1
 	golang.org/x/image v0.39.0
 	golang.org/x/sys v0.41.0
 )
 
+require github.com/suyashkumar/dicom v1.1.0 // indirect
+
 require (
 	github.com/VividCortex/ewma v1.2.0 // indirect
+	github.com/WSILabs/dicom v1.1.0-wsilabs.1
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
