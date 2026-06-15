@@ -51,7 +51,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 |---|---|---|---|---|---|
 | D1 | ~~**Integration suite never runs in CI**~~ **DONE** (PR #4, merge eea2da4) — added a `go test (integration)` step (`-tags integration ./tests/integration/...`) to the macOS job; tests skip gracefully on fixtures absent from the 3 CI pulls. CI-verified green (`ok … 10.5s`). | `.github/workflows/ci.yml` | [confirmed firsthand] | S–M | High |
 | D2 | ~~**No DICOM CI fixture**~~ **DONE** (PR #5, merge c51cd7b) — wsi-fixtures **v5** adds `dicom.tar`: 3DHISTECH-JP2K/HTJ2K (CC0) + scan_621_grundium_dicom (CC-BY-4.0, attribution). CI pulls it + 16 instance SHAs; the DICOM unit + integration tests now RUN in CI (integration 10.5s→33.8s). | `.github/fixtures.sha256`, `ci.yml` | [confirmed firsthand] | M (cross-repo) | High |
-| D3 | **No JP2K-SVS / OME-TIFF / Leica-SCN / generic-TIFF CI fixtures** → those paths skip in CI. | fixtures.sha256 | [confirmed] | M | Med |
+| D3 | **No JP2K-SVS / OME-TIFF / Leica-SCN / generic-TIFF CI fixtures** → those paths skip in CI. **PARTIAL** (merge bf5c81f): wsi-fixtures **v7** added an OME-TIFF (`CMU-1-Small-Region.ome.tiff` → OME-TIFF transform CI coverage) + the `590_crop` ImageScope crops (JP2K-SVS + LZW/uncompressed TIFF). Still open: Leica-SCN. | fixtures.sha256 | [confirmed] | M | Med |
 | D4 | **Windows CI job runs no tests** (build+vet only); HTJ2K untested on Windows (`-tags nohtj2k`). | `ci.yml` | [confirmed] | M | Med |
 | D5 | **dciodvfy not in CI** → DICOM conformance never auto-validated. | `ci.yml` | [confirmed] | S–M | Med |
 | D6 | **CI `-timeout 5m`** vs heavy `-race cmd/wsitools` → false-FAIL risk under load (CLAUDE.md suggests 30m). | `ci.yml` | [check] | S | Low |
@@ -69,6 +69,7 @@ additionally supports dzi/szi/dicom as one-shot targets.
 
 - `dump-ifds` rejects dicom/ife (no TIFF IFDs) — structurally correct.
 - `hash --mode pixel` only decodes JPEG/JP2K L0 (`hash.go:130`); `--mode file` rejects DICOM dirs (`hash.go:61`). Minor.
+- `F1` | **`convert` / `hash --mode pixel` can't decode LZW / uncompressed / Deflate *source* tiles** — wsitools' own decode pipeline (codec registry / source-compression handling) errors "no decoder for source compression lzw|none" even though opentile-go v0.41.1 now decodes them (and `region`/`extract`, which use opentile decode directly, work). Surfaced consuming the ImageScope-export fixtures. Means `convert --to X --codec C` and pixel-hash on an ImageScope LZW/uncompressed slide fail where `region`/`extract` succeed. Effort S–M (wire the source LZW/none/deflate decode into the convert pipeline), Impact Med. [confirmed firsthand]
 
 ---
 

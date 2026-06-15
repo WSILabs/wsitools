@@ -61,11 +61,12 @@ editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
 - `make test` runs with `-race -count=1`.
 - Integration tests gated by `WSI_TOOLS_TESTDIR` env var (default
   `./sample_files`).
-- CI downloads fixtures from `wsilabs/wsi-fixtures` **v5** (`svs.tar`,
-  `ndpi.tar`, `cog-wsi.tar`, `dicom.tar` — incl. the 3DHISTECH JP2K/HTJ2K and
-  scan_621 Grundium DICOM-WSM fixtures), verifies them against
-  `.github/fixtures.sha256`, and runs both the unit suite and the
-  `-tags integration` suite on every push and PR (see `.github/workflows/ci.yml`).
+- CI downloads fixtures from `wsilabs/wsi-fixtures` **v7** (`svs.tar` — incl. the
+  `590_crop` ImageScope export crops, `ndpi.tar`, `cog-wsi.tar`, `dicom.tar` —
+  incl. the 3DHISTECH JP2K/HTJ2K + scan_621 Grundium DICOM-WSM fixtures,
+  `ome-tiff.tar`), verifies them against `.github/fixtures.sha256`, and runs both
+  the unit suite and the `-tags integration` suite on every push and PR (see
+  `.github/workflows/ci.yml`).
 - For local work, soft-link to opentile-go's fixture pool:
 
   ```sh
