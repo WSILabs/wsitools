@@ -68,8 +68,8 @@ additionally supports dzi/szi/dicom as one-shot targets.
 ## F. Read-side notes (mostly fine)
 
 - `dump-ifds` rejects dicom/ife (no TIFF IFDs) — structurally correct.
-- `hash --mode pixel` only decodes JPEG/JP2K L0 (`hash.go:130`); `--mode file` rejects DICOM dirs (`hash.go:61`). Minor.
-- `F1` | **`convert` / `hash --mode pixel` can't decode LZW / uncompressed / Deflate *source* tiles** — wsitools' own decode pipeline (codec registry / source-compression handling) errors "no decoder for source compression lzw|none" even though opentile-go v0.41.1 now decodes them (and `region`/`extract`, which use opentile decode directly, work). Surfaced consuming the ImageScope-export fixtures. Means `convert --to X --codec C` and pixel-hash on an ImageScope LZW/uncompressed slide fail where `region`/`extract` succeed. Effort S–M (wire the source LZW/none/deflate decode into the convert pipeline), Impact Med. [confirmed firsthand]
+- `--mode file` rejects DICOM dirs (`hash.go:61`). Minor.
+- ~~`F1` | **`convert` / `hash --mode pixel` can't decode LZW / uncompressed / Deflate *source* tiles**~~ — **RESOLVED** (branch `fix/f1-decode-lzw-source`, commits 9446591 + 3e4ef28). Added `source.Level.DecodedTile` routing through opentile-go's level-decode; `hash --mode pixel`, the `convert` re-encode pipeline (`transcodeLevel`), and the downsample/crop materialize path (`downscale.DecodeReducedTile`) now decode every source compression. Integration coverage: `TestConvertReencodeDecodesLZWAndUncompressedSource`, `TestDownsampleDecodesLZWSource`, `TestDecodedTile_LZWSource`.
 
 ---
 
