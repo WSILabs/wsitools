@@ -58,6 +58,13 @@ type Level interface {
 	// returned slice (dst[:n]) is the canonical byte form for the
 	// transcode/downsample decoder pipeline.
 	TileInto(x, y int, dst []byte) (int, error)
+
+	// DecodedTile decodes the tile at (x, y) to RGB pixels via opentile-go's
+	// level-decode, which handles EVERY source compression (JPEG / JPEG 2000 /
+	// LZW / uncompressed / Deflate / …) with the TIFF tile-dims + predictor
+	// context that standalone codec-of-bytes decode lacks. Use this for the
+	// transcode / hash decode paths rather than picking a codec by compression.
+	DecodedTile(x, y int) (*decoder.Image, error)
 }
 
 // AssociatedImage is one of label / macro / thumbnail / overview /

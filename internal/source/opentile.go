@@ -7,6 +7,7 @@ import (
 
 	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/opentile-go/decoder"
+	_ "github.com/wsilabs/opentile-go/decoder/all" // register all tile decoders (incl. LZW/none/Deflate) so DecodedTile works for any source compression
 	_ "github.com/wsilabs/opentile-go/formats/all"
 	dicom "github.com/wsilabs/opentile-go/formats/dicom"
 	svsfmt "github.com/wsilabs/opentile-go/formats/svs"
@@ -144,6 +145,10 @@ func (l *opentileLevel) TileMaxSize() int { return l.lvl.TileMaxSize() }
 
 func (l *opentileLevel) TileInto(x, y int, dst []byte) (int, error) {
 	return l.lvl.TileInto(x, y, dst)
+}
+
+func (l *opentileLevel) DecodedTile(x, y int) (*decoder.Image, error) {
+	return l.lvl.DecodedTile(x, y, opentile.WithFormat(decoder.PixelFormatRGB))
 }
 
 func (l *opentileLevel) Compression() Compression {
