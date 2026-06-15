@@ -30,6 +30,14 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   UIDs land upstream so the fork can be retired. Read-side DICOM (via opentile-go)
   still uses upstream `suyashkumar/dicom` as an indirect dependency.
 
+- **opentile-go v0.41.1 → v0.42.1** — adds `decoder.CodestreamInspector`
+  (`Inspect(src) → CodestreamInfo{Components, BitDepth, Lossless, Boxed}`),
+  the header-only codec-domain probe requested in opentile-go #41 (implemented by
+  jpeg / jpeg2000 / htj2k / jpegxl). No wsitools behavior change yet — it unblocks
+  the JPEG XL → DICOM frame-copy *source* side (survey A4a) and lets the DICOM
+  writer later retire its hand-rolled `jpegmeta`/`jp2kmeta` codestream parsers in
+  favor of the upstream inspector.
+
 - **opentile-go v0.41.0 → v0.41.1** (no API change) — picks up two decode fixes
   for **Aperio ImageScope exports** (which re-encode the pyramid + associated
   images in non-Aperio codecs): tiled **LZW / uncompressed / Deflate** levels now
