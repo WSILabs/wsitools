@@ -19,23 +19,11 @@ import (
 // decode where the source codec supports it (JPEG IDCT fast-scale, JP2K/HTJ2K
 // wavelet resolution decode), else full-decode + chained 2x2 box-average.
 func MaterializeReducedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []byte, outW, outH, factor int) error {
-	srcCompression := srcL0.Compression
 	srcGrid := srcL0.Grid
 	srcTileW := srcL0.TileSize.W
 	srcTileH := srcL0.TileSize.H
 	srcW := srcL0.Size.W
 	srcH := srcL0.Size.H
-
-	// libjpeg-turbo's scale formula: outDim = ceil(inDim * 1 / factor).
-	// For interior tiles this is srcTileW/factor, srcTileH/factor exactly
-	// (we choose factors that divide common tile sizes 240/256 cleanly:
-	// 240/2=120, 240/4=60, 240/8=30, 240/16=15; same shape for 256).
-	fac, ok := otdecoder.GetByCompressionTag(opentile.CompressionToTIFFTag(srcCompression))
-	if !ok {
-		return fmt.Errorf("no decoder registered for source compression %s", srcCompression)
-	}
-
-	tileBuf := make([]byte, srcL0.TileMaxSize())
 
 	for ty := 0; ty < srcGrid.H; ty++ {
 		for tx := 0; tx < srcGrid.W; tx++ {
@@ -44,11 +32,6 @@ func MaterializeReducedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []by
 				return ctx.Err()
 			default:
 			}
-			n, err := srcL0.TileInto(tx, ty, tileBuf)
-			if err != nil {
-				return fmt.Errorf("read source tile (%d,%d): %w", tx, ty, err)
-			}
-			compressed := tileBuf[:n]
 			// Compute the image-space destination rect for this source tile.
 			// The source tile covers [sx0, sx1) × [sy0, sy1) in source-pixel
 			// space, clamped at the image bounds. The corresponding output
@@ -69,7 +52,7 @@ func MaterializeReducedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []by
 			// Codec-domain scaled decode where the source codec supports it
 			// (JPEG IDCT, JP2K/HTJ2K wavelet resolution), else full-decode +
 			// box-halve. Self-contained per tile, so seam-free.
-			decoded, decW, decH, err := DecodeReducedTile(fac, compressed, srcTileW, srcTileH, factor)
+			decoded, decW, decH, err := DecodeReducedTile(srcL0, tx, ty, srcTileW, srcTileH, factor)
 			if err != nil {
 				return fmt.Errorf("decode tile (%d,%d): %w", tx, ty, err)
 			}
@@ -110,26 +93,47 @@ func PasteIntoRaster(dst []byte, dstW, dstH, dx, dy int, src []byte, srcStrideW,
 	PasteSubRect(dst, dstW, dstH, dx, dy, src, srcStrideW, 0, 0, validW, validH)
 }
 
-// DecodeReducedTile decodes one source tile's compressed bytes reduced by
-// `factor`, preferring codec-domain scaled decode (DecodeOptions.Scale) and
-// falling back to a full decode + box-halving only when the codec cannot
-// scale-decode (ErrUnsupportedScale). Returns packed RGB and its actual dims.
-func DecodeReducedTile(fac otdecoder.Factory, compressed []byte, srcTileW, srcTileH, factor int) (pix []byte, w, h int, err error) {
-	dec := fac.New()
-	defer dec.Close()
-	img, derr := dec.Decode(compressed, otdecoder.DecodeOptions{Scale: factor, Format: otdecoder.PixelFormatRGB})
+// DecodeReducedTile decodes the source tile at (tx, ty) reduced by `factor`,
+// preferring codec-domain scaled decode (DecodeOptions.Scale) and falling back
+// to a full decode + box-halving only when the codec cannot scale-decode
+// (ErrUnsupportedScale). Returns tightly packed RGB (stride = w*3) and its
+// actual dims.
+//
+// Decode routes through opentile-go's level-decode (srcL0.DecodedTile) rather
+// than a standalone codec-of-bytes decode, so it handles EVERY source
+// compression — LZW / uncompressed / Deflate (which need explicit tile-dims +
+// predictor context) as well as the self-describing JPEG / JP2K / HTJ2K. Pass
+// factor=1 for an unscaled full-tile decode (the crop path).
+func DecodeReducedTile(srcL0 *opentile.Level, tx, ty, srcTileW, srcTileH, factor int) (pix []byte, w, h int, err error) {
+	img, derr := srcL0.DecodedTile(tx, ty, opentile.WithScale(factor), opentile.WithFormat(otdecoder.PixelFormatRGB))
 	if derr == nil {
-		return img.Pix, img.Width, img.Height, nil
+		return tightTilePix(img), img.Width, img.Height, nil
 	}
 	if !errors.Is(derr, otdecoder.ErrUnsupportedScale) {
 		return nil, 0, 0, derr
 	}
 	// Codec can't scale-decode at this factor: full decode + box-halve.
-	full, ferr := dec.Decode(compressed, otdecoder.DecodeOptions{Scale: 1, Format: otdecoder.PixelFormatRGB})
+	full, ferr := srcL0.DecodedTile(tx, ty, opentile.WithFormat(otdecoder.PixelFormatRGB))
 	if ferr != nil {
 		return nil, 0, 0, ferr
 	}
-	return BoxHalve(full.Pix, srcTileW, srcTileH, factor)
+	return BoxHalve(tightTilePix(full), srcTileW, srcTileH, factor)
+}
+
+// tightTilePix returns the decoded tile's pixels as a tightly packed RGB buffer
+// (stride = Width*3). When the decoder already produced a tight buffer the
+// backing slice is returned directly; otherwise rows are compacted into a fresh
+// buffer so downstream paste/box-halve can assume a w*3 stride.
+func tightTilePix(img *otdecoder.Image) []byte {
+	rowBytes := img.Width * 3
+	if img.Stride == rowBytes {
+		return img.Pix[:img.Height*rowBytes]
+	}
+	out := make([]byte, img.Height*rowBytes)
+	for y := 0; y < img.Height; y++ {
+		copy(out[y*rowBytes:(y+1)*rowBytes], img.Pix[y*img.Stride:y*img.Stride+rowBytes])
+	}
+	return out
 }
 
 // BoxHalve chains Box-halving steps log2(factor) times to produce a
