@@ -28,6 +28,23 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **`convert` (re-encode), `downsample`, `crop`, and `hash --mode pixel` could
+  not decode LZW / uncompressed / Deflate *source* tiles** (Survey F1). Those
+  paths picked a standalone codec by source compression, which covers only
+  JPEG / JPEG 2000 — so re-encoding, downsampling, cropping, or pixel-hashing an
+  Aperio **ImageScope export** (tiled LZW / uncompressed / Deflate) errored
+  `no decoder for source compression lzw|none`, even though `region`/`extract`
+  (which decode through opentile-go directly) worked. Added a
+  `source.Level.DecodedTile` seam that routes through opentile-go's level-decode
+  — handling every source compression with the TIFF tile-dims + predictor
+  context a codec-of-bytes decode lacks — and wired `hash --mode pixel`, the
+  `convert` re-encode pipeline (`transcodeLevel`), and the downsample/crop
+  materialize path (`downscale.DecodeReducedTile`, which keeps codec-domain
+  scaled decode where supported, else full-decode + box-halve) through it.
+  Decode stays parallel across the worker pool (concurrency-safe `ReadAt` tile
+  reads + a mutex/channel decoder pool). Builds on the opentile-go v0.41.1 bump
+  above.
+
 - **`convert --to svs --factor` rejected non-SVS sources.** It required a
   parseable Aperio `ImageDescription`, an asymmetry vs the tiff/ome-tiff/cog-wsi
   targets (which accept any source). It now resolves MPP/magnification from the

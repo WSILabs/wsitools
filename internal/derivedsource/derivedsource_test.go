@@ -8,6 +8,7 @@ import (
 	"image/jpeg"
 	"testing"
 
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
@@ -168,6 +169,7 @@ func (f *fakeLevel) TileSize() image.Point           { return f.tileSize }
 func (f *fakeLevel) Grid() image.Point               { return image.Point{X: 4, Y: 4} }
 func (f *fakeLevel) Compression() source.Compression { return f.comp }
 func (f *fakeLevel) TileMaxSize() int                { return 8 }
+func (f *fakeLevel) DecodedTile(x, y int) (*otdecoder.Image, error) { return nil, nil }
 func (f *fakeLevel) TileInto(x, y int, dst []byte) (int, error) {
 	body := []byte{byte(x), byte(y)}
 	return copy(dst, body), nil

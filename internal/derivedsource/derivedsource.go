@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/wsilabs/opentile-go/decoder"
 	"github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/downscale"
@@ -122,6 +123,13 @@ func (l *rasterLevel) encodeAll() {
 	l.raster = nil
 }
 
+// DecodedTile returns this level's tile as RGB directly from the raster (no
+// codec round-trip) — the level is already decoded pixels.
+func (l *rasterLevel) DecodedTile(x, y int) (*decoder.Image, error) {
+	rgb := downscale.ExtractTile(l.raster, l.w, l.h, x, y, l.tileSize)
+	return &decoder.Image{Width: l.tileSize, Height: l.tileSize, Stride: l.tileSize * 3, Format: decoder.PixelFormatRGB, Pix: rgb}, nil
+}
+
 func (l *rasterLevel) TileInto(x, y int, dst []byte) (int, error) {
 	l.once.Do(l.encodeAll)
 	if l.encErr != nil {
@@ -179,6 +187,9 @@ func (l *passthroughLevel) Compression() source.Compression { return l.src.Compr
 func (l *passthroughLevel) TileMaxSize() int                { return l.src.TileMaxSize() }
 func (l *passthroughLevel) TileInto(x, y int, dst []byte) (int, error) {
 	return l.src.TileInto(x+l.offX, y+l.offY, dst)
+}
+func (l *passthroughLevel) DecodedTile(x, y int) (*decoder.Image, error) {
+	return l.src.DecodedTile(x+l.offX, y+l.offY)
 }
 
 // WithLosslessL0 builds a derived source whose L0 is a passthrough over srcL0

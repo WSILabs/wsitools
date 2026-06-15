@@ -8,7 +8,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -445,21 +444,9 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 		return err
 	}
 
-	decFac := pickDecoder(lvl.Compression())
-	if decFac == nil {
-		return fmt.Errorf("no decoder for source compression %s", lvl.Compression())
-	}
-
 	grid := lvl.Grid()
 	tileW := lvl.TileSize().X
 	tileH := lvl.TileSize().Y
-	maxTileBytes := lvl.TileMaxSize()
-	pool := &sync.Pool{
-		New: func() any {
-			b := make([]byte, maxTileBytes)
-			return &b
-		},
-	}
 
 	sink := func(t pipeline.Tile) error {
 		return lh.WriteTile(t.X, t.Y, t.Bytes)
@@ -488,24 +475,21 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 
 	pipeErr := pipeline.Run(ctx, pipeline.Config{
 		Workers: workers,
+		// Coordinate-only producer: the Process stage decodes each tile by
+		// (x,y) via lvl.DecodedTile, which routes through opentile-go's
+		// level-decode — handling every source compression (LZW / uncompressed
+		// / Deflate / JPEG / JP2K / …), not just the JPEG/JP2K a standalone
+		// codec-of-bytes decode covers. DecodedTile is safe for concurrent use
+		// (ReadAt-based tile reads + a mutex/channel decoder pool), so decode
+		// stays parallel across the worker pool.
 		Source: func(ctx context.Context, emit func(pipeline.Tile) error) error {
 			for ty := 0; ty < grid.Y; ty++ {
 				for tx := 0; tx < grid.X; tx++ {
-					bufp := pool.Get().(*[]byte)
-					n, err := lvl.TileInto(tx, ty, *bufp)
-					if err != nil {
-						pool.Put(bufp)
-						return err
-					}
-					t := pipeline.Tile{
-						Level:   lvl.Index(),
-						X:       uint32(tx),
-						Y:       uint32(ty),
-						Bytes:   (*bufp)[:n],
-						Release: func() { pool.Put(bufp) },
-					}
-					if err := emit(t); err != nil {
-						pool.Put(bufp)
+					if err := emit(pipeline.Tile{
+						Level: lvl.Index(),
+						X:     uint32(tx),
+						Y:     uint32(ty),
+					}); err != nil {
 						return err
 					}
 				}
@@ -513,20 +497,12 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 			return nil
 		},
 		Process: func(t pipeline.Tile) (pipeline.Tile, error) {
-			dec := decFac.New()
-			defer dec.Close()
-			img, err := dec.Decode(t.Bytes, decoder.DecodeOptions{
-				Scale:  1,
-				Format: decoder.PixelFormatRGB,
-			})
-			if t.Release != nil {
-				t.Release()
-				t.Release = nil
-			}
+			img, err := lvl.DecodedTile(int(t.X), int(t.Y))
 			if err != nil {
 				return pipeline.Tile{}, err
 			}
-			encoded, err := enc.EncodeTile(img.Pix, tileW, tileH, nil)
+			tileRGB := tightRGB(img)
+			encoded, err := enc.EncodeTile(tileRGB, tileW, tileH, nil)
 			if err != nil {
 				return pipeline.Tile{}, err
 			}
@@ -574,21 +550,21 @@ func encoderChromaSubsampling(fac codec.EncoderFactory, knobs map[string]string)
 	return nil, false
 }
 
-func pickDecoder(c source.Compression) decoder.Factory {
-	var name string
-	switch c {
-	case source.CompressionJPEG:
-		name = "jpeg"
-	case source.CompressionJPEG2000:
-		name = "jpeg2000"
-	default:
-		return nil
+// tightRGB returns the decoded tile's pixels as a tightly packed RGB buffer
+// (tileW*tileH*3, no per-row stride padding) — the form the codec EncodeTile
+// expects. When the decoder already produced a tight buffer (Stride ==
+// Width*3) the backing slice is returned directly; otherwise rows are
+// compacted into a fresh buffer.
+func tightRGB(img *decoder.Image) []byte {
+	rowBytes := img.Width * 3
+	if img.Stride == rowBytes {
+		return img.Pix[:img.Height*rowBytes]
 	}
-	fac, ok := decoder.Get(name)
-	if !ok {
-		return nil
+	out := make([]byte, img.Height*rowBytes)
+	for y := 0; y < img.Height; y++ {
+		copy(out[y*rowBytes:(y+1)*rowBytes], img.Pix[y*img.Stride:y*img.Stride+rowBytes])
 	}
-	return fac
+	return out
 }
 
 // writeTIFFTileCopy copies src's pyramid into w (verbatim tiles, async drain)

@@ -9,8 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wsilabs/opentile-go/decoder"
-
 	"github.com/wsilabs/wsitools/internal/cliout"
 	"github.com/wsilabs/wsitools/internal/source"
 )
@@ -100,48 +98,27 @@ func hashL0Pixels(path string) (string, error) {
 		return "", fmt.Errorf("no levels in %s", path)
 	}
 	l0 := levels[0]
-	fac := pickDecoderForCompression(l0.Compression())
-	if fac == nil {
-		return "", fmt.Errorf("L0 compression %s is not decodable for pixel hash",
-			l0.Compression())
-	}
-
-	tileBuf := make([]byte, l0.TileMaxSize())
 	h := sha256.New()
 	grid := l0.Grid()
 	for ty := 0; ty < grid.Y; ty++ {
 		for tx := 0; tx < grid.X; tx++ {
-			n, err := l0.TileInto(tx, ty, tileBuf)
-			if err != nil {
-				return "", fmt.Errorf("read tile (%d,%d): %w", tx, ty, err)
-			}
-			dec := fac.New()
-			img, err := dec.Decode(tileBuf[:n], decoder.DecodeOptions{Scale: 1, Format: decoder.PixelFormatRGB})
-			dec.Close()
+			// DecodedTile decodes via opentile-go's level-decode, which handles
+			// every source compression (JPEG / JPEG 2000 / LZW / uncompressed /
+			// Deflate / …), not just the JPEG/JP2K a standalone codec covers.
+			img, err := l0.DecodedTile(tx, ty)
 			if err != nil {
 				return "", fmt.Errorf("decode tile (%d,%d): %w", tx, ty, err)
 			}
-			h.Write(img.Pix)
+			// Hash tight RGB rows (strip any decoder stride padding) so the digest
+			// is stable across decoders / compressions.
+			rowBytes := img.Width * 3
+			for y := 0; y < img.Height; y++ {
+				off := y * img.Stride
+				h.Write(img.Pix[off : off+rowBytes])
+			}
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func pickDecoderForCompression(c source.Compression) decoder.Factory {
-	var name string
-	switch c {
-	case source.CompressionJPEG:
-		name = "jpeg"
-	case source.CompressionJPEG2000:
-		name = "jpeg2000"
-	default:
-		return nil
-	}
-	fac, ok := decoder.Get(name)
-	if !ok {
-		return nil
-	}
-	return fac
 }
 
 func emitHash(cmd *cobra.Command, algorithm, mode, hexStr, path string) error {

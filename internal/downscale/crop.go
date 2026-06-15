@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	opentile "github.com/wsilabs/opentile-go"
-	otdecoder "github.com/wsilabs/opentile-go/decoder"
 )
 
 // PasteSubRect copies a validW×validH RGB888 region starting at (srcX, srcY)
@@ -69,17 +68,11 @@ func MaterializeCroppedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []by
 	srcW := srcL0.Size.W
 	srcH := srcL0.Size.H
 
-	fac, ok := otdecoder.GetByCompressionTag(opentile.CompressionToTIFFTag(srcL0.Compression))
-	if !ok {
-		return fmt.Errorf("no decoder registered for source compression %s", srcL0.Compression)
-	}
-
 	tx0 := cropX / srcTileW
 	ty0 := cropY / srcTileH
 	tx1 := (cropX + cropW - 1) / srcTileW
 	ty1 := (cropY + cropH - 1) / srcTileH
 
-	tileBuf := make([]byte, srcL0.TileMaxSize())
 	for ty := ty0; ty <= ty1; ty++ {
 		for tx := tx0; tx <= tx1; tx++ {
 			select {
@@ -92,12 +85,8 @@ func MaterializeCroppedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []by
 			if !overlap {
 				continue
 			}
-			n, err := srcL0.TileInto(tx, ty, tileBuf)
-			if err != nil {
-				return fmt.Errorf("read source tile (%d,%d): %w", tx, ty, err)
-			}
 			// factor=1 → unscaled full-tile decode (codec-agnostic).
-			decoded, decW, decH, err := DecodeReducedTile(fac, tileBuf[:n], srcTileW, srcTileH, 1)
+			decoded, decW, decH, err := DecodeReducedTile(srcL0, tx, ty, srcTileW, srcTileH, 1)
 			if err != nil {
 				return fmt.Errorf("decode source tile (%d,%d): %w", tx, ty, err)
 			}
