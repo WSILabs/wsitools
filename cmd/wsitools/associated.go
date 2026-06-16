@@ -209,6 +209,20 @@ func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 		TargetIdx: idx,
 		Fsync:     fl.fsync,
 	}); err != nil {
+		// A wsitools-produced generic-TIFF has a streamwriter byte layout (L0
+		// directory past the associated data) that the tail-splice model can't
+		// handle. Fall back to a faithful, pixel-identical rebuild for
+		// generic-TIFF; other formats (SVS) surface the error. src is still open
+		// (deferred Close) — rebuild reads its already-parsed levels.
+		if src.Format() == string(opentile.FormatGenericTIFF) && errors.Is(err, edit.ErrUnexpectedLayout) {
+			if rerr := rebuildGenericTIFF(src, outPath, omeEditPlan{remove: typ}, fl.fsync); rerr != nil {
+				return rerr
+			}
+			if !fl.quiet {
+				fmt.Printf("wsitools: removed %s: %s -> %s\n", typ, input, outPath)
+			}
+			return nil
+		}
 		return err
 	}
 
@@ -319,6 +333,31 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 		Replacement: rep,
 		Fsync:       fl.fsync,
 	}); err != nil {
+		// generic-TIFF with a non-tail-spliceable streamwriter layout: fall back
+		// to a faithful, pixel-identical rebuild (the splice ReplacementIFD can't
+		// be reused — rebuild needs a streamwriter StrippedSpec, rebuilt here from
+		// the same decoded image + resolved dims).
+		if src.Format() == string(opentile.FormatGenericTIFF) && errors.Is(err, edit.ErrUnexpectedLayout) {
+			spec, serr := buildReplacementStrippedSpec(img, replaceOpts{
+				typ:         typ,
+				compression: fl.compression,
+				resize:      resize,
+				bg:          bg,
+				targetW:     tw,
+				targetH:     th,
+				force:       fl.force,
+			})
+			if serr != nil {
+				return serr
+			}
+			if rerr := rebuildGenericTIFF(src, outPath, omeEditPlan{replace: typ, spec: spec}, fl.fsync); rerr != nil {
+				return rerr
+			}
+			if !fl.quiet {
+				fmt.Printf("wsitools: %s %s: %s -> %s\n", verb, typ, input, outPath)
+			}
+			return nil
+		}
 		return err
 	}
 
