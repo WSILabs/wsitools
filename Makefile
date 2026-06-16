@@ -95,8 +95,8 @@ dicom-validate: build
 		done; \
 		rm -rf "$$DIR3"; \
 	else echo "missing $$SVS; skipping SVS->DICOM"; fi; \
-	JP2K="$$WSI_TOOLS_TESTDIR/svs/JP2K-33003-1.svs"; \
-	if [ -f "$$JP2K" ]; then \
+	JP2K="$$WSI_TOOLS_TESTDIR/dicom/3DHISTECH-JP2K"; \
+	if [ -d "$$JP2K" ]; then \
 		DIR2=$$(mktemp -d -t wsm-jp2k.XXXXXX); \
 		./bin/wsitools convert --to dicom -f -o "$$DIR2/pyr" "$$JP2K"; \
 		for L in "$$DIR2"/pyr/*.dcm; do \
@@ -105,4 +105,24 @@ dicom-validate: build
 		done; \
 		rm -rf "$$DIR2"; \
 	else echo "missing $$JP2K; skipping JP2K pyramid"; fi; \
+	HTJ2K="$$WSI_TOOLS_TESTDIR/dicom/3DHISTECH-HTJ2K"; \
+	if [ -d "$$HTJ2K" ]; then \
+		DIR4=$$(mktemp -d -t wsm-htj2k.XXXXXX); \
+		./bin/wsitools convert --to dicom -f -o "$$DIR4/pyr" "$$HTJ2K"; \
+		for L in "$$DIR4"/pyr/*.dcm; do \
+			echo "=== dciodvfy (HTJ2K pyramid) $$L ==="; \
+			"$(DCIODVFY)" "$$L" || RC=$$?; \
+		done; \
+		rm -rf "$$DIR4"; \
+	else echo "missing $$HTJ2K; skipping HTJ2K pyramid"; fi; \
+	LZW="$$WSI_TOOLS_TESTDIR/svs/590_crop_lzw_imagescope.tif"; \
+	if [ -f "$$LZW" ]; then \
+		DIR5=$$(mktemp -d -t wsm-lzw.XXXXXX); \
+		./bin/wsitools convert --to dicom --codec jpeg -f -o "$$DIR5/pyr" "$$LZW"; \
+		for L in "$$DIR5"/pyr/*.dcm; do \
+			echo "=== dciodvfy (A4b LZW->JPEG re-encode) $$L ==="; \
+			"$(DCIODVFY)" "$$L" || RC=$$?; \
+		done; \
+		rm -rf "$$DIR5"; \
+	else echo "missing $$LZW; skipping A4b LZW->JPEG"; fi; \
 	exit $$RC
