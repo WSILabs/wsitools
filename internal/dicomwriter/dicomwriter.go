@@ -381,7 +381,7 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 			return codecColor(buf[:n], comp, icc, lossyRatio)
 		default:
 			return ImageDescriptor{}, fmt.Errorf(
-				"--to dicom: DICOM source frames are %s; only JPEG-baseline, JPEG 2000, HTJ2K, and JPEG XL frame-copy are supported", comp)
+				"--to dicom: DICOM source frames are %s, which is not a DICOM transfer syntax; only JPEG-baseline / JPEG 2000 / HTJ2K / JPEG XL frame-copy verbatim — pass --codec jpeg to re-encode", comp)
 		}
 	}
 	lvl := src.Levels()[level]
@@ -389,8 +389,7 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 	if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 &&
 		comp != source.CompressionHTJ2K && comp != source.CompressionJPEGXL {
 		return ImageDescriptor{}, fmt.Errorf(
-			"--to dicom: level %d is %s; only JPEG-baseline, JPEG 2000, HTJ2K, or JPEG XL tile-copy is supported",
-			level, comp)
+			"--to dicom: level %d is %s, which is not a DICOM transfer syntax; only JPEG-baseline / JPEG 2000 / HTJ2K / JPEG XL tile-copy verbatim — pass --codec jpeg to re-encode", level, comp)
 	}
 	buf := make([]byte, lvl.TileMaxSize())
 	n, err := lvl.TileInto(0, 0, buf)
