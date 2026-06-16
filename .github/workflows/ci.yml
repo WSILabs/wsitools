@@ -99,21 +99,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dicom3tools
-          key: dicom3tools-macexe-20260320044638
+          # Key includes the mirror source so a cache miss exercises the
+          # gh-release-download path (bump when the pinned snapshot changes).
+          key: dicom3tools-macexe-20260320044638-wsifx
 
       - name: Download dciodvfy
         if: steps.dciodvfy-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ZIP=dicom3tools_macexe_1.00.snapshot.20260320044638.zip
-          URL="https://www.dclunie.com/dicom3tools/workinprogress/macexe/$ZIP"
-          # Hard-fail (don't skip) if dciodvfy can't be fetched: a conformance
-          # gate that silently disables itself is worse than one that breaks
-          # loudly. The ::error:: annotation makes the failure notification
-          # actionable. dclunie prunes old snapshots, so re-pin to a current one
-          # (https://www.dclunie.com/dicom3tools/workinprogress/macexe/) — or
-          # mirror the binary to a wsilabs-controlled endpoint.
-          if ! curl -fsSL -o "$ZIP" "$URL"; then
-            echo "::error title=dciodvfy unavailable::Could not download dicom3tools from $URL — the DICOM conformance gate cannot run. Re-pin to a current snapshot or mirror the binary."
+          # dciodvfy is mirrored on wsilabs/wsi-fixtures (release tools-v1, BSD —
+          # see dicom3tools-COPYRIGHT.txt) so CI does NOT depend on dclunie.com
+          # being reachable. The dciodvfy-watch workflow notifies us when upstream
+          # moves/prunes the pinned snapshot or ships a newer one (then refresh the
+          # mirror asset + bump this pin). Hard-fail (don't skip) if the mirror is
+          # gone: a conformance gate that silently disables itself is worse than
+          # one that breaks loudly — the ::error:: makes the notification actionable.
+          if ! gh release download tools-v1 --repo wsilabs/wsi-fixtures --pattern "$ZIP" --dir .; then
+            echo "::error title=dciodvfy unavailable::Could not download $ZIP from wsilabs/wsi-fixtures release tools-v1 — the DICOM conformance gate cannot run. Restore the mirror asset."
             exit 1
           fi
           unzip -q "$ZIP" -d dicom3tools
