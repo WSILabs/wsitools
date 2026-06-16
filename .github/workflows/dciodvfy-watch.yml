@@ -1,0 +1,78 @@
+name: dciodvfy-watch
+
+# Proactively watches the upstream dicom3tools snapshot that the DICOM
+# conformance gate (ci.yml) is pinned to. The binary is mirrored on
+# wsilabs/wsi-fixtures (release tools-v1), so CI never depends on dclunie.com
+# directly — but neither the pin nor the mirror tells us when David Clunie
+# MOVES/PRUNES the pinned snapshot or publishes a NEWER one. This weekly job
+# opens a tracking issue on either event so we can refresh the mirror asset and
+# bump the pin (then re-run the conformance gate against the new dciodvfy).
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC (upstream moves rarely)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MACEXE: https://www.dclunie.com/dicom3tools/workinprogress/macexe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check pinned snapshot vs upstream
+        run: |
+          set -uo pipefail
+          # Single source of truth for the pin: the ci.yml conformance step.
+          PINNED=$(grep -oE 'dicom3tools_macexe_1\.00\.snapshot\.[0-9]+\.zip' .github/workflows/ci.yml | head -1)
+          if [ -z "$PINNED" ]; then
+            echo "::error::could not read the pinned dciodvfy snapshot from ci.yml"
+            exit 1
+          fi
+          echo "Pinned snapshot: $PINNED"
+
+          # (1) Is the pinned snapshot still served upstream?
+          PIN_GONE=0
+          if curl -fsI --max-time 30 "$MACEXE/$PINNED" >/dev/null 2>&1; then
+            echo "Pinned snapshot still served upstream."
+          else
+            echo "Pinned snapshot is NO LONGER served upstream (moved/pruned)."
+            PIN_GONE=1
+          fi
+
+          # (2) Newest snapshot in the upstream index.
+          LATEST=$(curl -fsSL --max-time 30 "$MACEXE/index.html" 2>/dev/null \
+            | grep -oE 'dicom3tools_macexe_1\.00\.snapshot\.[0-9]+\.zip' | sort | tail -1)
+          echo "Latest upstream snapshot: ${LATEST:-<index unreachable>}"
+          NEWER=0
+          if [ -n "$LATEST" ] && [ "$LATEST" != "$PINNED" ]; then NEWER=1; fi
+
+          if [ "$PIN_GONE" = 0 ] && [ "$NEWER" = 0 ]; then
+            echo "Up to date — no action."
+            exit 0
+          fi
+
+          # Build the issue body.
+          {
+            echo "Automated **dciodvfy-watch** finding (pinned: \`$PINNED\`):"
+            echo
+            [ "$PIN_GONE" = 1 ] && echo "- ⚠️ The pinned snapshot is **no longer served** by dclunie.com (moved or pruned). CI still works (it pulls the mirror on \`wsilabs/wsi-fixtures\` \`tools-v1\`), but the mirror should be refreshed before the pinned URL is needed again."
+            [ "$NEWER" = 1 ] && echo "- ℹ️ A **newer** upstream snapshot is available: \`$LATEST\`."
+            echo
+            echo "**To refresh:** download the desired snapshot from $MACEXE/, upload it (+ \`dicom3tools-COPYRIGHT.txt\`) as a new \`wsi-fixtures\` tools release, bump the pin in \`.github/workflows/ci.yml\` (Download dciodvfy step + cache key), and let the DICOM conformance gate re-validate against it."
+          } > body.md
+
+          # Dedup: one open issue at a time (stable title).
+          TITLE="dciodvfy: upstream snapshot needs attention"
+          OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq 'length')
+          if [ "$OPEN" != "0" ]; then
+            echo "An open tracking issue already exists; not duplicating."
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file body.md
