@@ -48,20 +48,28 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 		return fmt.Errorf("slide has no pyramid levels")
 	}
 	l0 := images[0].Levels[0]
-	width, height := l0.Size.W, l0.Size.H
+	srcW, srcH := l0.Size.W, l0.Size.H
+	factor, err := resolveFactor(src, input, cvFactor, cvTargetMag)
+	if err != nil {
+		return err
+	}
+	outW, outH, err := reducedDims(srcW, srcH, factor)
+	if err != nil {
+		return err
+	}
 
 	w, err := szi.NewWriter(f, szi.Config{
-		Name: name, Width: width, Height: height,
+		Name: name, Width: outW, Height: outH,
 		Format: cvDZIFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
 	})
 	if err != nil {
 		return err
 	}
 	cfg := dzi.Config{
-		Name: name, Width: width, Height: height,
+		Name: name, Width: outW, Height: outH,
 		Format: cvDZIFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
 	}
-	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg); err != nil {
+	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcW, srcH); err != nil {
 		return err
 	}
 	if err := w.WriteScanProperties(src.Metadata()); err != nil {

@@ -73,7 +73,7 @@ func init() {
 	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpegxl|avif|webp|htj2k); absent = tile-copy when eligible")
 	convertCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs accepted)")
 	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
-	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom (1 = no scaling; one of {2,4,8,16})")
+	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi (1 = no scaling; one of {2,4,8,16})")
 	convertCmd.Flags().IntVar(&cvTargetMag, "target-mag", 0, "alternative to --factor: derive factor from source AppMag")
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
@@ -89,9 +89,6 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 
 	if cvFactor != 1 || cvTargetMag != 0 {
-		if cvTo == "dzi" || cvTo == "szi" {
-			return fmt.Errorf("--factor/--target-mag not supported for --to %s (yet)", cvTo)
-		}
 		if cvFactor != 1 && !isValidFactor(cvFactor) {
 			return fmt.Errorf("--factor must be one of {2,4,8,16}, got %d", cvFactor)
 		}
