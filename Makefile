@@ -95,8 +95,8 @@ dicom-validate: build
 		done; \
 		rm -rf "$$DIR3"; \
 	else echo "missing $$SVS; skipping SVS->DICOM"; fi; \
-	JP2K="$$WSI_TOOLS_TESTDIR/svs/JP2K-33003-1.svs"; \
-	if [ -f "$$JP2K" ]; then \
+	JP2K="$$WSI_TOOLS_TESTDIR/dicom/3DHISTECH-JP2K"; \
+	if [ -d "$$JP2K" ]; then \
 		DIR2=$$(mktemp -d -t wsm-jp2k.XXXXXX); \
 		./bin/wsitools convert --to dicom -f -o "$$DIR2/pyr" "$$JP2K"; \
 		for L in "$$DIR2"/pyr/*.dcm; do \

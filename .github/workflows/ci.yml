@@ -105,7 +105,17 @@ jobs:
         if: steps.dciodvfy-cache.outputs.cache-hit != 'true'
         run: |
           ZIP=dicom3tools_macexe_1.00.snapshot.20260320044638.zip
-          curl -fsSL -o "$ZIP" "https://www.dclunie.com/dicom3tools/workinprogress/macexe/$ZIP"
+          URL="https://www.dclunie.com/dicom3tools/workinprogress/macexe/$ZIP"
+          # Hard-fail (don't skip) if dciodvfy can't be fetched: a conformance
+          # gate that silently disables itself is worse than one that breaks
+          # loudly. The ::error:: annotation makes the failure notification
+          # actionable. dclunie prunes old snapshots, so re-pin to a current one
+          # (https://www.dclunie.com/dicom3tools/workinprogress/macexe/) — or
+          # mirror the binary to a wsilabs-controlled endpoint.
+          if ! curl -fsSL -o "$ZIP" "$URL"; then
+            echo "::error title=dciodvfy unavailable::Could not download dicom3tools from $URL — the DICOM conformance gate cannot run. Re-pin to a current snapshot or mirror the binary."
+            exit 1
+          fi
           unzip -q "$ZIP" -d dicom3tools
           rm "$ZIP"
 
