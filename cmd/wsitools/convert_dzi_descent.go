@@ -355,7 +355,7 @@ func sinkDrainer(jobs <-chan writeJob, sink dziTileSink, firstErr *error) {
 // runDescent drives the v0.17 pyramid-descent pipeline:
 // one ScaledStrips iterator → linked levelBuilders → encoder pool
 // → serialized sink drain. Returns the first error from any stage.
-func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cfg dzi.Config, workers, quality int) error {
+func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cfg dzi.Config, srcW, srcH, workers, quality int) error {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
@@ -418,22 +418,27 @@ func runDescent(ctx context.Context, slide *opentile.Slide, sink dziTileSink, cf
 		sinkDrainer(writeJobs, sink, &sinkErr)
 	}()
 
-	// Source iterator.
+	// Source iterator. We read the full source L0 region (srcW×srcH) and emit
+	// strips at the output size (cfg.Width×cfg.Height = the DZI L_max); the
+	// descent then downsamples in process for every coarser DZI level.
 	//
-	// At the top of the cascade, outSize == sourceLevel.Size (we read
-	// the source at native resolution and downsample in process for
-	// every coarser DZI level). No scaling is needed at the top, so
-	// use Nearest — Lanczos otherwise dominates ~80% of CPU on the
-	// identity-scale read path (profiled May 2026).
+	// Kernel: when output == source (no --factor), the top read is identity, so
+	// Nearest — Lanczos otherwise dominates ~80% of CPU on the identity-scale
+	// path (profiled May 2026). When --factor reduces the output, the top read
+	// is a real downscale, so use Box (area-averaging) to avoid Nearest aliasing.
+	kernel := resample.Nearest
+	if srcW != cfg.Width || srcH != cfg.Height {
+		kernel = resample.Box
+	}
 	stripOpts := []opentile.StripOption{
 		opentile.WithStripContext(ctx),
-		opentile.WithStripKernel(resample.Nearest),
+		opentile.WithStripKernel(kernel),
 	}
 	if workers > 0 {
 		stripOpts = append(stripOpts, opentile.WithStripWorkers(workers))
 	}
 	it := slide.Pyramid(0).ScaledStrips(
-		opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: cfg.Width, H: cfg.Height}},
+		opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: srcW, H: srcH}},
 		opentile.Size{W: cfg.Width, H: cfg.Height},
 		cfg.TileSize,
 		stripOpts...,
