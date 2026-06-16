@@ -75,7 +75,10 @@ jobs:
       - name: go test
         env:
           WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
-        run: go test ./... -race -count=1 -timeout 5m
+        # 30m, not Go's 10m default: the heavy cmd/wsitools -race suite runs
+        # ~3min uncontended and can balloon under CI load — a too-tight timeout
+        # false-FAILs (looks like a crash). See CLAUDE.md "race-suite timeout".
+        run: go test ./... -race -count=1 -timeout 30m
 
       # End-to-end CLI suite (tests/integration, //go:build integration). These
       # shell out to a freshly built wsitools binary, so the harness runs
