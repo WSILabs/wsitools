@@ -327,76 +327,20 @@ func baseMPP(md source.Metadata) (mppX, mppY float64) {
 	return mppX, mppY
 }
 
-// codecColor derives the codec/colorspace attributes from a tile/frame's
-// codestream bytes. Gated to JPEG-baseline + JPEG 2000.
+// codecColor derives the DICOM codec/colorspace attributes from a tile/frame's
+// codestream bytes via opentile-go's header-only CodestreamInspector (no full
+// decode), then maps the codec-domain facts onto DICOM (see codecinspect.go).
+// Supports JPEG-baseline / JPEG 2000 / HTJ2K / JPEG XL frame-copy.
 func codecColor(tile []byte, comp source.Compression, icc []byte, lossyRatio float64) (ImageDescriptor, error) {
-	desc := ImageDescriptor{ICCProfile: icc, LossyRatio: lossyRatio}
-	switch comp {
-	case source.CompressionJPEG:
-		info, err := Inspect(tile)
-		if err != nil {
-			return ImageDescriptor{}, fmt.Errorf("inspect source JPEG: %w", err)
-		}
-		photo, err := Photometric(info)
-		if err != nil {
-			return ImageDescriptor{}, fmt.Errorf("derive photometric from source JPEG: %w", err)
-		}
-		desc.TransferSyntax = jpegBaselineTS
-		desc.Photometric = photo
-		desc.SamplesPerPixel = info.Components
-		desc.Lossy = true
-		desc.LossyMethod = "ISO_10918_1"
-	case source.CompressionJPEG2000:
-		info, err := InspectJP2K(tile)
-		if err != nil {
-			return ImageDescriptor{}, fmt.Errorf("inspect source JPEG 2000: %w", err)
-		}
-		photo, err := PhotometricJP2K(info)
-		if err != nil {
-			return ImageDescriptor{}, fmt.Errorf("derive photometric from source JPEG 2000: %w", err)
-		}
-		desc.Photometric = photo
-		desc.SamplesPerPixel = info.Components
-		if info.Reversible {
-			desc.TransferSyntax = jp2kLosslessTS
-			desc.Lossy = false
-			desc.LossyMethod = ""
-		} else {
-			desc.TransferSyntax = jp2kTS
-			desc.Lossy = true
-			desc.LossyMethod = "ISO_15444_1"
-		}
-	case source.CompressionHTJ2K:
-		// HTJ2K shares JPEG 2000's SIZ/COD main-header markers (it adds a CAP
-		// marker the generic walker length-skips) and the same component / MCT /
-		// reversibility semantics, so the JP2K inspector + photometric mapping
-		// apply unchanged. Only the transfer syntax differs: …4.201 (HT lossless,
-		// reversible 5/3) vs …4.203 (HT lossy). Frames are copied verbatim.
-		info, err := InspectJP2K(tile)
-		if err != nil {
-			return ImageDescriptor{}, fmt.Errorf("inspect source HTJ2K: %w", err)
-		}
-		photo, err := PhotometricJP2K(info)
-		if err != nil {
-			return ImageDescriptor{}, fmt.Errorf("derive photometric from source HTJ2K: %w", err)
-		}
-		desc.Photometric = photo
-		desc.SamplesPerPixel = info.Components
-		if info.Reversible {
-			desc.TransferSyntax = htj2kLosslessTS
-			desc.Lossy = false
-			desc.LossyMethod = ""
-		} else {
-			desc.TransferSyntax = htj2kTS
-			desc.Lossy = true
-			desc.LossyMethod = "ISO_15444_15"
-		}
-	default:
-		// Reachable once writeAssociated calls codecColor directly on associated
-		// frame bytes (buildDescriptor pre-checks the level codec before calling).
-		return ImageDescriptor{}, fmt.Errorf("unsupported codec %s (JPEG-baseline, JPEG 2000, or HTJ2K only)", comp)
+	insp, ok := inspectorFor(comp)
+	if !ok {
+		return ImageDescriptor{}, fmt.Errorf("unsupported codec %s (JPEG-baseline, JPEG 2000, HTJ2K, or JPEG XL only)", comp)
 	}
-	return desc, nil
+	info, err := insp.Inspect(tile)
+	if err != nil {
+		return ImageDescriptor{}, fmt.Errorf("inspect source %s codestream: %w", comp, err)
+	}
+	return descriptorFromInspect(info, comp, icc, lossyRatio)
 }
 
 // buildDescriptor derives the codec/color attributes for src level `level`. DICOM
@@ -424,11 +368,11 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 				LossyMethod:     "ISO_10918_1",
 				LossyRatio:      lossyRatio,
 			}, nil
-		case source.CompressionJPEG2000, source.CompressionHTJ2K:
+		case source.CompressionJPEG2000, source.CompressionHTJ2K, source.CompressionJPEGXL:
 			// Probe the frame and frame-copy verbatim with the matching transfer
-			// syntax: JP2K → .90/.91, HTJ2K → .201/.203 (reversible vs lossy);
-			// derive photometric from the shared SIZ/COD codestream markers (same
-			// path as the non-DICOM frame-copy).
+			// syntax: JP2K → .90/.91, HTJ2K → .201/.203 (reversible vs lossy),
+			// JXL → .112; derive photometric from the codestream header via the
+			// inspector (same path as the non-DICOM frame-copy).
 			buf := make([]byte, lvl.TileMaxSize())
 			n, err := lvl.TileInto(0, 0, buf)
 			if err != nil {
@@ -437,14 +381,15 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 			return codecColor(buf[:n], comp, icc, lossyRatio)
 		default:
 			return ImageDescriptor{}, fmt.Errorf(
-				"--to dicom: DICOM source frames are %s; only JPEG-baseline, JPEG 2000, and HTJ2K frame-copy are supported", comp)
+				"--to dicom: DICOM source frames are %s; only JPEG-baseline, JPEG 2000, HTJ2K, and JPEG XL frame-copy are supported", comp)
 		}
 	}
 	lvl := src.Levels()[level]
 	comp := lvl.Compression()
-	if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 && comp != source.CompressionHTJ2K {
+	if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 &&
+		comp != source.CompressionHTJ2K && comp != source.CompressionJPEGXL {
 		return ImageDescriptor{}, fmt.Errorf(
-			"--to dicom: level %d is %s; only JPEG-baseline, JPEG 2000, or HTJ2K tile-copy is supported",
+			"--to dicom: level %d is %s; only JPEG-baseline, JPEG 2000, HTJ2K, or JPEG XL tile-copy is supported",
 			level, comp)
 	}
 	buf := make([]byte, lvl.TileMaxSize())
