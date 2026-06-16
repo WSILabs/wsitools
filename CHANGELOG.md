@@ -6,6 +6,18 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
+- **`convert --to dicom --codec jpeg`** (survey A4b) — explicit opt-in to
+  **re-encode** a source whose tiles are not a DICOM transfer syntax (LZW /
+  uncompressed / Deflate / AVIF / WebP) to JPEG-baseline, mirroring the TIFF
+  family's `--codec`. Without `--codec`, such a source is still **rejected** (no
+  silent codec assumptions; the error now suggests `--codec jpeg`); `--codec`
+  values other than `jpeg` are rejected (no JPEG 2000 / HTJ2K encoder exists —
+  survey B1). Each tile is decoded via opentile-go's level-decode and re-encoded
+  on demand (`derivedsource.TranscodeToJPEG`); `codecColor` inspects the
+  re-encoded frame so the DICOM photometric matches. Verified: LZW + uncompressed
+  `590_crop` ImageScope crops → JPEG DICOM with `dciodvfy` **0 errors**
+  (`YBR_FULL_422`). A lossy-re-encode warning is logged.
+
 - **`convert --to dicom` now frame-copies HTJ2K sources** (survey A4a / B4). A
   DICOM source whose frames are **High-Throughput JPEG 2000** is re-emitted
   verbatim with the matching transfer syntax — `…1.2.4.201` (reversible/lossless)

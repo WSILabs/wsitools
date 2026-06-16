@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/wsilabs/wsitools/internal/derivedsource"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
 	"github.com/wsilabs/wsitools/internal/source"
 )
@@ -46,10 +48,48 @@ func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 	}
 	defer src.Close()
 
-	if cmd.Flags().Changed("level") {
-		return writeDICOMSingle(src, start)
+	// --codec is the explicit opt-in to RE-ENCODE the pyramid (lossy) rather
+	// than frame-copy it verbatim — mirroring the TIFF family's --codec. Without
+	// it, a source whose tiles are not a DICOM transfer syntax is rejected by the
+	// writer (no silent codec assumptions). JPEG-baseline is the only re-encode
+	// target available for DICOM today (no JPEG 2000 / HTJ2K encoder).
+	emit := src
+	if cvCodec != "" {
+		if cvCodec != "jpeg" {
+			return fmt.Errorf("--codec %q is not supported for --to dicom (only 'jpeg'; omit --codec to frame-copy a JPEG/JPEG2000/HTJ2K/JPEG XL source verbatim)", cvCodec)
+		}
+		quality, qerr := dicomReencodeQuality()
+		if qerr != nil {
+			return qerr
+		}
+		workers := cvWorkers
+		if workers == 0 {
+			workers = runtime.NumCPU()
+		}
+		slog.Warn("re-encoding pyramid to JPEG-baseline (lossy) for --to dicom --codec jpeg",
+			"quality", quality)
+		emit = derivedsource.TranscodeToJPEG(src, quality, workers)
 	}
-	return writeDICOMPyramid(src, start)
+
+	if cmd.Flags().Changed("level") {
+		return writeDICOMSingle(emit, start)
+	}
+	return writeDICOMPyramid(emit, start)
+}
+
+// dicomReencodeQuality parses the --quality flag (default 90) for the
+// --to dicom --codec jpeg re-encode path.
+func dicomReencodeQuality() (int, error) {
+	quality := 90
+	if cvQuality != "" {
+		if _, err := fmt.Sscanf(cvQuality, "%d", &quality); err != nil {
+			return 0, fmt.Errorf("--quality %q: must be an integer 1..100", cvQuality)
+		}
+	}
+	if quality < 1 || quality > 100 {
+		return 0, fmt.Errorf("--quality must be 1..100")
+	}
+	return quality, nil
 }
 
 // writeDICOMSingle emits one WSM instance for cvDICOMLevel to the cvOutput file.
