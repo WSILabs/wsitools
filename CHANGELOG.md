@@ -17,7 +17,24 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   `dciodvfy` reports **0 errors** on every instance (it validates the HTJ2K
   transfer syntax `…4.201`).
 
+- **`convert --to dicom` JPEG XL source frame-copy** (survey A4a) — a source
+  whose frames are **JPEG XL** is frame-copied with the general JPEG XL transfer
+  syntax `…1.2.4.112`. JPEG XL exposes no header-only reversibility flag, so it
+  is marked lossy conservatively. **Untested** — no JPEG XL source fixture exists
+  yet; ships behind the same inspector path as the other codecs.
+
 ### Changed
+
+- **DICOM writer codestream inspection now uses opentile-go's
+  `decoder.CodestreamInspector`** (header-only, no full decode) instead of
+  wsitools' hand-rolled `jpegmeta`/`jp2kmeta` marker parsers, which are deleted.
+  The inspector parses JPEG SOF / J2K SIZ+COD / HTJ2K / JXL headers and exposes
+  `ColorEncoding` + `ChromaSubsampling` + `Lossless`; wsitools keeps only the
+  codec→DICOM mapping (`codecinspect.go`). Behavior is unchanged for JPEG
+  (incl. Aperio APP14 raw-RGB → `RGB`, and 4:2:2 → `YBR_FULL_422` vs 4:4:4 →
+  `YBR_FULL`), JPEG 2000, and HTJ2K — verified by pixel-identical round-trips and
+  `dciodvfy` 0-errors across CMU (JPEG + native label + JPEG associated), JP2K,
+  and HTJ2K.
 
 - **DICOM writer now depends on the `WSILabs/dicom` fork** of
   `github.com/suyashkumar/dicom` (`v1.1.0-wsilabs.1`, via a direct `require`).
@@ -30,13 +47,11 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   UIDs land upstream so the fork can be retired. Read-side DICOM (via opentile-go)
   still uses upstream `suyashkumar/dicom` as an indirect dependency.
 
-- **opentile-go v0.41.1 → v0.42.1** — adds `decoder.CodestreamInspector`
-  (`Inspect(src) → CodestreamInfo{Components, BitDepth, Lossless, Boxed}`),
-  the header-only codec-domain probe requested in opentile-go #41 (implemented by
-  jpeg / jpeg2000 / htj2k / jpegxl). No wsitools behavior change yet — it unblocks
-  the JPEG XL → DICOM frame-copy *source* side (survey A4a) and lets the DICOM
-  writer later retire its hand-rolled `jpegmeta`/`jp2kmeta` codestream parsers in
-  favor of the upstream inspector.
+- **opentile-go v0.41.1 → v0.43.0** — adds `decoder.CodestreamInspector`
+  (`Inspect(src) → CodestreamInfo{Components, BitDepth, Lossless, ColorEncoding,
+  ChromaSubsampling, Boxed}`), the header-only codec-domain probe requested in
+  opentile-go #41 (implemented by jpeg / jpeg2000 / htj2k / jpegxl; v0.43.0 added
+  `ChromaSubsampling`). Now consumed by the DICOM writer (see above).
 
 - **opentile-go v0.41.0 → v0.41.1** (no API change) — picks up two decode fixes
   for **Aperio ImageScope exports** (which re-encode the pyramid + associated
