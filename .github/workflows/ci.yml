@@ -104,7 +104,7 @@ jobs:
           path: dicom3tools
           # Key includes the mirror source so a cache miss exercises the
           # gh-release-download path (bump when the pinned snapshot changes).
-          key: dicom3tools-macexe-20260320044638-wsifx
+          key: dicom3tools-macexe-20260320044638-mirror
 
       - name: Download dciodvfy
         if: steps.dciodvfy-cache.outputs.cache-hit != 'true'
@@ -112,15 +112,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ZIP=dicom3tools_macexe_1.00.snapshot.20260320044638.zip
-          # dciodvfy is mirrored on wsilabs/wsi-fixtures (release tools-v1, BSD —
+          # dciodvfy is mirrored on WSILabs/dicom3tools-mirror (release v1, BSD —
           # see dicom3tools-COPYRIGHT.txt) so CI does NOT depend on dclunie.com
           # being reachable. The dciodvfy-watch workflow notifies us when upstream
-          # moves/prunes the pinned snapshot or ships a newer one (then refresh the
-          # mirror asset + bump this pin). Hard-fail (don't skip) if the mirror is
-          # gone: a conformance gate that silently disables itself is worse than
-          # one that breaks loudly — the ::error:: makes the notification actionable.
-          if ! gh release download tools-v1 --repo wsilabs/wsi-fixtures --pattern "$ZIP" --dir .; then
-            echo "::error title=dciodvfy unavailable::Could not download $ZIP from wsilabs/wsi-fixtures release tools-v1 — the DICOM conformance gate cannot run. Restore the mirror asset."
+          # moves/prunes the pinned snapshot or ships a newer one (then publish a
+          # new mirror release + bump this pin). Hard-fail (don't skip) if the
+          # mirror is gone: a conformance gate that silently disables itself is
+          # worse than one that breaks loudly — the ::error:: makes it actionable.
+          if ! gh release download v1 --repo WSILabs/dicom3tools-mirror --pattern "$ZIP" --dir .; then
+            echo "::error title=dciodvfy unavailable::Could not download $ZIP from WSILabs/dicom3tools-mirror release v1 — the DICOM conformance gate cannot run. Restore the mirror asset."
             exit 1
           fi
           unzip -q "$ZIP" -d dicom3tools

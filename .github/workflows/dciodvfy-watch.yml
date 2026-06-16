@@ -2,7 +2,7 @@ name: dciodvfy-watch
 
 # Proactively watches the upstream dicom3tools snapshot that the DICOM
 # conformance gate (ci.yml) is pinned to. The binary is mirrored on
-# wsilabs/wsi-fixtures (release tools-v1), so CI never depends on dclunie.com
+# WSILabs/dicom3tools-mirror (release v1), so CI never depends on dclunie.com
 # directly — but neither the pin nor the mirror tells us when David Clunie
 # MOVES/PRUNES the pinned snapshot or publishes a NEWER one. This weekly job
 # opens a tracking issue on either event so we can refresh the mirror asset and
@@ -62,10 +62,10 @@ jobs:
           {
             echo "Automated **dciodvfy-watch** finding (pinned: \`$PINNED\`):"
             echo
-            [ "$PIN_GONE" = 1 ] && echo "- ⚠️ The pinned snapshot is **no longer served** by dclunie.com (moved or pruned). CI still works (it pulls the mirror on \`wsilabs/wsi-fixtures\` \`tools-v1\`), but the mirror should be refreshed before the pinned URL is needed again."
+            [ "$PIN_GONE" = 1 ] && echo "- ⚠️ The pinned snapshot is **no longer served** by dclunie.com (moved or pruned). CI still works (it pulls the mirror on \`WSILabs/dicom3tools-mirror\` \`v1\`), but the mirror should be refreshed before the pinned URL is needed again."
             [ "$NEWER" = 1 ] && echo "- ℹ️ A **newer** upstream snapshot is available: \`$LATEST\`."
             echo
-            echo "**To refresh:** download the desired snapshot from $MACEXE/, upload it (+ \`dicom3tools-COPYRIGHT.txt\`) as a new \`wsi-fixtures\` tools release, bump the pin in \`.github/workflows/ci.yml\` (Download dciodvfy step + cache key), and let the DICOM conformance gate re-validate against it."
+            echo "**To refresh:** download the desired snapshot from $MACEXE/, upload it (+ \`dicom3tools-COPYRIGHT.txt\`) as a new \`WSILabs/dicom3tools-mirror\` release (\`v2\`, …), bump the pin in \`.github/workflows/ci.yml\` (Download dciodvfy step + cache key), and let the DICOM conformance gate re-validate against it."
           } > body.md
 
           # Dedup: one open issue at a time (stable title).
