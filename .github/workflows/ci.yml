@@ -88,6 +88,35 @@ jobs:
           WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
         run: go test -tags integration ./tests/integration/... -count=1 -timeout 30m
 
+      # DICOM conformance gate: convert fixtures (JPEG / JPEG 2000 / HTJ2K +
+      # the A4b LZW→JPEG re-encode) to WSM and validate every emitted instance
+      # with David Clunie's dciodvfy (dicom3tools). dciodvfy exits non-zero only
+      # on errors (benign warnings are exit 0), so `make dicom-validate` fails
+      # the build iff an instance is non-conformant. The macexe is a pinned
+      # snapshot (universal binary; runs natively on the arm64 runner).
+      - name: Cache dciodvfy (dicom3tools)
+        id: dciodvfy-cache
+        uses: actions/cache@v4
+        with:
+          path: dicom3tools
+          key: dicom3tools-macexe-20260320044638
+
+      - name: Download dciodvfy
+        if: steps.dciodvfy-cache.outputs.cache-hit != 'true'
+        run: |
+          ZIP=dicom3tools_macexe_1.00.snapshot.20260320044638.zip
+          curl -fsSL -o "$ZIP" "https://www.dclunie.com/dicom3tools/workinprogress/macexe/$ZIP"
+          unzip -q "$ZIP" -d dicom3tools
+          rm "$ZIP"
+
+      - name: DICOM conformance (dciodvfy)
+        env:
+          WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
+        run: |
+          chmod +x dicom3tools/dciodvfy
+          xattr -dr com.apple.quarantine dicom3tools 2>/dev/null || true
+          make dicom-validate DCIODVFY="$PWD/dicom3tools/dciodvfy"
+
   build-windows:
     name: build (Windows)
     runs-on: windows-latest
