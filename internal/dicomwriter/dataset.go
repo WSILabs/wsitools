@@ -43,6 +43,7 @@ const (
 	jp2kTS          = "1.2.840.10008.1.2.4.91"         // JPEG 2000 Image Compression
 	htj2kLosslessTS = "1.2.840.10008.1.2.4.201"        // High-Throughput JPEG 2000 (Lossless Only)
 	htj2kTS         = "1.2.840.10008.1.2.4.203"        // High-Throughput JPEG 2000 Image Compression
+	jpegxlTS        = "1.2.840.10008.1.2.4.112"        // JPEG XL (general; valid lossy or lossless)
 )
 
 // UIDSet holds the generated UIDs for one instance. The caller populates these
