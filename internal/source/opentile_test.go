@@ -170,11 +170,10 @@ func TestOpenWithSlide_ReturnsBothHandles(t *testing.T) {
 // that TileInto fills a buffer with the same bytes the underlying
 // opentile.Level returns.
 func TestLevel_TileInto_RoundTrip(t *testing.T) {
-	testDir := os.Getenv("WSI_TOOLS_TESTDIR")
-	if testDir == "" {
-		t.Skip("WSI_TOOLS_TESTDIR not set")
-	}
-	path := filepath.Join(testDir, "svs", "CMU-1-Small-Region.svs")
+	// Use the shared testdir(t) helper (stat + skip) rather than a bespoke
+	// getenv: it skips gracefully when the fixture dir is unset OR points
+	// somewhere inaccessible, instead of failing at Open.
+	path := filepath.Join(testdir(t), "svs", "CMU-1-Small-Region.svs")
 	src, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
