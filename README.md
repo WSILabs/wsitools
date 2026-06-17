@@ -92,8 +92,9 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   copied verbatim; no decode, no re-encode. See
   `docs/superpowers/specs/2026-05-20-cog-wsi-format.md` for the format spec.
 - `wsitools convert --to {svs, tiff, ome-tiff}` — tile-copy re-container
-  (no `--codec` set) or re-encode (`--codec {jpeg, jpegxl, avif, webp,
-  htj2k}`). Streaming pipeline; no L0 raster materialisation.
+  (no `--codec` set) or re-encode (`--codec {jpeg, jpeg2000, jpegxl, avif,
+  webp, htj2k}`; JPEG 2000 lossless via `--quality reversible=true`).
+  Streaming pipeline; no L0 raster materialisation.
 - `wsitools convert --to dzi` — DeepZoom pyramid output, OpenSeadragon-
   compatible (256×256 tiles, 1 px overlap, JPEG Q=85 by default). Single-
   pass pyramid-descent generator with parallel libjpeg-turbo encoders;
@@ -128,8 +129,9 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   pyramid, and `downsample <dicom>` / `crop <dicom>` (re-encode, plus
   `crop --lossless` verbatim-L0 frame-copy) emit a reduced/cropped DICOM
   directly (a `<dir>/level-<n>.dcm` pyramid; see `crop` / `downsample` below).
-  Re-encoded levels are **JPEG-baseline** (no JP2K/HTJ2K encoder yet); the tile
-  encode runs on a `--jobs` worker pool.
+  Re-encoded levels are **JPEG-baseline** — the DICOM derived-pyramid path does
+  not yet wire up the JPEG 2000 / HTJ2K encoders (which exist for the TIFF
+  family, see `--codec` above); the tile encode runs on a `--jobs` worker pool.
 - `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
   40x → 20x), **format-preserving**: the output is the same container as the
   source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,

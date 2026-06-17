@@ -32,7 +32,9 @@ editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
   synthesized `source.Source` over a reduced/cropped pyramid (rasterLevel
   re-encodes tiles via a worker pool; passthroughLevel copies verbatim L0 frames
   for lossless crop) fed to `WritePyramid`. Re-encoded levels are JPEG-baseline
-  (no JP2K/HTJ2K encoder). `crop`/`downsample`/`convert --factor` for the TIFF
+  (the derivedsource path does not yet wire up the JPEG 2000 / HTJ2K encoders —
+  those exist in `internal/codec` and are reachable from the TIFF-family
+  `convert --codec`). `crop`/`downsample`/`convert --factor` for the TIFF
   family live in `cmd/wsitools` (crop.go/crop_formats.go, downsample.go,
   convert_factor.go).
 - Tile-ordering strategies (row-major / hilbert / morton) =
