@@ -6,6 +6,14 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
+- **`wsitools validate <file>`** — new read-side command that checks a slide's
+  structural conformance using opentile-go v0.45.1's `Validate` API
+  (`ValidateFile` → `Report` of findings with severities and check codes).
+  Human or `--json` output; three-way exit code (`0` valid / `2` invalid / `1`
+  operational error); `--strict` promotes warnings to failures. Calls
+  `ValidateFile` directly (not `internal/source`), so a malformed file is
+  reported as an `unopenable` finding rather than erroring out.
+
 - **JPEG 2000 is now a `--codec` re-encode target** (survey B1) — new
   `internal/codec/jp2k` OpenJPEG-backed encoder (raw J2K codestream). Use
   `convert --to {tiff,cog-wsi,...} --codec jpeg2000`; lossless via the knob

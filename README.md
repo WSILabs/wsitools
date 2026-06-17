@@ -35,6 +35,12 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 - `wsitools hash` — content hash. `--mode file` (default,
   `sha256sum`-equivalent) or `--mode pixel` (L0 RGB tiles in raster order,
   stable across re-encode).
+- `wsitools validate <file>` — check a slide's structural conformance against
+  opentile-go's reader (level geometry, tile-grid math, monotone pyramid,
+  per-format checks). Prints findings (info / warning / error) as text or
+  `--json`. Exit code: `0` valid, `2` invalid (findings crossed the gate), `1`
+  operational error (path missing/unreadable). `--strict` treats warnings as
+  failures.
 - `wsitools extract --type <t> -o <path>` — save an associated image
   (label / macro / thumbnail / overview) as PNG (default) or JPEG. JPEG
   output is byte-pass-through when the source is already JPEG.
