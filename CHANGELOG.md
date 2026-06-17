@@ -76,15 +76,20 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   UIDs land upstream so the fork can be retired. Read-side DICOM (via opentile-go)
   still uses upstream `suyashkumar/dicom` as an indirect dependency.
 
-- **opentile-go v0.41.1 → v0.45.1.** Picks up: `decoder.CodestreamInspector`
+- **opentile-go v0.41.1 → v0.45.2.** Picks up: `decoder.CodestreamInspector`
   (`Inspect(src) → CodestreamInfo{Components, BitDepth, Lossless, ColorEncoding,
   ChromaSubsampling, Boxed}`, opentile-go #41, v0.43.0 — now consumed by the
   DICOM writer); a structural WSI **`Validate` API** (`opentile.ValidateFile`/
-  `Validate`/`(*Slide).Validate` → findings-`Report`, v0.45.0); and the
+  `Validate`/`(*Slide).Validate` → findings-`Report`, v0.45.0); the
   **JPEG 2000 decoder colorspace fix** (opentile-go #53, v0.45.1) — the decoder
   now decides RGB-vs-YCbCr from the codestream (MCT/colorspace) instead of
   force-assuming YCbCr, so wsitools' new JP2K-encoder output round-trips correct
-  colors (Aperio 33003 decoding unchanged).
+  colors (Aperio 33003 decoding unchanged); and the **`Validate` slide-level MPP
+  fix** (opentile-go #55, v0.45.2) — `checkLevelGeometry` now accepts the
+  slide-level `Metadata.MPP` and rolls a genuinely-missing MPP into a single
+  whole-file finding, instead of false-positiving one `missing-metadata` warning
+  per level on ndpi/leica-scn/dicom/generic-tiff/ife/szi (which carry MPP at the
+  slide level, not per `Level`). Found via a `wsitools validate` corpus sweep.
 
 - **opentile-go v0.41.0 → v0.41.1** (no API change) — picks up two decode fixes
   for **Aperio ImageScope exports** (which re-encode the pyramid + associated
