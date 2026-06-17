@@ -70,7 +70,7 @@ func init() {
 		"Tile emission order within each level (row-major|hilbert|morton). "+
 			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
 			"accept all three.")
-	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpegxl|avif|webp|htj2k); absent = tile-copy when eligible")
+	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpeg2000|jpegxl|avif|webp|htj2k); absent = tile-copy when eligible")
 	convertCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs accepted)")
 	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
 	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi (1 = no scaling; one of {2,4,8,16})")

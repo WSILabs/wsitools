@@ -6,12 +6,10 @@ require (
 	github.com/hhrutter/lzw v1.0.0
 	github.com/spf13/cobra v1.10.2
 	github.com/vbauerster/mpb/v8 v8.12.0
-	github.com/wsilabs/opentile-go v0.43.0
+	github.com/wsilabs/opentile-go v0.45.1
 	golang.org/x/image v0.39.0
 	golang.org/x/sys v0.41.0
 )
-
-require github.com/suyashkumar/dicom v1.1.0 // indirect
 
 require (
 	github.com/VividCortex/ewma v1.2.0 // indirect

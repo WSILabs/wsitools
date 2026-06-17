@@ -6,6 +6,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
+- **JPEG 2000 is now a `--codec` re-encode target** (survey B1) — new
+  `internal/codec/jp2k` OpenJPEG-backed encoder (raw J2K codestream). Use
+  `convert --to {tiff,cog-wsi,...} --codec jpeg2000`; lossless via the knob
+  `--quality reversible=true` (the `--quality` flag now accepts comma-separated
+  `k=v` knobs, e.g. `q=85,reversible=true`, in addition to a bare integer). The
+  lossless path round-trips **pixel-identical** (verified end-to-end after the
+  opentile-go v0.45.1 JP2K-decoder fix below). wsitools now has encoders for
+  jpeg / jpeg2000 / htj2k / jpegxl / avif / webp.
+
 - **`convert --to dicom --codec jpeg`** (survey A4b) — explicit opt-in to
   **re-encode** a source whose tiles are not a DICOM transfer syntax (LZW /
   uncompressed / Deflate / AVIF / WebP) to JPEG-baseline, mirroring the TIFF
@@ -59,11 +68,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   UIDs land upstream so the fork can be retired. Read-side DICOM (via opentile-go)
   still uses upstream `suyashkumar/dicom` as an indirect dependency.
 
-- **opentile-go v0.41.1 → v0.43.0** — adds `decoder.CodestreamInspector`
+- **opentile-go v0.41.1 → v0.45.1.** Picks up: `decoder.CodestreamInspector`
   (`Inspect(src) → CodestreamInfo{Components, BitDepth, Lossless, ColorEncoding,
-  ChromaSubsampling, Boxed}`), the header-only codec-domain probe requested in
-  opentile-go #41 (implemented by jpeg / jpeg2000 / htj2k / jpegxl; v0.43.0 added
-  `ChromaSubsampling`). Now consumed by the DICOM writer (see above).
+  ChromaSubsampling, Boxed}`, opentile-go #41, v0.43.0 — now consumed by the
+  DICOM writer); a structural WSI **`Validate` API** (`opentile.ValidateFile`/
+  `Validate`/`(*Slide).Validate` → findings-`Report`, v0.45.0); and the
+  **JPEG 2000 decoder colorspace fix** (opentile-go #53, v0.45.1) — the decoder
+  now decides RGB-vs-YCbCr from the codestream (MCT/colorspace) instead of
+  force-assuming YCbCr, so wsitools' new JP2K-encoder output round-trips correct
+  colors (Aperio 33003 decoding unchanged).
 
 - **opentile-go v0.41.0 → v0.41.1** (no API change) — picks up two decode fixes
   for **Aperio ImageScope exports** (which re-encode the pyramid + associated
