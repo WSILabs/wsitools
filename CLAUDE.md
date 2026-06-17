@@ -2,7 +2,7 @@
 
 Go-based utilities for whole-slide imaging (WSI) files used in digital
 pathology. CLI bundles read-side inspection (`info`, `dump-ifds`, `extract`,
-`hash`, `region`), write-side conversion (`convert --to {cog-wsi, dzi,
+`hash`, `region`, `validate`), write-side conversion (`convert --to {cog-wsi, dzi,
 szi, svs, tiff, ome-tiff, dicom}`, `downsample`, `crop`), associated-image
 editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
 (`doctor`, `version`).

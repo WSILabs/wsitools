@@ -129,6 +129,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "interrupted")
 			os.Exit(130)
 		}
+		if errors.Is(err, errValidationFailed) {
+			os.Exit(2) // report already printed by `validate`; no "error:" line
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
