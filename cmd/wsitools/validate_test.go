@@ -263,6 +263,11 @@ func TestValidateMissingPathExitsOne(t *testing.T) {
 	if !strings.Contains(string(out), "error:") {
 		t.Errorf("expected 'error:' on stderr for a missing path:\n%s", out)
 	}
+	// The error must be reported exactly once: main.go prints it, cobra is
+	// silenced (no duplicate capital-E "Error:" line).
+	if n := strings.Count(string(out), "no such file"); n != 1 {
+		t.Errorf("expected the operational error reported once, saw %d times:\n%s", n, out)
+	}
 }
 
 func TestValidateGarbageFileExitsTwo(t *testing.T) {
@@ -277,5 +282,10 @@ func TestValidateGarbageFileExitsTwo(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "unopenable") {
 		t.Errorf("expected an 'unopenable' finding:\n%s", out)
+	}
+	// The report is the output: the errValidationFailed sentinel must not leak
+	// as a cobra "Error: validation failed" line.
+	if strings.Contains(string(out), "validation failed") {
+		t.Errorf("exit-2 output leaked the sentinel error text:\n%s", out)
 	}
 }
