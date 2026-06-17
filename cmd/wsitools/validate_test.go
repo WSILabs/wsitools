@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -143,5 +144,56 @@ func TestBuildValidateResultCleanIsEmptyArray(t *testing.T) {
 	_ = json.Unmarshal(b, &round)
 	if _, ok := round["findings"].([]any); !ok {
 		t.Errorf("findings did not marshal as a JSON array: %s", b)
+	}
+}
+
+func TestRenderValidateTextClean(t *testing.T) {
+	res := buildValidateResult("good.svs", &opentile.Report{Format: opentile.Format("svs")})
+	var b bytes.Buffer
+	if err := renderValidateText(&b, &res, false); err != nil {
+		t.Fatal(err)
+	}
+	want := "good.svs · svs · valid\n"
+	if b.String() != want {
+		t.Errorf("got %q, want %q", b.String(), want)
+	}
+}
+
+func TestRenderValidateTextFindings(t *testing.T) {
+	report := &opentile.Report{
+		Format: opentile.Format("svs"),
+		Findings: []opentile.Finding{
+			{Severity: opentile.Error, Code: "tile-grid-mismatch", Message: "grid 4x4 != 5x4", Pyramid: 0, Level: 3, Count: 200},
+			{Severity: opentile.Warning, Code: "missing-metadata", Message: "no mpp", Pyramid: -1, Level: -1, Count: 1},
+		},
+	}
+	res := buildValidateResult("bad.svs", report)
+	var b bytes.Buffer
+	if err := renderValidateText(&b, &res, true); err != nil {
+		t.Fatal(err)
+	}
+	want := "bad.svs · svs · INVALID (2 findings)\n" +
+		"  [error] tile-grid-mismatch  P0/L3 ×200  grid 4x4 != 5x4\n" +
+		"  [warning] missing-metadata  no mpp\n"
+	if b.String() != want {
+		t.Errorf("got:\n%q\nwant:\n%q", b.String(), want)
+	}
+}
+
+func TestRenderValidateTextWarningPassedGate(t *testing.T) {
+	report := &opentile.Report{
+		Format: opentile.Format("svs"),
+		Findings: []opentile.Finding{
+			{Severity: opentile.Warning, Code: "missing-metadata", Message: "no mpp", Pyramid: 0, Level: 0, Count: 1},
+		},
+	}
+	res := buildValidateResult("warn.svs", report)
+	var b bytes.Buffer
+	// failed=false: warnings present but gate not crossed (lenient mode).
+	if err := renderValidateText(&b, &res, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.String(); got[:len("warn.svs · svs · OK (1 findings)")] != "warn.svs · svs · OK (1 findings)" {
+		t.Errorf("header verb wrong, got %q", got)
 	}
 }
