@@ -3,6 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	opentile "github.com/wsilabs/opentile-go"
@@ -195,5 +200,82 @@ func TestRenderValidateTextWarningPassedGate(t *testing.T) {
 	}
 	if got := b.String(); got[:len("warn.svs · svs · OK (1 findings)")] != "warn.svs · svs · OK (1 findings)" {
 		t.Errorf("header verb wrong, got %q", got)
+	}
+}
+
+// exitCode extracts the process exit code from a runBin error: 0 for nil, the
+// real code for an *exec.ExitError, and -1 for any other (non-exit) error.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
+func TestValidateGoodSlideExitsZero(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out, err := runBin(bin, "validate", src)
+	if code := exitCode(err); code != 0 {
+		t.Fatalf("exit = %d, want 0\n%s", code, out)
+	}
+	if !strings.Contains(string(out), "valid") {
+		t.Errorf("output missing 'valid':\n%s", out)
+	}
+}
+
+func TestValidateGoodSlideJSON(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out, err := runBin(bin, "validate", "--json", src)
+	if code := exitCode(err); code != 0 {
+		t.Fatalf("exit = %d, want 0\n%s", code, out)
+	}
+	var res struct {
+		OK       bool   `json:"ok"`
+		Format   string `json:"format"`
+		Findings []any  `json:"findings"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if !res.OK {
+		t.Errorf("expected ok=true for a good slide, got:\n%s", out)
+	}
+}
+
+func TestValidateMissingPathExitsOne(t *testing.T) {
+	bin := stripedBinary(t)
+	out, err := runBin(bin, "validate", filepath.Join(t.TempDir(), "does-not-exist.svs"))
+	if code := exitCode(err); code != 1 {
+		t.Fatalf("exit = %d, want 1 (operational error)\n%s", code, out)
+	}
+	if !strings.Contains(string(out), "error:") {
+		t.Errorf("expected 'error:' on stderr for a missing path:\n%s", out)
+	}
+}
+
+func TestValidateGarbageFileExitsTwo(t *testing.T) {
+	bin := stripedBinary(t)
+	junk := filepath.Join(t.TempDir(), "garbage.svs")
+	if err := os.WriteFile(junk, []byte("not a tiff at all, just bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runBin(bin, "validate", junk)
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit = %d, want 2 (invalid file)\n%s", code, out)
+	}
+	if !strings.Contains(string(out), "unopenable") {
+		t.Errorf("expected an 'unopenable' finding:\n%s", out)
 	}
 }
