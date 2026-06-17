@@ -36,19 +36,9 @@ func TestConvertFactorSVSParity(t *testing.T) {
 	}
 }
 
-// --factor with dzi/szi is rejected.
-func TestConvertFactorRejectsDZI(t *testing.T) {
-	bin := stripedBinary(t)
-	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
-	if _, err := os.Stat(src); err != nil {
-		t.Skipf("fixture absent: %v", err)
-	}
-	out := filepath.Join(t.TempDir(), "o.dzi")
-	o, err := runBin(bin, "convert", "--to", "dzi", "--factor", "2", "-f", "-o", out, src)
-	if err == nil || !strings.Contains(string(o), "factor") {
-		t.Fatalf("expected --factor/dzi rejection, got err=%v\n%s", err, o)
-	}
-}
+// NOTE: dzi/szi --factor is no longer rejected — it downsamples during
+// conversion (survey A3); see TestConvertDZIFactorHalvesDims et al. The former
+// TestConvertFactorRejectsDZI (which asserted the removed rejection) was deleted.
 
 // tiff + cog-wsi targets must produce scaled metadata (factor-4 of a 20x → 5x).
 func TestConvertFactorTIFFTargets(t *testing.T) {

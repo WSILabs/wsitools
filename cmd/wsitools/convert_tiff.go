@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -217,16 +218,13 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 		}
 	}
 
-	// Parse quality: default 85 when absent.
-	qualityInt := 85
-	if quality != "" {
-		if _, err := fmt.Sscanf(quality, "%d", &qualityInt); err != nil {
-			return fmt.Errorf("--quality %q: must be an integer 1..100", quality)
-		}
+	// --quality is a bare integer (the q knob) or comma-separated k=v knobs
+	// (e.g. "q=85,reversible=true"). Codec-specific knobs pass through.
+	knobs, err := parseQualityKnobs(quality)
+	if err != nil {
+		return err
 	}
-	if qualityInt < 1 || qualityInt > 100 {
-		return fmt.Errorf("--quality must be 1..100")
-	}
+	qualityInt, _ := strconv.Atoi(knobs["q"]) // validated 1..100 by parseQualityKnobs
 
 	// Workers: 0 means GOMAXPROCS.
 	if workers == 0 {
@@ -255,8 +253,6 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	if err != nil {
 		return fmt.Errorf("--tile-order: %w", err)
 	}
-
-	knobs := map[string]string{"q": fmt.Sprintf("%d", qualityInt)}
 
 	md := src.Metadata()
 
@@ -395,6 +391,35 @@ func resolveBigTIFFMode(mode string, src source.Source) tiff.BigTIFFMode {
 		return tiff.BigTIFFOn
 	}
 	return tiff.BigTIFFOff
+}
+
+// parseQualityKnobs parses the --quality value into codec knobs. It accepts a
+// bare integer (the "q" knob) or comma-separated key=value pairs (e.g.
+// "q=85,reversible=true" for jpeg2000 lossless). The "q" knob defaults to 85 and
+// is range-checked 1..100; codec-specific knobs pass through to the encoder.
+func parseQualityKnobs(quality string) (map[string]string, error) {
+	knobs := map[string]string{"q": "85"}
+	if quality != "" {
+		if strings.Contains(quality, "=") {
+			for _, kv := range strings.Split(quality, ",") {
+				k, v, ok := strings.Cut(kv, "=")
+				k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+				if !ok || k == "" {
+					return nil, fmt.Errorf("--quality knob %q: want key=value", kv)
+				}
+				knobs[k] = v
+			}
+		} else {
+			if _, err := strconv.Atoi(strings.TrimSpace(quality)); err != nil {
+				return nil, fmt.Errorf("--quality %q: must be an integer 1..100 or comma-separated k=v knobs", quality)
+			}
+			knobs["q"] = strings.TrimSpace(quality)
+		}
+	}
+	if n, err := strconv.Atoi(knobs["q"]); err != nil || n < 1 || n > 100 {
+		return nil, fmt.Errorf("--quality q must be an integer 1..100, got %q", knobs["q"])
+	}
+	return knobs, nil
 }
 
 func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {

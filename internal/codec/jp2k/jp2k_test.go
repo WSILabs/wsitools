@@ -59,14 +59,9 @@ func TestLosslessRoundTripByteExact(t *testing.T) {
 		t.Fatalf("output is not a J2K codestream (missing SOC FF4F): % x", j2k[:min(8, len(j2k))])
 	}
 
-	// The encoder is byte-exact (verified out-of-band with OpenJPEG's own
-	// opj_decompress: RGB(200,50,100) → byte-identical). The byte-exact
-	// round-trip assertion *through opentile-go* is BLOCKED on opentile-go#53:
-	// its JPEG 2000 decoder force-assumes 3-component raw codestreams are YCbCr
-	// and applies a spurious YCbCr→RGB conversion to our RGB output. Re-enable
-	// the pixel comparison below (drop the Skip) once #53 lands.
-	t.Skip("opentile-go#53: JP2K decoder mis-converts RGB-as-YCbCr; byte-exact round-trip via opentile blocked (encoder verified correct via opj_decompress)")
-
+	// opentile-go#53 (fixed in v0.45.1): the JPEG 2000 decoder now honors the
+	// codestream MCT/colorspace, so our RGB+MCT output round-trips byte-exact
+	// instead of being force-converted as YCbCr.
 	fac, ok := otdecoder.Get("jpeg2000")
 	if !ok {
 		t.Skip("jpeg2000 decoder not registered")
