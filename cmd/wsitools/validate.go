@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/spf13/cobra"
+
+	"github.com/wsilabs/wsitools/internal/cliout"
+
 	opentile "github.com/wsilabs/opentile-go"
 )
 
@@ -132,6 +136,61 @@ func renderValidateText(w io.Writer, r *validateResult, failed bool) error {
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+var (
+	validateJSON   *bool
+	validateStrict bool
+)
+
+var validateCmd = &cobra.Command{
+	Use:   "validate <file>",
+	Short: "Check a slide's structural conformance (opentile-go reader)",
+	Long: `Validate the structure of a whole-slide image against opentile-go's
+reader: pyramid level geometry, tile-grid math, monotone downsampling, and
+per-format structural checks. Reports findings (info / warning / error) in
+human-readable text or, with --json, machine-readable JSON.
+
+Exit codes:
+  0  valid       no error findings (and, with --strict, no warnings)
+  2  invalid     findings crossed the failure threshold (file is malformed)
+  1  error       could not attempt validation (path missing / unreadable)`,
+	Args: cobra.ExactArgs(1),
+	RunE: runValidate,
+}
+
+func init() {
+	validateJSON = cliout.RegisterJSONFlag(validateCmd)
+	validateCmd.Flags().BoolVar(&validateStrict, "strict", false,
+		"treat warning findings as failures (affects exit code only)")
+	rootCmd.AddCommand(validateCmd)
+}
+
+func runValidate(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+	path := args[0]
+
+	// ValidateFile bypasses internal/source on purpose: an open/parse failure
+	// becomes a CheckUnopenable finding in the report, not a hard error. Only a
+	// genuinely missing/unreadable path returns an operational error here.
+	report, err := opentile.ValidateFile(path)
+	if err != nil {
+		return err
+	}
+
+	failed := reportFails(report, validateStrict)
+	result := buildValidateResult(path, report)
+
+	if rErr := cliout.Render(*validateJSON, cmd.OutOrStdout(),
+		func(w io.Writer) error { return renderValidateText(w, &result, failed) },
+		result); rErr != nil {
+		return rErr
+	}
+
+	if failed {
+		return errValidationFailed
 	}
 	return nil
 }
