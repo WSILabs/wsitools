@@ -7,17 +7,18 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 ### Added
 
 - **`convert --to bif`** (experimental) — write a Ventana/Roche **DP 200-shaped
-  BIF** from any JPEG-tiled source (`internal/tiff/bifwriter` +
-  `cmd/wsitools/convert_bif.go`). Full pyramid as row-major `level=N` IFDs
-  (verbatim JPEG tile-copy, no re-encode), generated whole-slide overview, and
-  synthesized `<iScan>`/`<EncodeInfo>` metadata (scanner model, MPP,
-  magnification). **Renders correctly in bio-formats / QuPath.** Key finding:
-  real DP 200 stores tiles **row-major** (per the file's own `<Frame>` nodes),
-  not serpentine — the whitepaper's "serpentine" is the `TileJointInfo`
-  stitch-graph numbering only; opentile-go's reader conflates the two
-  (filed opentile-go#57/#58/#59), so opentile mis-renders this output until
-  fixed. Limitations: JPEG sources only (non-JPEG rejected); single-AOI, no Z;
-  no source associated images / probability map; no `--factor`/`--target-mag`.
+  BIF** from any source (`internal/tiff/bifwriter` + `cmd/wsitools/convert_bif.go`).
+  Full pyramid as row-major `level=N` IFDs (verbatim JPEG **tile-copy** for JPEG
+  sources; **`--codec jpeg`** decodes+re-encodes non-JPEG sources to self-contained
+  JPEG tiles), generated whole-slide overview, and synthesized `<iScan>`/
+  `<EncodeInfo>` metadata (scanner model, MPP, magnification). **Renders
+  correctly in bio-formats / QuPath.** Key finding: real DP 200 stores tiles
+  **row-major** (per the file's own `<Frame>` nodes), not serpentine — the
+  whitepaper's "serpentine" is the `TileJointInfo` stitch-graph numbering only;
+  opentile-go's reader conflates the two (filed opentile-go#57/#58/#59), so
+  opentile mis-renders this output until fixed. Limitations: re-encode is serial
+  (slow for large non-JPEG slides); single-AOI, no Z; no source associated
+  images / probability map; no `--factor`/`--target-mag`.
 - **`wsitools validate <file>`** — new read-side command that checks a slide's
   structural conformance using opentile-go v0.45.1's `Validate` API
   (`ValidateFile` → `Report` of findings with severities and check codes).
