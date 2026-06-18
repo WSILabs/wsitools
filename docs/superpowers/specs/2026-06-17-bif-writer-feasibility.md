@@ -287,84 +287,74 @@ generator and serpentine ordering are the genuinely novel parts (and land in
 Phase 2); Phase 1 is mostly offset-patching + byte-splice, close to the existing
 SVS `label remove`.
 
-## 6a. Phase 0 results (2026-06-17) — what the openslide test actually found
+## 6a. Phase 0 results (2026-06-17) — in-house reader testing & the tile-order truth
 
-Phase 0 shipped (merged to main: `internal/tiff/bifwriter`, opentile round-trip
-pixel-identical). The owner's openslide check was then run **in-house** (openslide
-4.0.0, brew) directly on the spec-shaped artifact, with concrete, decision-shaping
-results:
+Phase 0 shipped (merged to main). Three real readers were then tested in-house
+(openslide 4.0.0 + bio-formats `bftools` + opentile), which uncovered the central
+correctness fact and overturned the writer's original assumption.
 
-1. **openslide requires `<TileJointInfo>` and only accepts `Direction="RIGHT"` /
-   `"UP"`** — and that requirement is a TRAP. Its Ventana driver errors
-   `"Couldn't find tile joint info"` without joints, and `get_tile_coordinates`
-   rejects any direction but RIGHT/UP. An intermediate writer emitted RIGHT/UP
-   *to satisfy openslide* — openslide then accepted it (`vendor: ventana`, all
-   metadata) — but this was a **mistake**: real Roche DP 200 uses `LEFT`/`UP`
-   (verified in `Ventana-1.bif`: 462 LEFT + 460 UP joins), and the RIGHT hack
-   **broke bio-formats** (the correct oracle). The writer now emits the
-   **real-Roche `LEFT`/`UP`** directions (commit `1e952fe`); openslide
-   consequently rejects them, which is the right trade — openslide can't render
-   serpentine DP 200 at all (see #2), so it is a metadata-only oracle and we do
-   not distort the stitch graph for it.
+**THE DECISIVE FINDING: real Roche DP 200 stores tiles ROW-MAJOR, not serpentine.**
+The whitepaper (Fig 2) describes a "serpentine" tile path, and opentile-go's BIF
+reader hardcodes a serpentine remap accordingly — so the first writer stored
+serpentine. That was **wrong**. Proof, three independent ways on the real
+`Ventana-1.bif`:
+- **Its own metadata says row-major.** The `<EncodeInfo>/<FrameInfo>/<Frame
+  XY="col,row">` nodes declare the storage order (whitepaper p.14: "the order of
+  the Frame-nodes … reflects the order in which the image tiles are stored in
+  TILE_OFFSETS"). Real `Frame[k]` = `(k%cols, k/cols)` exactly — plain row-major
+  (483 nodes = 23×21, in order).
+- **Decoding the real tiles confirms it.** Re-compositing a real level's tiles
+  row-major yields coherent tissue; serpentine yields a scramble.
+- **bio-formats and openslide both read row-major** (they assume `TILE_OFFSETS[k]`
+  is at image `(k%cols, k/cols)` top-left) and render the real file correctly.
 
-2. **opentile and openslide use OPPOSITE tile byte-orders — verified empirically.**
-   openslide reads tile pixel data **row-major** (libtiff-native `row*cols+col`),
-   while opentile (and the whitepaper, Fig 2) use **serpentine**. Proof: our
-   spec-correct *serpentine* file renders **scrambled** in openslide, but a
-   throwaway *row-major* variant renders **spatially coherent** in openslide
-   (tissue silhouette matches the source) — and conversely the row-major variant
-   breaks the opentile round-trip. **One byte-order cannot satisfy both readers.**
-   Since the whitepaper mandates serpentine and openslide already can't read real
-   DP 200, **serpentine is authoritative and openslide's row-major DP 200 read is
-   an openslide limitation, not our bug.**
+So the "serpentine" is at most the physical scan/stage path, NOT the storage
+order. The writer now **stores row-major** (commit `e7f263f`); `<Frame>` nodes
+and tile numbering follow.
 
-3. **bio-formats (QuPath/ImageJ ecosystem) IS a serpentine reader — the right
-   oracle.** Its `VentanaReader` reads the *real* `Ventana-1.bif` correctly (10
-   series, full dims), confirming bio-formats uses the **serpentine** convention
-   (agrees with opentile + whitepaper, unlike openslide). On *our* output it
-   surfaced two fixable gaps, each now understood:
-   - **tag 700 must be TIFF type BYTE (1) + trailing NUL**, as real Roche writes
-     it. Our type-7/UNDEFINED tag 700 made bio-formats throw "Content is not
-     allowed in prolog". Fixed (commit `0d04175`); opentile/openslide read either.
-   - **a geometry underflow caused by the RIGHT-direction hack — now fixed.**
-     `VentanaReader` reconstructs positions from the joins; with the wrong
-     `RIGHT` directions its per-column Y-adjust map stayed empty and `maxYAdjust`
-     underflowed (`-2147480768`). Switching to real-Roche `LEFT`/`UP` (commit
-     `1e952fe`) **resolved the crash**: bio-formats now reads our BIF (2 series)
-     and **renders it with correct colors and recognizable tissue**.
-   - **residual (open): a per-column Y-adjust artifact.** bio-formats reports the
-     pyramid height one tile-row short (2880 vs 3120) and the render shows a
-     checkerboard/row-offset. The gross placement + color are right (serpentine
-     confirmed), but bio-formats' overlap-weighted `realY += columnYAdjust[col]`
-     isn't perfectly reproduced by our synthetic OverlapX/Y=0 graph. Likely needs
-     matching real Roche's non-zero `Pos-X`/`Pos-Y` AOI stage coords and/or the
-     exact overlap structure. **Phase-1 stitch-graph fidelity — a refinement, not
-     a convention conflict.**
+**Reader matrix on the corrected (row-major) output:**
+- **bio-formats / QuPath: renders CORRECTLY** — coherent tissue matching the
+  source, correct orientation/colors, full dims. This is the real-world
+  acceptance target and it passes. (Required two other real-Roche-fidelity fixes
+  to get there: tag 700 as TIFF type **BYTE+NUL** not UNDEFINED — commit
+  `0d04175`, else "Content is not allowed in prolog"; and `<TileJointInfo>`
+  directions **`LEFT`/`UP`** as real Roche emits — commit `1e952fe`, else a
+  `maxYAdjust` integer underflow. Also pad `ImageWidth/Length` to whole tiles, as
+  real Roche does, so bio-formats' integer `sizeX/tileWidth` grid math keeps the
+  last row/col.)
+- **openslide: rejects** (`"Bad direction attribute LEFT"`). Its Ventana driver
+  only accepts `RIGHT`/`UP` — which is why it *also* rejects genuine Roche DP 200
+  files. We correctly match real Roche (`LEFT`/`UP`); openslide is simply broken
+  for DP 200 and is a metadata-only tool here. (An intermediate `RIGHT`/`UP` hack
+  pleased openslide but broke bio-formats — a dead end, now reverted.)
+- **opentile-go: reads metadata, SCRAMBLES pixels.** Its hardcoded serpentine
+  remap mis-places the row-major tiles on any multi-tile level. **This is an
+  opentile-go bug** (it only ever looked right on single-tile levels and on our
+  earlier serpentine output, which matched the bug). The earlier "pixel-identical
+  opentile round-trip" was our writer matching opentile's bug, not correctness.
+  Read-side → **file an opentile-go issue** (boundary rule: we file, owner fixes
+  upstream): its BIF reader should honor the `<Frame>` nodes, or default to
+  row-major, not assume serpentine.
 
 **Consequences for the plan:**
-- **bio-formats is the practical real-world placement oracle** (serpentine,
-  reads real Roche, drives QuPath/ImageJ). Getting it to render our output fully
-  is the Phase-1 acceptance bar — and it's a completeness problem (stitch-graph
-  fidelity), not a convention conflict. The XML-framing half is already fixed.
-- **openslide is a structural/metadata oracle only, NOT a placement oracle** for
-  spec-compliant DP 200. Don't contort the writer to openslide's row-major
-  placement at the cost of spec/opentile correctness.
-- **Roche viewer is the real tiebreaker** and the one remaining unknown: does it
-  agree with the whitepaper/opentile serpentine (expected) — render the
-  serpentine artifact correctly? That single owner test, on
-  `/tmp/wsitools-spike.bif`, confirms the convention before Phase 1+ synthesis.
-- A separate, lower-priority finding: even the row-major variant rendered with
-  **off colors** (greenish) in openslide — a color-space issue from feeding
-  verbatim Aperio-SVS JPEG tiles (APP14/RGB) into a YCbCr-declared BIF. Cosmetic
-  for the spatial question; a Phase-1+ concern for real origination.
+- **bio-formats/QuPath is the real-world placement oracle and it passes** on the
+  row-major output. The convention question is fully resolved (row-major, proven
+  from the file's own metadata) — no Roche viewer needed (Roche ships no free
+  viewer anyway; uPath is enterprise-only).
+- **opentile-go must be fixed** to read row-major/Frame-honoring before it can
+  read real Roche DP 200 *or* our output correctly. Tracked as the next upstream
+  issue.
+- Lower-priority colour note: re-encoded/verbatim Aperio-SVS JPEG tiles (APP14/
+  RGB) in a YCbCr-declared BIF can render with off colours in some readers — a
+  Phase-1+ color-space concern for true origination, not a placement issue.
 
 ## 7. Risks & open questions
 
-- **Oracle / dialect question — now substantially resolved (see §6a).** The
-  serpentine-vs-row-major split between opentile and openslide is measured, not
-  hypothetical; serpentine (whitepaper) wins, openslide is a metadata-only oracle.
-  The sole remaining unknown is the **Roche viewer** acceptance of the serpentine
-  artifact (owner test). Historical framing retained below.
+- **Tile-order question — RESOLVED (see §6a): real Roche DP 200 is ROW-MAJOR**,
+  proven from `Ventana-1.bif`'s own `<Frame>` nodes + tile decode. The writer
+  stores row-major; bio-formats/QuPath render it correctly. The remaining
+  read-side item is an **opentile-go bug** (hardcoded serpentine remap scrambles
+  real DP 200) — to be filed upstream. Historical framing retained below.
   is no single drop-in BIF validator (no `dciodvfy` equivalent), but §5's
   multi-oracle approach covers it: opentile round-trip + openslide + Roche viewer
   + QuPath + Appendix-A self-check. The remaining sharp question is **which BIF
