@@ -295,14 +295,17 @@ pixel-identical). The owner's openslide check was then run **in-house** (opensli
 results:
 
 1. **openslide requires `<TileJointInfo>` and only accepts `Direction="RIGHT"` /
-   `"UP"`.** Its Ventana driver errors `"Couldn't find tile joint info"` without
-   them, and its `get_tile_coordinates` rejects any direction other than RIGHT/UP
-   (the exact reason it rejects *real* Roche DP 200 files, which use `LEFT`). The
-   writer now emits RIGHT/UP joints (commit on `feat/bif-openslide-dialect`), and
-   **openslide then fully accepts the file**: `openslide.vendor: ventana`, all
-   `ventana.*` iScan properties, MPP 0.25, objective-power 40, the overview as a
-   macro image. So we *can* produce a DP 200 BIF openslide ingests — a thing
-   openslide can't do with genuine Roche output.
+   `"UP"`** — and that requirement is a TRAP. Its Ventana driver errors
+   `"Couldn't find tile joint info"` without joints, and `get_tile_coordinates`
+   rejects any direction but RIGHT/UP. An intermediate writer emitted RIGHT/UP
+   *to satisfy openslide* — openslide then accepted it (`vendor: ventana`, all
+   metadata) — but this was a **mistake**: real Roche DP 200 uses `LEFT`/`UP`
+   (verified in `Ventana-1.bif`: 462 LEFT + 460 UP joins), and the RIGHT hack
+   **broke bio-formats** (the correct oracle). The writer now emits the
+   **real-Roche `LEFT`/`UP`** directions (commit `1e952fe`); openslide
+   consequently rejects them, which is the right trade — openslide can't render
+   serpentine DP 200 at all (see #2), so it is a metadata-only oracle and we do
+   not distort the stitch graph for it.
 
 2. **opentile and openslide use OPPOSITE tile byte-orders — verified empirically.**
    openslide reads tile pixel data **row-major** (libtiff-native `row*cols+col`),
@@ -323,15 +326,20 @@ results:
    - **tag 700 must be TIFF type BYTE (1) + trailing NUL**, as real Roche writes
      it. Our type-7/UNDEFINED tag 700 made bio-formats throw "Content is not
      allowed in prolog". Fixed (commit `0d04175`); opentile/openslide read either.
-   - **its geometry parser underflows on a minimal abutting-tile stitch graph.**
-     `VentanaReader` reconstructs tile positions from overlap-weighted joins;
-     `maxYAdjust` stays `Integer.MIN_VALUE` (→ `-2147480768` error) unless the
-     per-column Y-adjustment map is populated by the joins. Our OverlapX/Y=0
-     joins don't populate it the way bio-formats expects. The bind: the
-     whitepaper says DP 200 has **no vertical overlap** and **opentile rejects
-     `OverlapY != 0`**, so we can't just add vertical overlap. bio-formats reads
-     real OverlapY=0 DP 200 files, so the fix is matching its join geometry/Tile1
-     /Tile2 indexing precisely — a Phase-1 refinement, NOT a convention conflict.
+   - **a geometry underflow caused by the RIGHT-direction hack — now fixed.**
+     `VentanaReader` reconstructs positions from the joins; with the wrong
+     `RIGHT` directions its per-column Y-adjust map stayed empty and `maxYAdjust`
+     underflowed (`-2147480768`). Switching to real-Roche `LEFT`/`UP` (commit
+     `1e952fe`) **resolved the crash**: bio-formats now reads our BIF (2 series)
+     and **renders it with correct colors and recognizable tissue**.
+   - **residual (open): a per-column Y-adjust artifact.** bio-formats reports the
+     pyramid height one tile-row short (2880 vs 3120) and the render shows a
+     checkerboard/row-offset. The gross placement + color are right (serpentine
+     confirmed), but bio-formats' overlap-weighted `realY += columnYAdjust[col]`
+     isn't perfectly reproduced by our synthetic OverlapX/Y=0 graph. Likely needs
+     matching real Roche's non-zero `Pos-X`/`Pos-Y` AOI stage coords and/or the
+     exact overlap structure. **Phase-1 stitch-graph fidelity — a refinement, not
+     a convention conflict.**
 
 **Consequences for the plan:**
 - **bio-formats is the practical real-world placement oracle** (serpentine,
