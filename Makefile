@@ -1,20 +1,44 @@
-.PHONY: test vet cover bench install clean goldens-byte-stable bench-dzi dicom-validate
+.PHONY: test vet cover bench install clean goldens-byte-stable bench-dzi dicom-validate check-fixtures
 
 GO ?= go
 BIN = bin/wsitools
+# Sentinel fixture used to detect a mis-pointed WSI_TOOLS_TESTDIR. When the var
+# is set, integration tests gate on fixtures under it; a stale/wrong/empty dir
+# (e.g. a path left over from a repo move) makes them all t.Skip() silently —
+# which reads as a green run but tested nothing. check-fixtures fails loud
+# instead. Point WSI_TOOLS_TESTDIR at your fixtures, or unset it to run unit-only.
+FIXTURE_SENTINEL = svs/CMU-1-Small-Region.svs
 # DICOM conformance validator. dciodvfy ships in David Clunie's dicom3tools
 # (https://www.dclunie.com/dicom3tools.html — precompiled macOS/Windows binaries
 # under workinprogress/, or build from source). Override if it is not on PATH,
 # e.g. `make dicom-validate DCIODVFY=/tmp/dciodvfy`.
 DCIODVFY ?= dciodvfy
 
-test:
+# Fail loud when WSI_TOOLS_TESTDIR is set but doesn't look like a fixtures dir,
+# so fixture-gated tests don't silently skip and masquerade as a pass. Unset is
+# fine (fixture tests skip — the fresh-checkout / unit-only case).
+check-fixtures:
+	@if [ -n "$$WSI_TOOLS_TESTDIR" ]; then \
+		if [ ! -d "$$WSI_TOOLS_TESTDIR" ]; then \
+			echo "ERROR: WSI_TOOLS_TESTDIR=$$WSI_TOOLS_TESTDIR does not exist."; \
+			echo "       Fixture-gated tests would all silently skip. Fix the path or 'unset WSI_TOOLS_TESTDIR'."; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$$WSI_TOOLS_TESTDIR/$(FIXTURE_SENTINEL)" ]; then \
+			echo "ERROR: WSI_TOOLS_TESTDIR=$$WSI_TOOLS_TESTDIR is missing sentinel fixture $(FIXTURE_SENTINEL)."; \
+			echo "       It's set but doesn't look like a fixtures dir; tests would silently skip."; \
+			echo "       Point it at your fixtures (e.g. \"\$$(pwd)/sample_files\") or 'unset WSI_TOOLS_TESTDIR'."; \
+			exit 1; \
+		fi; \
+	fi
+
+test: check-fixtures
 	$(GO) test ./... -race -count=1
 
 vet:
 	$(GO) vet ./...
 
-cover:
+cover: check-fixtures
 	$(GO) test ./... -race -count=1 -coverprofile=coverage.txt -covermode=atomic
 	$(GO) tool cover -func=coverage.txt | tail -1
 
