@@ -1,6 +1,7 @@
 package bifwriter
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -143,3 +144,145 @@ func buildLevelIFD(src TileSource, cols, rows int, offsets, counts []uint64, xmp
 // does not thread real magnification; opentile derives MPP from <iScan>/ScanRes,
 // not from this token, so any positive value round-trips.
 func magFor(src TileSource) float64 { return 40 }
+
+// WriteSpecShaped writes the two-IFD DP 200 shape for owner viewer-testing:
+// IFD 0 = overview (Label_Image, iScan XMP, small uncompressed-RGB strip
+// placeholder); IFD 1 = pyramid level (level=0, verbatim tiles in serpentine
+// order, EncodeInfo XMP). NOTE: the overview is a synthetic gray placeholder in
+// Phase 0 — real overview/probability generation is Phase 1+.
+func WriteSpecShaped(w io.WriterAt, src TileSource, meta IScanMeta) error {
+	cols := ceilDiv(src.SizeW(), src.TileW())
+	rows := ceilDiv(src.SizeH(), src.TileH())
+	n := cols * rows
+
+	// --- read pyramid tiles (serpentine-keyed) ---
+	tileBytes := make([][]byte, n)
+	buf := make([]byte, src.TileMaxSize())
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			nb, err := src.TileInto(col, row, buf)
+			if err != nil {
+				return fmt.Errorf("bifwriter: read tile (%d,%d): %w", col, row, err)
+			}
+			idx := imageToSerpentine(col, row, cols, rows)
+			b := make([]byte, nb)
+			copy(b, buf[:nb])
+			tileBytes[idx] = b
+		}
+	}
+
+	// --- overview placeholder: ovW x ovH solid gray RGB, single strip ---
+	const ovW, ovH = 128, 384 // 1:3 slide-ish aspect; content irrelevant to the spike
+	ovPix := make([]byte, ovW*ovH*3)
+	for i := range ovPix {
+		ovPix[i] = 0xC0
+	}
+
+	iscan := iScanXMP(meta)
+	encinfo := encodeInfoXMP(cols, rows, src.TileW(), src.TileH())
+
+	// --- layout: header | IFD0 | ext0 | IFD1 | ext1 | ovPix | tiles ---
+	// Two passes for stable sizes, same trick as WriteSingleLevel.
+	const hdr = uint64(16)
+	plN := make([]uint64, n)
+	ifd0a, ext0a, err := buildOverviewIFD(ovW, ovH, 0, iscan) // placeholder strip offset
+	if err != nil {
+		return err
+	}
+	ifd1Off := hdr + uint64(len(ifd0a)) + uint64(len(ext0a))
+	ifd1a, ext1a, err := buildLevelIFDAt(ifd1Off, src, cols, rows, plN, plN, encinfo)
+	if err != nil {
+		return err
+	}
+	ovOff := ifd1Off + uint64(len(ifd1a)) + uint64(len(ext1a))
+	tilesStart := ovOff + uint64(len(ovPix))
+
+	offsets := make([]uint64, n)
+	counts := make([]uint64, n)
+	cur := tilesStart
+	for i := 0; i < n; i++ {
+		offsets[i] = cur
+		counts[i] = uint64(len(tileBytes[i]))
+		cur += uint64(len(tileBytes[i]))
+	}
+
+	ifd0, ext0, err := buildOverviewIFD(ovW, ovH, ovOff, iscan)
+	if err != nil {
+		return err
+	}
+	ifd1, ext1, err := buildLevelIFDAt(ifd1Off, src, cols, rows, offsets, counts, encinfo)
+	if err != nil {
+		return err
+	}
+	if len(ifd0) != len(ifd0a) || len(ext0) != len(ext0a) || len(ifd1) != len(ifd1a) || len(ext1) != len(ext1a) {
+		return fmt.Errorf("bifwriter: IFD size unstable between passes")
+	}
+	// Patch IFD 0's next-IFD pointer (trailing 8 BigTIFF bytes) to IFD 1's offset.
+	binary.LittleEndian.PutUint64(ifd0[len(ifd0)-8:], ifd1Off)
+
+	if err := tiff.WriteHeader(w, true, hdr); err != nil {
+		return err
+	}
+	writes := []struct {
+		off uint64
+		b   []byte
+	}{
+		{hdr, ifd0}, {hdr + uint64(len(ifd0)), ext0},
+		{ifd1Off, ifd1}, {ifd1Off + uint64(len(ifd1)), ext1},
+		{ovOff, ovPix},
+	}
+	for _, wr := range writes {
+		if _, err := w.WriteAt(wr.b, int64(wr.off)); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < n; i++ {
+		if _, err := w.WriteAt(tileBytes[i], int64(offsets[i])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// buildLevelIFDAt is buildLevelIFD with an explicit ifd offset (for IFD 1).
+func buildLevelIFDAt(off uint64, src TileSource, cols, rows int, offsets, counts []uint64, xmp []byte) (ifd, ext []byte, err error) {
+	b := tiff.NewEntryBuilder(true)
+	b.AddLong(tiff.TagImageWidth, []uint32{uint32(src.SizeW())})
+	b.AddLong(tiff.TagImageLength, []uint32{uint32(src.SizeH())})
+	b.AddShort(tiff.TagBitsPerSample, []uint16{8, 8, 8})
+	b.AddShort(tiff.TagCompression, []uint16{tiff.CompressionJPEG})
+	b.AddShort(tiff.TagPhotometricInterpretation, []uint16{6})
+	b.AddASCII(tiff.TagImageDescription, fmt.Sprintf("level=0 mag=%g quality=90", magFor(src)))
+	b.AddShort(tiff.TagSamplesPerPixel, []uint16{3})
+	b.AddShort(tiff.TagPlanarConfiguration, []uint16{1})
+	b.AddShort(tiff.TagTileWidth, []uint16{uint16(src.TileW())})
+	b.AddShort(tiff.TagTileLength, []uint16{uint16(src.TileH())})
+	if err := b.AddTileOffsets(tiff.TagTileOffsets, offsets); err != nil {
+		return nil, nil, err
+	}
+	if err := b.AddTileOffsets(tiff.TagTileByteCounts, counts); err != nil {
+		return nil, nil, err
+	}
+	b.AddShort(tiff.TagYCbCrSubSampling, []uint16{2, 2})
+	b.AddUndefined(uint16(700), xmp)
+	return b.Encode(off)
+}
+
+// buildOverviewIFD builds the IFD-0 overview: a wxh uncompressed RGB single
+// strip at stripOff, ImageDescription "Label_Image", iScan XMP.
+func buildOverviewIFD(w, h int, stripOff uint64, xmp []byte) (ifd, ext []byte, err error) {
+	b := tiff.NewEntryBuilder(true)
+	b.AddLong(tiff.TagImageWidth, []uint32{uint32(w)})
+	b.AddLong(tiff.TagImageLength, []uint32{uint32(h)})
+	b.AddShort(tiff.TagBitsPerSample, []uint16{8, 8, 8})
+	b.AddShort(tiff.TagCompression, []uint16{tiff.CompressionNone})
+	b.AddShort(tiff.TagPhotometricInterpretation, []uint16{2}) // RGB
+	b.AddASCII(tiff.TagImageDescription, "Label_Image")
+	b.AddLong8(tiff.TagStripOffsets, []uint64{stripOff})
+	b.AddShort(tiff.TagSamplesPerPixel, []uint16{3})
+	b.AddLong(tiff.TagRowsPerStrip, []uint32{uint32(h)})
+	b.AddLong8(tiff.TagStripByteCounts, []uint64{uint64(w * h * 3)})
+	b.AddShort(tiff.TagPlanarConfiguration, []uint16{1})
+	b.AddUndefined(uint16(700), xmp)
+	return b.Encode(16) // ifd 0 starts right after the 16-byte header
+}

@@ -24,3 +24,31 @@ func iScanXMP(m IScanMeta) []byte {
 			`</Metadata>`,
 		m.Magnification, m.ScanRes))
 }
+
+// encodeInfoXMP builds the minimal level-0 <EncodeInfo Ver="2"> for a single
+// AOI with no tile overlap: SlideInfo/AoiInfo with the tile grid, a
+// SlideStitchInfo/ImageInfo, FrameInfo with one <Frame> per tile in serpentine
+// (TILE_OFFSETS) order, and AoiOrigin (0,0). TileJointInfo overlaps are all 0
+// (abutting tiles). Reader requires Ver>=2.
+func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
+	var frames []byte
+	for idx := 0; idx < cols*rows; idx++ {
+		col, row := serpentineToImage(idx, cols, rows)
+		frames = append(frames, []byte(fmt.Sprintf(
+			`<Frame XY="%d,%d" Z="0" Focus="0"/>`, col, row))...)
+	}
+	return []byte(fmt.Sprintf(
+		`<?xml version="1.0" encoding="UTF-8"?>`+
+			`<EncodeInfo Ver="2">`+
+			`<SlideInfo Rack="0" Slot="0" BaseName="wsitools">`+
+			`<AoiInfo XIMAGESIZE="%d" YIMAGESIZE="%d" NumRows="%d" NumCols="%d" Pos-X="0" Pos-Y="0"/>`+
+			`</SlideInfo>`+
+			`<SlideStitchInfo>`+
+			`<ImageInfo AOIScanned="1" AOIIndex="0" NumRows="%d" NumCols="%d" Width="%d" Height="%d" Pos-X="0" Pos-Y="0">`+
+			`<FrameInfo AOIScanned="1" AOIIndex="0">%s</FrameInfo>`+
+			`</ImageInfo>`+
+			`</SlideStitchInfo>`+
+			`<AoiOrigin><AOI0 OriginX="0" OriginY="0"/></AoiOrigin>`+
+			`</EncodeInfo>`,
+		tileW, tileH, rows, cols, rows, cols, tileW, tileH, frames))
+}
