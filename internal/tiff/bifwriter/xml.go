@@ -42,17 +42,19 @@ func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
 	}
 
 	// TileJointInfo: one per adjacent image-tile pair, mirroring REAL Roche
-	// DP 200 exactly (verified against Ventana-1.bif): horizontal joins use
-	// Direction "LEFT" with Tile1=left-column / Tile2=right-column neighbor;
-	// vertical joins use "UP" with Tile1=lower-row / Tile2=upper-row(=row-1)
-	// neighbor. Tile indices are 1-based serpentine numbers; OverlapX/OverlapY=0
-	// (abutting tiles — a value real files also use). This is the spec/real-Roche
-	// convention that opentile and bio-formats (the serpentine readers that read
-	// genuine Roche) expect. NOTE: openslide only accepts "RIGHT"/"UP" and will
-	// reject these "LEFT" joins — but openslide reads DP 200 tiles row-major and
-	// cannot render real serpentine Roche slides anyway, so it is a metadata-only
-	// oracle here; we do NOT distort the stitch graph to satisfy it.
-	tile := func(col, row int) int { return row*cols + col + 1 } // 1-based row-major
+	// DP 200 exactly (verified byte-for-byte against Ventana-1.bif's 922 joins).
+	// Horizontal joins use Direction "LEFT" with Tile1=left-column /
+	// Tile2=right-column neighbor; vertical joins use "UP" with Tile1=lower-row /
+	// Tile2=upper-row(=row-1). OverlapX/OverlapY=0 (abutting; a value real files
+	// also use).
+	//
+	// IMPORTANT — TWO tile-numbering systems coexist in BIF (whitepaper Fig 2 +
+	// p.15): the pixel STORAGE order (TILE_OFFSETS) is ROW-MAJOR, declared by the
+	// <Frame> nodes above; but the stitch-graph Tile1/Tile2 IDs use the physical
+	// SERPENTINE numbering (tile 1 = lower-left, snake up). All 922 real joins are
+	// consistent only under serpentine numbering. So tiles are STORED row-major
+	// while joins are NUMBERED serpentine — do not conflate them.
+	tile := func(col, row int) int { return imageToSerpentine(col, row, cols, rows) + 1 }
 	var joints []byte
 	for row := 0; row < rows; row++ {
 		for col := 0; col+1 < cols; col++ { // horizontal LEFT joins
