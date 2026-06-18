@@ -332,13 +332,13 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 		return fmt.Errorf("create output: %w", err)
 	}
 
-	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc); err != nil {
+	omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
+	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic); err != nil {
 		w.Abort()
 		return err
 	}
 
 	if !cvNoAssociated {
-		omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
 		if err := writeAssociatedImages(src, w, resolvedContainer, omeSynthetic, omeEditPlan{}); err != nil {
 			w.Abort()
 			return err
@@ -422,10 +422,13 @@ func parseQualityKnobs(quality string) (map[string]string, error) {
 	return knobs, nil
 }
 
-func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {
+func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool) error {
 	for _, lvl := range src.Levels() {
 		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers, container, srcImageDesc); err != nil {
 			return fmt.Errorf("level %d: %w", lvl.Index(), err)
+		}
+		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -675,6 +678,9 @@ func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0D
 		if err := <-drainErr; err != nil {
 			return fmt.Errorf("drain level %d: %w", lvl.Index(), err)
 		}
+		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan); err != nil {
+			return err
+		}
 	}
 
 	if err := writeAssociatedImages(src, w, container, omeSynthetic, plan); err != nil {
@@ -742,70 +748,110 @@ func omeAssociatedSpecs(src source.Source, plan omeEditPlan) []OMEAssoc {
 	return out
 }
 
+// emitOneAssociated emits associated image `a` as a single stripped IFD, applying
+// the edit plan and the container's classification tags. Returns whether an IFD
+// was written (false when the plan removes it, an OME-unmapped type is filtered
+// under synthetic OME output, or the codec can't be faithfully copied). The
+// caller owns plan.replace bookkeeping (the `replaced` flag) — this helper does
+// not track it.
+func emitOneAssociated(src source.Source, w *streamwriter.Writer, a source.AssociatedImage, container string, omeSynthetic bool, plan omeEditPlan) (bool, error) {
+	if plan.remove != "" && a.Type() == plan.remove {
+		return false, nil
+	}
+	if plan.replace != "" && a.Type() == plan.replace {
+		// Under synthetic OME output, an OME-unmapped type emits no <Image>, so
+		// it must emit no IFD either (else OME-XML and IFDs desync).
+		if container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "" {
+			return false, nil
+		}
+		if err := w.AddStripped(*plan.spec); err != nil {
+			return false, fmt.Errorf("write associated %s: %w", a.Type(), err)
+		}
+		return true, nil
+	}
+	if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Type()) == "" {
+		return false, nil
+	}
+	spec, err := faithfulStrippedSpec(a)
+	if err != nil {
+		if errors.Is(err, errSkipAssociated) {
+			slog.Warn("skipping associated", "type", a.Type(), "reason", err)
+			return false, nil
+		}
+		return false, fmt.Errorf("associated %s: %w", a.Type(), err)
+	}
+	spec.BitsPerSample = []uint16{8, 8, 8}
+	spec.NewSubfileType = newSubfileTypeForAssoc(container, a.Type())
+	spec.WSIImageType = a.Type()
+	// SVS-shaped output: emit Aperio-flavored NewSubfileType via ExtraTags
+	// (macro=9, label=1). Clear spec.NewSubfileType so the writer doesn't also
+	// emit a default value — EntryBuilder doesn't dedup, so a duplicate tag
+	// would corrupt the IFD.
+	if container == "svs" {
+		switch a.Type() {
+		case "macro", "overview":
+			spec.NewSubfileType = 0
+			spec.ExtraTags = buildSVSMacroExtraTags()
+		case "label":
+			spec.NewSubfileType = 0
+			spec.ExtraTags = buildSVSLabelExtraTags()
+		}
+	}
+	if err := w.AddStripped(spec); err != nil {
+		return false, fmt.Errorf("write associated %s: %w", a.Type(), err)
+	}
+	return true, nil
+}
+
+// emitSVSThumbnailAtL0 emits the SVS thumbnail as IFD 1, called right after L0 in
+// each level loop. opentile classifies the SVS thumbnail positionally (page 1,
+// non-tiled), so on a multi-level slide it must precede L1. No-op unless
+// container=="svs" && lvlIndex==0. Honors the plan via emitOneAssociated
+// (dropAll/remove emit nothing; replace emits plan.spec). Handles the upsert
+// (replace a thumbnail the source lacks). Returns whether an IFD was emitted.
+func emitSVSThumbnailAtL0(src source.Source, w *streamwriter.Writer, lvlIndex int, container string, omeSynthetic bool, plan omeEditPlan) (bool, error) {
+	if container != "svs" || lvlIndex != 0 || plan.dropAll {
+		return false, nil
+	}
+	for _, a := range src.Associated() {
+		if a.Type() == "thumbnail" {
+			return emitOneAssociated(src, w, a, container, omeSynthetic, plan)
+		}
+	}
+	// Upsert: source has no thumbnail but the plan replaces (adds) one.
+	if plan.replace == "thumbnail" {
+		if err := w.AddStripped(*plan.spec); err != nil {
+			return false, fmt.Errorf("write thumbnail: %w", err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool, plan omeEditPlan) error {
 	if plan.dropAll {
 		return nil
 	}
 	replaced := false
 	for _, a := range src.Associated() {
-		if plan.remove != "" && a.Type() == plan.remove {
+		if container == "svs" && a.Type() == "thumbnail" {
+			if plan.replace == "thumbnail" {
+				replaced = true // handled at IFD 1 by emitSVSThumbnailAtL0
+			}
 			continue
 		}
 		if plan.replace != "" && a.Type() == plan.replace {
-			// Keep IFDs in lockstep with omeAssociatedSpecs: under synthetic
-			// OME output, a type with no OME mapping emits no <Image>, so it
-			// must emit no IFD either (else OME-XML and IFDs desync).
-			if container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "" {
-				replaced = true
-				continue
-			}
-			if err := w.AddStripped(*plan.spec); err != nil {
-				return fmt.Errorf("write associated %s: %w", a.Type(), err)
-			}
 			replaced = true
-			continue
 		}
-		// Synthetic OME path only: keep the written associated IFDs in sync
-		// with the <Image> entries omeAssociatedSpecs emitted (recognized
-		// types, same order). The native ome→ome path keeps the verbatim
-		// source OME-XML, which already describes its own associated images,
-		// so it is not filtered here.
-		if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Type()) == "" {
-			continue
-		}
-		spec, err := faithfulStrippedSpec(a)
-		if err != nil {
-			if errors.Is(err, errSkipAssociated) {
-				slog.Warn("skipping associated", "type", a.Type(), "reason", err)
-				continue
-			}
-			return fmt.Errorf("associated %s: %w", a.Type(), err)
-		}
-		spec.BitsPerSample = []uint16{8, 8, 8}
-		spec.NewSubfileType = newSubfileTypeForAssoc(container, a.Type())
-		spec.WSIImageType = a.Type()
-		// SVS-shaped output: emit Aperio-flavored NewSubfileType via
-		// ExtraTags (macro=9, label=1). Clear spec.NewSubfileType so the
-		// writer doesn't also emit a default value — EntryBuilder doesn't
-		// dedup, so a duplicate tag would corrupt the IFD.
-		if container == "svs" {
-			switch a.Type() {
-			case "macro", "overview":
-				spec.NewSubfileType = 0
-				spec.ExtraTags = buildSVSMacroExtraTags()
-			case "label":
-				spec.NewSubfileType = 0
-				spec.ExtraTags = buildSVSLabelExtraTags()
-			}
-		}
-		if err := w.AddStripped(spec); err != nil {
-			return fmt.Errorf("write associated %s: %w", a.Type(), err)
+		if _, err := emitOneAssociated(src, w, a, container, omeSynthetic, plan); err != nil {
+			return err
 		}
 	}
-	// Upsert: plan.replace was not present in the source set. Skip the IFD for
-	// an OME-unmapped type under synthetic output (omeAssociatedSpecs omits its
-	// <Image> too), keeping OME-XML and IFDs in sync.
-	if plan.replace != "" && !replaced && !(container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "") {
+	// Upsert: plan.replace absent from source. Skip OME-unmapped synthetic types
+	// and the SVS thumbnail (the latter is upserted at IFD 1 by emitSVSThumbnailAtL0).
+	if plan.replace != "" && !replaced &&
+		!(container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "") &&
+		!(container == "svs" && plan.replace == "thumbnail") {
 		if err := w.AddStripped(*plan.spec); err != nil {
 			return fmt.Errorf("write associated %s: %w", plan.replace, err)
 		}

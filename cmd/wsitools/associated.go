@@ -214,8 +214,17 @@ func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 		// handle. Fall back to a faithful, pixel-identical rebuild for
 		// generic-TIFF; other formats (SVS) surface the error. src is still open
 		// (deferred Close) — rebuild reads its already-parsed levels.
-		if src.Format() == string(opentile.FormatGenericTIFF) && errors.Is(err, edit.ErrUnexpectedLayout) {
-			if rerr := rebuildGenericTIFF(src, outPath, omeEditPlan{remove: typ}, fl.fsync); rerr != nil {
+		if errors.Is(err, edit.ErrUnexpectedLayout) {
+			var rerr error
+			switch src.Format() {
+			case string(opentile.FormatGenericTIFF):
+				rerr = rebuildGenericTIFF(src, outPath, omeEditPlan{remove: typ}, fl.fsync)
+			case "svs":
+				rerr = rebuildSVS(src, outPath, omeEditPlan{remove: typ}, fl.fsync)
+			default:
+				return err
+			}
+			if rerr != nil {
 				return rerr
 			}
 			if !fl.quiet {
@@ -334,14 +343,15 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 		// relocate those levels, so it fails with ErrUnexpectedLayout. Report it
 		// clearly rather than leaking the raw "Strip/TileOffsets" layout error.
 		// (label/macro/overview trail the pyramid and splice fine.)
-		if src.Format() == "svs" && errors.Is(err, edit.ErrUnexpectedLayout) {
-			return fmt.Errorf("%w: replacing the %s on SVS is not yet supported — it precedes the tiled pyramid levels, which the in-place splice cannot relocate; label/macro/overview (which trail the pyramid) work, and remove works for all types", ErrUnsupportedAssoc, typ)
-		}
-		// generic-TIFF with a non-tail-spliceable streamwriter layout: fall back
-		// to a faithful, pixel-identical rebuild (the splice ReplacementIFD can't
-		// be reused — rebuild needs a streamwriter StrippedSpec, rebuilt here from
-		// the same decoded image + resolved dims).
-		if src.Format() == string(opentile.FormatGenericTIFF) && errors.Is(err, edit.ErrUnexpectedLayout) {
+		// A layout the splice can't tail-rewrite: a wsitools-produced generic-TIFF
+		// (L0 directory past the associated data), or an SVS whose target precedes
+		// the tiled pyramid (the thumbnail at IFD 1, which would need those levels
+		// relocated). Fall back to a faithful, pixel-identical rebuild through the
+		// streamwriter. The splice ReplacementIFD can't be reused — the rebuild
+		// needs a streamwriter StrippedSpec, rebuilt here from the same decoded
+		// image + resolved dims.
+		if errors.Is(err, edit.ErrUnexpectedLayout) &&
+			(src.Format() == string(opentile.FormatGenericTIFF) || src.Format() == "svs") {
 			spec, serr := buildReplacementStrippedSpec(img, replaceOpts{
 				typ:         typ,
 				compression: fl.compression,
@@ -354,7 +364,14 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 			if serr != nil {
 				return serr
 			}
-			if rerr := rebuildGenericTIFF(src, outPath, omeEditPlan{replace: typ, spec: spec}, fl.fsync); rerr != nil {
+			plan := omeEditPlan{replace: typ, spec: spec}
+			var rerr error
+			if src.Format() == "svs" {
+				rerr = rebuildSVS(src, outPath, plan, fl.fsync)
+			} else {
+				rerr = rebuildGenericTIFF(src, outPath, plan, fl.fsync)
+			}
+			if rerr != nil {
 				return rerr
 			}
 			if !fl.quiet {
