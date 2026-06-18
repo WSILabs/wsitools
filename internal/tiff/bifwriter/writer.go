@@ -136,7 +136,10 @@ func buildLevelIFD(src TileSource, cols, rows int, offsets, counts []uint64, xmp
 		return nil, nil, err
 	}
 	b.AddShort(tiff.TagYCbCrSubSampling, []uint16{2, 2})
-	b.AddUndefined(uint16(700), xmp) // XMP
+	// XMP as TIFF type BYTE (1) with a trailing NUL — matches real Roche files
+	// exactly; bio-formats' VentanaReader fails to parse a type-7/UNDEFINED tag
+	// 700 ("Content is not allowed in prolog"), opentile reads either.
+	b.AddBytes(uint16(700), append(append([]byte(nil), xmp...), 0)) // XMP
 	return b.Encode(16)
 }
 
@@ -264,7 +267,10 @@ func buildLevelIFDAt(off uint64, src TileSource, cols, rows int, offsets, counts
 		return nil, nil, err
 	}
 	b.AddShort(tiff.TagYCbCrSubSampling, []uint16{2, 2})
-	b.AddUndefined(uint16(700), xmp)
+	// XMP as TIFF type BYTE (1) with a trailing NUL — matches real Roche files
+	// exactly; bio-formats' VentanaReader fails to parse a type-7/UNDEFINED tag
+	// 700 ("Content is not allowed in prolog"), opentile reads either.
+	b.AddBytes(uint16(700), append(append([]byte(nil), xmp...), 0))
 	return b.Encode(off)
 }
 
@@ -283,6 +289,9 @@ func buildOverviewIFD(w, h int, stripOff uint64, xmp []byte) (ifd, ext []byte, e
 	b.AddLong(tiff.TagRowsPerStrip, []uint32{uint32(h)})
 	b.AddLong8(tiff.TagStripByteCounts, []uint64{uint64(w * h * 3)})
 	b.AddShort(tiff.TagPlanarConfiguration, []uint16{1})
-	b.AddUndefined(uint16(700), xmp)
+	// XMP as TIFF type BYTE (1) with a trailing NUL — matches real Roche files
+	// exactly; bio-formats' VentanaReader fails to parse a type-7/UNDEFINED tag
+	// 700 ("Content is not allowed in prolog"), opentile reads either.
+	b.AddBytes(uint16(700), append(append([]byte(nil), xmp...), 0))
 	return b.Encode(16) // ifd 0 starts right after the 16-byte header
 }
