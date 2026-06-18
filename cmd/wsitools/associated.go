@@ -257,15 +257,12 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 	}
 	defer src.Close()
 
-	// SVS replace is supported only for the label today. opentile-go reads
-	// Aperio thumbnail/macro/overview as abbreviated JPEG (tables in the
-	// JPEGTables tag, reassembled via ConcatenateScans), which a standalone
-	// re-encode does not yet satisfy — a replaced image would be unreadable.
-	// remove works for every type; generic-TIFF supports replacing any type.
-	if src.Format() == "svs" && typ != "label" {
-		return fmt.Errorf("%w: replacing the %s on SVS is not yet supported (only label); remove works for all types, and generic-TIFF supports replacing any type", ErrUnsupportedAssoc, typ)
-	}
-
+	// SVS replace works for any associated image that TRAILS the tiled pyramid
+	// (label, macro, overview): the splice does a cheap tail-rewrite and leaves
+	// the pyramid bytes untouched. The thumbnail is the exception — Aperio stores
+	// it at IFD 1, BEFORE the pyramid levels, so replacing it would require
+	// relocating those tiled levels, which the splice can't do. That case surfaces
+	// as edit.ErrUnexpectedLayout and is reported with a clear message below.
 	f, err := parseSlideFile(input)
 	if err != nil {
 		return err
@@ -333,6 +330,13 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 		Replacement: rep,
 		Fsync:       fl.fsync,
 	}); err != nil {
+		// SVS thumbnail sits at IFD 1, before the tiled pyramid; the splice can't
+		// relocate those levels, so it fails with ErrUnexpectedLayout. Report it
+		// clearly rather than leaking the raw "Strip/TileOffsets" layout error.
+		// (label/macro/overview trail the pyramid and splice fine.)
+		if src.Format() == "svs" && errors.Is(err, edit.ErrUnexpectedLayout) {
+			return fmt.Errorf("%w: replacing the %s on SVS is not yet supported — it precedes the tiled pyramid levels, which the in-place splice cannot relocate; label/macro/overview (which trail the pyramid) work, and remove works for all types", ErrUnsupportedAssoc, typ)
+		}
 		// generic-TIFF with a non-tail-spliceable streamwriter layout: fall back
 		// to a faithful, pixel-identical rebuild (the splice ReplacementIFD can't
 		// be reused — rebuild needs a streamwriter StrippedSpec, rebuilt here from

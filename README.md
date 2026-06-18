@@ -71,10 +71,12 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
   OME-XML — instrument/acquisition/channel/vendor metadata are discarded
   even for the surviving pyramid; an always-on runtime warning fires; see
   [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). On
-  **SVS** only the **label** can be replaced today — opentile-go reads
-  Aperio thumbnail/macro/overview as abbreviated JPEG (tables in the
-  `JPEGTables` tag), so re-encoding those is a Slice-2 item; SVS
-  thumbnail/macro/overview `replace` errors with a clear message.
+  **SVS** `replace` works for any associated image that trails the tiled
+  pyramid — **label**, **macro**, and **overview** — via a tail IFD
+  rewrite that leaves the pyramid bytes untouched. The **thumbnail**
+  (Aperio stores it at IFD 1, before the pyramid) can also be replaced on
+  single-level slides, but on a multi-level slide it would require
+  relocating the tiled levels, so it `replace`-errors with a clear message.
 
 > [!NOTE]
 > **OME-TIFF support in wsitools is rudimentary.** The writer models only

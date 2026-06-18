@@ -203,22 +203,101 @@ func TestSVSOverviewRemoveKeepsLabel(t *testing.T) {
 	}
 }
 
-// TestSVSReplaceNonLabelGated: replacing a non-label image on SVS is not yet
-// supported (opentile-go reads Aperio thumbnail/macro/overview as abbreviated
-// JPEG). It must error clearly rather than emit an unreadable image.
-func TestSVSReplaceNonLabelGated(t *testing.T) {
+// TestSVSOverviewReplaceWorks: the overview trails the tiled pyramid, so the
+// splice tail-rewrite replaces it while leaving the pyramid byte-identical. The
+// overview content must change, the pyramid must be untouched, and the label/
+// thumbnail classification must survive.
+func TestSVSOverviewReplaceWorks(t *testing.T) {
 	in := copyFile(t, svsFixture(t))
+	origSize, origBytes, ok := assocOfType(t, in, "overview")
+	if !ok {
+		t.Skip("fixture has no overview")
+	}
 	png := filepath.Join(t.TempDir(), "x.png")
-	writeSolidPNG(t, png, 1280, 431, color.RGBA{10, 20, 30, 255})
+	writeSolidPNG(t, png, origSize.X, origSize.Y, color.RGBA{10, 20, 30, 255})
 	out := filepath.Join(t.TempDir(), "out.svs")
-	err := runAssociatedReplaceFor("overview", in, out, replaceFlags{
-		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, force: true,
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedReplaceFor("overview", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, resize: "fit", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("overview replace: %v", err)
+	}
+	_, newBytes, ok := assocOfType(t, out, "overview")
+	if !ok {
+		t.Fatalf("overview missing after replace")
+	}
+	if bytes.Equal(origBytes, newBytes) {
+		t.Errorf("overview content unchanged after replace")
+	}
+	if digestAfter := level0Digest(t, out); digestAfter != digestBefore {
+		t.Errorf("pyramid changed after overview replace")
+	}
+	if _, _, ok := assocOfType(t, out, "label"); !ok {
+		t.Errorf("label vanished after overview replace (classification corrupted)")
+	}
+}
+
+// TestSVSThumbnailReplaceSingleLevel: when no tiled pyramid level follows the
+// thumbnail (a single-level slide), replacing it works via the tail-rewrite —
+// pyramid intact, thumbnail content changed. If the fixture is multi-level the
+// replace is correctly refused (covered by TestSVSThumbnailReplaceMultiLevelGated),
+// so this test skips in that case rather than asserting the wrong outcome.
+func TestSVSThumbnailReplaceSingleLevel(t *testing.T) {
+	in := copyFile(t, svsFixture(t))
+	origSize, origBytes, ok := assocOfType(t, in, "thumbnail")
+	if !ok {
+		t.Skip("fixture has no thumbnail")
+	}
+	png := filepath.Join(t.TempDir(), "x.png")
+	writeSolidPNG(t, png, origSize.X, origSize.Y, color.RGBA{10, 20, 30, 255})
+	out := filepath.Join(t.TempDir(), "out.svs")
+	digestBefore := level0Digest(t, in)
+	err := runAssociatedReplaceFor("thumbnail", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, resize: "fit", bgHex: "F5F5E6", force: true,
+	})
+	if errors.Is(err, ErrUnsupportedAssoc) {
+		t.Skip("fixture is multi-level (tiled levels follow the thumbnail); see TestSVSThumbnailReplaceMultiLevelGated")
+	}
+	if err != nil {
+		t.Fatalf("thumbnail replace: %v", err)
+	}
+	_, newBytes, ok := assocOfType(t, out, "thumbnail")
+	if !ok {
+		t.Fatalf("thumbnail missing after replace")
+	}
+	if bytes.Equal(origBytes, newBytes) {
+		t.Errorf("thumbnail content unchanged after replace")
+	}
+	if digestAfter := level0Digest(t, out); digestAfter != digestBefore {
+		t.Errorf("pyramid changed after thumbnail replace")
+	}
+}
+
+// TestSVSThumbnailReplaceMultiLevelGated: on a multi-level slide the thumbnail
+// (IFD 1) is followed by tiled pyramid levels that the in-place splice can't
+// relocate, so the replace must fail clearly (ErrUnexpectedLayout reported as
+// ErrUnsupportedAssoc) and write no output. Needs a multi-level SVS fixture
+// (CMU-1.svs); the single-level CI fixture exercises the success path above.
+func TestSVSThumbnailReplaceMultiLevelGated(t *testing.T) {
+	p := firstExisting(t, "svs/CMU-1.svs")
+	if p == "" {
+		t.Skip("no multi-level SVS fixture (CMU-1.svs)")
+	}
+	in := copyFile(t, p)
+	if _, _, ok := assocOfType(t, in, "thumbnail"); !ok {
+		t.Skip("fixture has no thumbnail")
+	}
+	png := filepath.Join(t.TempDir(), "x.png")
+	writeSolidPNG(t, png, 400, 300, color.RGBA{10, 20, 30, 255})
+	out := filepath.Join(t.TempDir(), "out.svs")
+	err := runAssociatedReplaceFor("thumbnail", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, resize: "fit", bgHex: "F5F5E6", force: true,
 	})
 	if !errors.Is(err, ErrUnsupportedAssoc) {
-		t.Fatalf("want ErrUnsupportedAssoc for SVS overview replace, got %v", err)
+		t.Fatalf("want ErrUnsupportedAssoc for multi-level SVS thumbnail replace, got %v", err)
 	}
 	if _, statErr := os.Stat(out); statErr == nil {
-		t.Errorf("output written despite gate")
+		t.Errorf("output written despite thumbnail gate")
 	}
 }
 
