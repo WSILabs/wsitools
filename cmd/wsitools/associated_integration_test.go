@@ -727,6 +727,50 @@ func TestOMETIFFEditWarnsLossy(t *testing.T) {
 	}
 }
 
+// multiLevelSVSFixture returns a multi-level SVS (tiled pyramid levels follow the
+// thumbnail at IFD 1), or skips. 239551.svs is JPEG-tiled with 3 levels +
+// thumbnail/label/overview.
+func multiLevelSVSFixture(t *testing.T) string {
+	p := firstExisting(t, "svs/239551.svs")
+	if p == "" {
+		t.Skip("no multi-level SVS fixture (svs/239551.svs)")
+	}
+	return p
+}
+
+// TestConvertToSVSMultiLevelKeepsThumbnail guards the IFD-1 placement fix: a
+// multi-level SVS converted via the tile-copy path must keep the thumbnail and
+// overview (they were dropped when the thumbnail stranded after the pyramid).
+func TestConvertToSVSMultiLevelKeepsThumbnail(t *testing.T) {
+	bin := stripedBinary(t)
+	in := multiLevelSVSFixture(t)
+	for _, ty := range []string{"thumbnail", "overview", "label"} {
+		if _, _, ok := assocOfType(t, in, ty); !ok {
+			t.Skipf("fixture lacks %s", ty)
+		}
+	}
+	out := filepath.Join(t.TempDir(), "out.svs")
+	if o, err := runBin(bin, "convert", "--to", "svs", "-f", "-o", out, in); err != nil {
+		t.Fatalf("convert --to svs: %v\n%s", err, o)
+	}
+	info, _ := runBin(bin, "info", out)
+	for _, ty := range []string{"thumbnail", "label", "overview"} {
+		if !strings.Contains(string(info), ty) {
+			t.Errorf("converted multi-level SVS dropped %s:\n%s", ty, info)
+		}
+	}
+	// Pyramid must be pixel-identical (verbatim tile-copy).
+	if ds, db := pixelDigest(mustRun(t, bin, "hash", "--mode", "pixel", in)), pixelDigest(mustRun(t, bin, "hash", "--mode", "pixel", out)); ds == "" || ds != db {
+		t.Errorf("pyramid pixels changed: src=%s out=%s", ds, db)
+	}
+}
+
+func mustRun(t *testing.T, bin string, args ...string) []byte {
+	t.Helper()
+	out, _ := runBin(bin, args...)
+	return out
+}
+
 // TestOMETIFFRealLeicaOverviewRemove exercises the multi-image real Leica
 // OME-TIFF path (macro-series + main-series). Self-skips in -short mode and
 // when the fixture is absent (e.g. CI).

@@ -675,6 +675,9 @@ func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0D
 		if err := <-drainErr; err != nil {
 			return fmt.Errorf("drain level %d: %w", lvl.Index(), err)
 		}
+		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan); err != nil {
+			return err
+		}
 	}
 
 	if err := writeAssociatedImages(src, w, container, omeSynthetic, plan); err != nil {
@@ -797,12 +800,43 @@ func emitOneAssociated(src source.Source, w *streamwriter.Writer, a source.Assoc
 	return true, nil
 }
 
+// emitSVSThumbnailAtL0 emits the SVS thumbnail as IFD 1, called right after L0 in
+// each level loop. opentile classifies the SVS thumbnail positionally (page 1,
+// non-tiled), so on a multi-level slide it must precede L1. No-op unless
+// container=="svs" && lvlIndex==0. Honors the plan via emitOneAssociated
+// (dropAll/remove emit nothing; replace emits plan.spec). Handles the upsert
+// (replace a thumbnail the source lacks). Returns whether an IFD was emitted.
+func emitSVSThumbnailAtL0(src source.Source, w *streamwriter.Writer, lvlIndex int, container string, omeSynthetic bool, plan omeEditPlan) (bool, error) {
+	if container != "svs" || lvlIndex != 0 || plan.dropAll {
+		return false, nil
+	}
+	for _, a := range src.Associated() {
+		if a.Type() == "thumbnail" {
+			return emitOneAssociated(src, w, a, container, omeSynthetic, plan)
+		}
+	}
+	// Upsert: source has no thumbnail but the plan replaces (adds) one.
+	if plan.replace == "thumbnail" {
+		if err := w.AddStripped(*plan.spec); err != nil {
+			return false, fmt.Errorf("write thumbnail: %w", err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool, plan omeEditPlan) error {
 	if plan.dropAll {
 		return nil
 	}
 	replaced := false
 	for _, a := range src.Associated() {
+		if container == "svs" && a.Type() == "thumbnail" {
+			if plan.replace == "thumbnail" {
+				replaced = true // handled at IFD 1 by emitSVSThumbnailAtL0
+			}
+			continue
+		}
 		if plan.replace != "" && a.Type() == plan.replace {
 			replaced = true
 		}
@@ -810,10 +844,11 @@ func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container 
 			return err
 		}
 	}
-	// Upsert: plan.replace was not present in the source set. Skip the IFD for
-	// an OME-unmapped type under synthetic output (omeAssociatedSpecs omits its
-	// <Image> too), keeping OME-XML and IFDs in sync.
-	if plan.replace != "" && !replaced && !(container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "") {
+	// Upsert: plan.replace absent from source. Skip OME-unmapped synthetic types
+	// and the SVS thumbnail (the latter is upserted at IFD 1 by emitSVSThumbnailAtL0).
+	if plan.replace != "" && !replaced &&
+		!(container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "") &&
+		!(container == "svs" && plan.replace == "thumbnail") {
 		if err := w.AddStripped(*plan.spec); err != nil {
 			return fmt.Errorf("write associated %s: %w", plan.replace, err)
 		}
