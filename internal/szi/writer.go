@@ -61,6 +61,13 @@ func (w *Writer) WriteScanProperties(md source.Metadata) error {
 	return nil
 }
 
+// WriteAssociated stores an associated image PNG at
+// <Name>/<Name>_associated/<typ>.png inside the archive, delegating to the inner
+// DZI writer (whose WriteFS is this archive). Must be called before Close.
+func (w *Writer) WriteAssociated(typ string, pngBytes []byte) error {
+	return w.dziW.WriteAssociated(typ, pngBytes)
+}
+
 // Close flushes the DZI manifest, writes scan-properties.xml if present,
 // and closes the ZIP central directory.
 func (w *Writer) Close() error {

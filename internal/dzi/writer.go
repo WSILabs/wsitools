@@ -86,6 +86,23 @@ func (w *Writer) WriteTile(level, col, row int, body []byte) error {
 	return f.Close()
 }
 
+// WriteAssociated writes an associated image as a standalone PNG at
+// <Name>_associated/<typ>.png. DZI defines no slot for associated images, so
+// wsitools emits them as siblings of the tile tree (a parallel _associated dir)
+// rather than dropping them.
+func (w *Writer) WriteAssociated(typ string, pngBytes []byte) error {
+	path := fmt.Sprintf("%s_associated/%s.png", w.cfg.Name, typ)
+	f, err := w.fs.Create(path)
+	if err != nil {
+		return fmt.Errorf("dzi: create %s: %w", path, err)
+	}
+	if _, err := f.Write(pngBytes); err != nil {
+		f.Close()
+		return fmt.Errorf("dzi: write %s: %w", path, err)
+	}
+	return f.Close()
+}
+
 // Close emits the manifest. Tile writes must complete before Close.
 func (w *Writer) Close() error {
 	path := w.cfg.Name + ".dzi"

@@ -75,6 +75,9 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err := w.WriteScanProperties(src.Metadata()); err != nil {
 		return err
 	}
+	if err := writeAssociatedPNGs(src, w.WriteAssociated); err != nil {
+		return err
+	}
 	if err := w.Close(); err != nil {
 		return err
 	}

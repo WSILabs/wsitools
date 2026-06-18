@@ -107,9 +107,13 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   compatible (256×256 tiles, 1 px overlap, JPEG Q=85 by default). Single-
   pass pyramid-descent generator with parallel libjpeg-turbo encoders;
   ~150× faster than v0.16, faster than libvips `dzsave` on CMU-1.ndpi.
+  Associated images (label/macro/thumbnail/overview) are written as lossless
+  PNGs under `<stem>_associated/<type>.png` (DZI has no native slot for them, so
+  they're emitted as sidecars rather than dropped; `--no-associated` skips).
 - `wsitools convert --to szi` — Smart Zoom Image: DZI pyramid wrapped in a
   store-method ZIP, plus an optional `scan-properties.xml` populated from
-  source metadata.
+  source metadata. Associated images are stored as PNG entries under
+  `<name>/<name>_associated/<type>.png` inside the archive.
 - `wsitools convert --to dicom` — **early** (experimental). Emits conformant
   DICOM-WSI VOLUME instances from a **DICOM, JPEG-baseline, or JPEG 2000 source**
   (SVS etc.): by default the **full resolution pyramid** — `convert --to dicom

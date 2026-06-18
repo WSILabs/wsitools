@@ -69,6 +69,9 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcW, srcH); err != nil {
 		return err
 	}
+	if err := writeAssociatedPNGs(src, w.WriteAssociated); err != nil {
+		return err
+	}
 	if err := w.Close(); err != nil {
 		return err
 	}
