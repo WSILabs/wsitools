@@ -315,7 +315,29 @@ results:
    DP 200, **serpentine is authoritative and openslide's row-major DP 200 read is
    an openslide limitation, not our bug.**
 
+3. **bio-formats (QuPath/ImageJ ecosystem) IS a serpentine reader — the right
+   oracle.** Its `VentanaReader` reads the *real* `Ventana-1.bif` correctly (10
+   series, full dims), confirming bio-formats uses the **serpentine** convention
+   (agrees with opentile + whitepaper, unlike openslide). On *our* output it
+   surfaced two fixable gaps, each now understood:
+   - **tag 700 must be TIFF type BYTE (1) + trailing NUL**, as real Roche writes
+     it. Our type-7/UNDEFINED tag 700 made bio-formats throw "Content is not
+     allowed in prolog". Fixed (commit `0d04175`); opentile/openslide read either.
+   - **its geometry parser underflows on a minimal abutting-tile stitch graph.**
+     `VentanaReader` reconstructs tile positions from overlap-weighted joins;
+     `maxYAdjust` stays `Integer.MIN_VALUE` (→ `-2147480768` error) unless the
+     per-column Y-adjustment map is populated by the joins. Our OverlapX/Y=0
+     joins don't populate it the way bio-formats expects. The bind: the
+     whitepaper says DP 200 has **no vertical overlap** and **opentile rejects
+     `OverlapY != 0`**, so we can't just add vertical overlap. bio-formats reads
+     real OverlapY=0 DP 200 files, so the fix is matching its join geometry/Tile1
+     /Tile2 indexing precisely — a Phase-1 refinement, NOT a convention conflict.
+
 **Consequences for the plan:**
+- **bio-formats is the practical real-world placement oracle** (serpentine,
+  reads real Roche, drives QuPath/ImageJ). Getting it to render our output fully
+  is the Phase-1 acceptance bar — and it's a completeness problem (stitch-graph
+  fidelity), not a convention conflict. The XML-framing half is already fixed.
 - **openslide is a structural/metadata oracle only, NOT a placement oracle** for
   spec-compliant DP 200. Don't contort the writer to openslide's row-major
   placement at the cost of spec/opentile correctness.
