@@ -29,8 +29,8 @@ editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
     `<EncodeInfo>` XMP. **Tiles stored ROW-MAJOR** (real DP 200, per the file's
     own `<Frame>` nodes — NOT serpentine, despite the whitepaper prose);
     `TileJointInfo` stitch IDs use the serpentine physical numbering. Validated
-    against bio-formats/QuPath. opentile-go's BIF reader has a serpentine-storage
-    bug (filed: opentile-go#57/#58/#59) so it mis-renders this output until fixed.
+    against bio-formats/QuPath and a pixel-identical round-trip through opentile
+    (the BIF read bug we found is fixed in opentile-go v0.45.3 / #57/#58/#59).
   All are pure Go; cgo only inside codec wrappers.
 - DICOM-WSM writer = `internal/dicomwriter` (`WritePyramid`/`WriteVolumeInstance`,
   built on `suyashkumar/dicom`); backs `convert --to dicom`. It reads compressed

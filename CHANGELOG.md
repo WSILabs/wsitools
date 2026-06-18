@@ -17,8 +17,9 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   bio-formats / QuPath.** Key finding: real DP 200 stores tiles **row-major**
   (per the file's own `<Frame>` nodes), not serpentine — the whitepaper's
   "serpentine" is the `TileJointInfo` stitch-graph numbering only; opentile-go's
-  reader conflates the two (filed opentile-go#57/#58/#59), so opentile
-  mis-renders this output until fixed. Re-encode runs on a worker pool
+  reader had conflated the two (the BIF read bug we filed, **fixed in
+  opentile-go v0.45.3 / #57** — it now reads our output pixel-identically).
+  Re-encode runs on a worker pool
   (`--workers`). Limitations: single-AOI, no Z; no separate label/thumbnail or
   probability map carried; no `--factor`/`--target-mag`.
 - **`wsitools validate <file>`** — new read-side command that checks a slide's
@@ -91,7 +92,7 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   UIDs land upstream so the fork can be retired. Read-side DICOM (via opentile-go)
   still uses upstream `suyashkumar/dicom` as an indirect dependency.
 
-- **opentile-go v0.41.1 → v0.45.2.** Picks up: `decoder.CodestreamInspector`
+- **opentile-go v0.41.1 → v0.45.3.** Picks up: `decoder.CodestreamInspector`
   (`Inspect(src) → CodestreamInfo{Components, BitDepth, Lossless, ColorEncoding,
   ChromaSubsampling, Boxed}`, opentile-go #41, v0.43.0 — now consumed by the
   DICOM writer); a structural WSI **`Validate` API** (`opentile.ValidateFile`/
@@ -104,7 +105,12 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   slide-level `Metadata.MPP` and rolls a genuinely-missing MPP into a single
   whole-file finding, instead of false-positiving one `missing-metadata` warning
   per level on ndpi/leica-scn/dicom/generic-tiff/ife/szi (which carry MPP at the
-  slide level, not per `Level`). Found via a `wsitools validate` corpus sweep.
+  slide level, not per `Level`). Found via a `wsitools validate` corpus sweep;
+  and the **BIF row-major tile-ordering fix** (opentile-go #57, v0.45.3) — the
+  reader no longer hardcodes a serpentine `TILE_OFFSETS` remap (real Roche DP 200
+  is row-major, per the `<Frame>` nodes), so opentile now reads genuine Roche
+  slides AND `convert --to bif` output **correctly** (verified pixel-identical
+  round-trip). Filed from the BIF writer work (also #58 docs, #59 test oracle).
 
 - **opentile-go v0.41.0 → v0.41.1** (no API change) — picks up two decode fixes
   for **Aperio ImageScope exports** (which re-encode the pyramid + associated
