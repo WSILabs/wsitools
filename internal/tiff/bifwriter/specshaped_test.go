@@ -39,4 +39,33 @@ func TestSpecShapedOpensInOpentile(t *testing.T) {
 	if got.Format() != "bif" {
 		t.Fatalf("detected %q, want bif", got.Format())
 	}
+
+	// Pixel-identity over the pyramid level: the spec-shaped path builds the
+	// pyramid IFD and the EncodeInfo Frame order independently, so verify the
+	// serpentine placement survives there too (not just that the file opens).
+	lvl := src.Levels()[0]
+	gl := got.Levels()[0]
+	cols := ceilDiv(lvl.Size().X, lvl.TileSize().X)
+	rows := ceilDiv(lvl.Size().Y, lvl.TileSize().Y)
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			want, err := lvl.DecodedTile(col, row)
+			if err != nil {
+				t.Fatalf("source DecodedTile(%d,%d): %v", col, row, err)
+			}
+			have, err := gl.DecodedTile(col, row)
+			if err != nil {
+				t.Fatalf("bif DecodedTile(%d,%d): %v", col, row, err)
+			}
+			if len(want.Pix) != len(have.Pix) {
+				t.Fatalf("tile (%d,%d) pix len %d != %d", col, row, len(have.Pix), len(want.Pix))
+			}
+			for i := range want.Pix {
+				if want.Pix[i] != have.Pix[i] {
+					t.Fatalf("spec-shaped tile (%d,%d) pixel %d differs: src=%d bif=%d",
+						col, row, i, want.Pix[i], have.Pix[i])
+				}
+			}
+		}
+	}
 }
