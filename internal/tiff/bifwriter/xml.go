@@ -38,18 +38,23 @@ func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
 			`<Frame XY="%d,%d" Z="0" Focus="0"/>`, col, row))...)
 	}
 
-	// TileJointInfo: one per adjacent image-tile pair. openslide's Ventana
-	// driver requires these (else "Couldn't find tile joint info") and only
-	// accepts Direction "RIGHT" (tile2 is the right image-column neighbor) or
-	// "UP" (tile2 is one image-row toward the top); it rejects the "LEFT"/"DOWN"
-	// that real Roche files emit. Tile indices are 1-based serpentine numbers.
-	// OverlapX/OverlapY are 0 (abutting tiles).
+	// TileJointInfo: one per adjacent image-tile pair, mirroring REAL Roche
+	// DP 200 exactly (verified against Ventana-1.bif): horizontal joins use
+	// Direction "LEFT" with Tile1=left-column / Tile2=right-column neighbor;
+	// vertical joins use "UP" with Tile1=lower-row / Tile2=upper-row(=row-1)
+	// neighbor. Tile indices are 1-based serpentine numbers; OverlapX/OverlapY=0
+	// (abutting tiles — a value real files also use). This is the spec/real-Roche
+	// convention that opentile and bio-formats (the serpentine readers that read
+	// genuine Roche) expect. NOTE: openslide only accepts "RIGHT"/"UP" and will
+	// reject these "LEFT" joins — but openslide reads DP 200 tiles row-major and
+	// cannot render real serpentine Roche slides anyway, so it is a metadata-only
+	// oracle here; we do NOT distort the stitch graph to satisfy it.
 	tile := func(col, row int) int { return imageToSerpentine(col, row, cols, rows) + 1 }
 	var joints []byte
 	for row := 0; row < rows; row++ {
-		for col := 0; col+1 < cols; col++ { // horizontal RIGHT joins
+		for col := 0; col+1 < cols; col++ { // horizontal LEFT joins
 			joints = append(joints, []byte(fmt.Sprintf(
-				`<TileJointInfo FlagJoined="1" Confidence="100" Direction="RIGHT" `+
+				`<TileJointInfo FlagJoined="1" Confidence="100" Direction="LEFT" `+
 					`Tile1="%d" Tile2="%d" OverlapX="0" OverlapY="0"/>`,
 				tile(col, row), tile(col+1, row)))...)
 		}
