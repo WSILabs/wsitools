@@ -71,6 +71,13 @@ editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
 - `make test` runs with `-race -count=1`.
 - Integration tests gated by `WSI_TOOLS_TESTDIR` env var (default
   `./sample_files`).
+- `make test`/`make cover` run a `check-fixtures` preflight: when
+  `WSI_TOOLS_TESTDIR` is **set**, it fails loud unless the dir exists and holds
+  the sentinel `svs/CMU-1-Small-Region.svs` — so a stale/wrong path (e.g. left
+  over from a repo move) can't make every fixture-gated test silently skip and
+  masquerade as a green run. **Unset** is a no-op (unit-only / fresh-checkout
+  case; the Go helpers then fall back to the `./sample_files` symlink). If you
+  hit the error, fix the path or `unset WSI_TOOLS_TESTDIR`.
 - CI downloads fixtures from `wsilabs/wsi-fixtures` **v7** (`svs.tar` — incl. the
   `590_crop` ImageScope export crops, `ndpi.tar`, `cog-wsi.tar`, `dicom.tar` —
   incl. the 3DHISTECH JP2K/HTJ2K + scan_621 Grundium DICOM-WSM fixtures,
