@@ -143,8 +143,8 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   IFDs plus a generated whole-slide overview and synthesized `<iScan>`/
   `<EncodeInfo>` metadata (scanner model, MPP, magnification). **JPEG** sources
   are **tile-copied verbatim** (fast, no re-encode); **non-JPEG** sources
-  re-encode to JPEG with **`--codec jpeg`** (self-contained tiles; serial, slow
-  for large slides). Output renders correctly in **bio-formats / QuPath**. Tile
+  re-encode to JPEG with **`--codec jpeg`** (self-contained tiles, on a
+  `--workers` pool). Output renders correctly in **bio-formats / QuPath**. Tile
   storage is **row-major** with serpentine-numbered stitch joins, matching
   genuine `Ventana-1.bif` (the whitepaper's "serpentine" describes the
   stitch-graph numbering, not the pixel storage — opentile-go's reader has a
