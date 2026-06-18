@@ -139,17 +139,17 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   not yet wire up the JPEG 2000 / HTJ2K encoders (which exist for the TIFF
   family, see `--codec` above); the tile encode runs on a `--jobs` worker pool.
 - `wsitools convert --to bif` — **early** (experimental). Writes a Ventana/Roche
-  **DP 200-shaped BIF** from any JPEG-tiled source: the full pyramid as
-  row-major `level=N` IFDs (verbatim JPEG tile-copy — fast, no re-encode) plus a
-  generated whole-slide overview and synthesized `<iScan>`/`<EncodeInfo>`
-  metadata (scanner model, MPP, magnification). Output renders correctly in
-  **bio-formats / QuPath**. Tile storage is **row-major** with serpentine-numbered
-  stitch joins, matching genuine `Ventana-1.bif` (the whitepaper's "serpentine"
-  describes the stitch-graph numbering, not the pixel storage — opentile-go's
-  reader has a serpentine bug here, filed upstream). Limitations: JPEG sources
-  only (non-JPEG is rejected with a pointer to re-encode first); single-AOI, no
-  Z; no source associated images or probability map carried; no
-  `--factor`/`--target-mag`.
+  **DP 200-shaped BIF** from any source: the full pyramid as row-major `level=N`
+  IFDs plus a generated whole-slide overview and synthesized `<iScan>`/
+  `<EncodeInfo>` metadata (scanner model, MPP, magnification). **JPEG** sources
+  are **tile-copied verbatim** (fast, no re-encode); **non-JPEG** sources
+  re-encode to JPEG with **`--codec jpeg`** (self-contained tiles; serial, slow
+  for large slides). Output renders correctly in **bio-formats / QuPath**. Tile
+  storage is **row-major** with serpentine-numbered stitch joins, matching
+  genuine `Ventana-1.bif` (the whitepaper's "serpentine" describes the
+  stitch-graph numbering, not the pixel storage — opentile-go's reader has a
+  serpentine bug here, filed upstream). Limitations: single-AOI, no Z; no source
+  associated images or probability map carried; no `--factor`/`--target-mag`.
 - `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
   40x → 20x), **format-preserving**: the output is the same container as the
   source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,
