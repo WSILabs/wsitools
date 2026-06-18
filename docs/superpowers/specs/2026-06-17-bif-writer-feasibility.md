@@ -287,9 +287,54 @@ generator and serpentine ordering are the genuinely novel parts (and land in
 Phase 2); Phase 1 is mostly offset-patching + byte-splice, close to the existing
 SVS `label remove`.
 
+## 6a. Phase 0 results (2026-06-17) — what the openslide test actually found
+
+Phase 0 shipped (merged to main: `internal/tiff/bifwriter`, opentile round-trip
+pixel-identical). The owner's openslide check was then run **in-house** (openslide
+4.0.0, brew) directly on the spec-shaped artifact, with concrete, decision-shaping
+results:
+
+1. **openslide requires `<TileJointInfo>` and only accepts `Direction="RIGHT"` /
+   `"UP"`.** Its Ventana driver errors `"Couldn't find tile joint info"` without
+   them, and its `get_tile_coordinates` rejects any direction other than RIGHT/UP
+   (the exact reason it rejects *real* Roche DP 200 files, which use `LEFT`). The
+   writer now emits RIGHT/UP joints (commit on `feat/bif-openslide-dialect`), and
+   **openslide then fully accepts the file**: `openslide.vendor: ventana`, all
+   `ventana.*` iScan properties, MPP 0.25, objective-power 40, the overview as a
+   macro image. So we *can* produce a DP 200 BIF openslide ingests — a thing
+   openslide can't do with genuine Roche output.
+
+2. **opentile and openslide use OPPOSITE tile byte-orders — verified empirically.**
+   openslide reads tile pixel data **row-major** (libtiff-native `row*cols+col`),
+   while opentile (and the whitepaper, Fig 2) use **serpentine**. Proof: our
+   spec-correct *serpentine* file renders **scrambled** in openslide, but a
+   throwaway *row-major* variant renders **spatially coherent** in openslide
+   (tissue silhouette matches the source) — and conversely the row-major variant
+   breaks the opentile round-trip. **One byte-order cannot satisfy both readers.**
+   Since the whitepaper mandates serpentine and openslide already can't read real
+   DP 200, **serpentine is authoritative and openslide's row-major DP 200 read is
+   an openslide limitation, not our bug.**
+
+**Consequences for the plan:**
+- **openslide is a structural/metadata oracle only, NOT a placement oracle** for
+  spec-compliant DP 200. Don't contort the writer to openslide's row-major
+  placement at the cost of spec/opentile correctness.
+- **Roche viewer is the real tiebreaker** and the one remaining unknown: does it
+  agree with the whitepaper/opentile serpentine (expected) — render the
+  serpentine artifact correctly? That single owner test, on
+  `/tmp/wsitools-spike.bif`, confirms the convention before Phase 1+ synthesis.
+- A separate, lower-priority finding: even the row-major variant rendered with
+  **off colors** (greenish) in openslide — a color-space issue from feeding
+  verbatim Aperio-SVS JPEG tiles (APP14/RGB) into a YCbCr-declared BIF. Cosmetic
+  for the spatial question; a Phase-1+ concern for real origination.
+
 ## 7. Risks & open questions
 
-- **Oracle / dialect question (was "the biggest risk", now manageable).** There
+- **Oracle / dialect question — now substantially resolved (see §6a).** The
+  serpentine-vs-row-major split between opentile and openslide is measured, not
+  hypothetical; serpentine (whitepaper) wins, openslide is a metadata-only oracle.
+  The sole remaining unknown is the **Roche viewer** acceptance of the serpentine
+  artifact (owner test). Historical framing retained below.
   is no single drop-in BIF validator (no `dciodvfy` equivalent), but §5's
   multi-oracle approach covers it: opentile round-trip + openslide + Roche viewer
   + QuPath + Appendix-A self-check. The remaining sharp question is **which BIF
