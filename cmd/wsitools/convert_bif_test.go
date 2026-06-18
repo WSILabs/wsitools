@@ -64,6 +64,34 @@ func TestConvertToBIFReencode(t *testing.T) {
 	}
 }
 
+// TestConvertToBIFOverviewDims: the overview ("Label_Image") is emitted at the
+// DP 200 canonical 1251×3685 portrait, and the reader crops the label as its
+// top 1/3 (1251×1228) — for both carry-through and synthesized overviews.
+func TestConvertToBIFOverviewDims(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "o.bif")
+	if o, err := runBin(bin, "convert", "--to", "bif", "-f", "-o", out, src); err != nil {
+		t.Fatalf("convert --to bif: %v\n%s", err, o)
+	}
+	info := string(mustInfo(t, bin, out))
+	if !strings.Contains(info, "overview") || !strings.Contains(info, "1251 × 3685") {
+		t.Errorf("expected overview 1251 × 3685 (DP 200 canonical):\n%s", info)
+	}
+	if !strings.Contains(info, "label") || !strings.Contains(info, "1251 × 1228") {
+		t.Errorf("expected synthesized label 1251 × 1228 (top 1/3 of overview):\n%s", info)
+	}
+}
+
+func mustInfo(t *testing.T, bin, path string) []byte {
+	t.Helper()
+	out, _ := runBin(bin, "info", path)
+	return out
+}
+
 // TestConvertToBIFRejectsBadCodec: BIF only supports --codec jpeg.
 func TestConvertToBIFRejectsBadCodec(t *testing.T) {
 	bin := stripedBinary(t)

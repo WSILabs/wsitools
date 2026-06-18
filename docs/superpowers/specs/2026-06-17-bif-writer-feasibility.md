@@ -431,3 +431,41 @@ re-containered level + opentile round-trip test), then run the owner-side oracle
 checks on its output before planning Phase 1+. The only input needed from the
 owner is access to the BIF fixtures (have them) and the manual viewer checks at
 the end of Phase 0.
+
+## 10. Cleanup / known issues (post-shipping — TODO before this is "done")
+
+`convert --to bif` (read→originate→re-encode→overview) is **shipped and renders
+correctly in bio-formats/QuPath**, but it's **close, not finished** — a cleanup
+pass is owed. Known rough edges:
+
+- **Spike code lingering.** `bifwriter.WriteSingleLevel` and `WriteSpecShaped`
+  (Phase-0 spike, single-level) coexist with the real `WritePyramid`. Consolidate
+  to `WritePyramid` and delete/retire the spike writers (and their tests) once
+  nothing else needs them.
+- **Overview fidelity is approximate.**
+  - Carry-through orientation: `rotate90CW` assumes the Aperio "label-on-left"
+    convention; a scanner that images label-right (or a non-Aperio macro) would
+    land the label at the *bottom*, so the reader's top-1/3 label crop would be
+    tissue. Needs a more principled orientation decision (or per-format rule).
+  - Synthesized overview: tissue is just letterbox-centered in the bottom 2/3 and
+    the label band is blank white — fine structurally, but not a faithful slide
+    layout.
+  - Overview is always emitted at the full 1251×3685 uncompressed (~13.8 MB)
+    regardless of slide size — wasteful for small inputs; consider sizing/JPEG.
+- **Only the overview is carried.** No separate `label`/`thumbnail` IFD and no
+  `Probability_Image` (DP 200 IFD 1) — the "label" is purely the reader's
+  top-1/3 crop of the overview.
+- **Colour space.** Verbatim (and re-encoded) Aperio APP14/RGB JPEG tiles sit in
+  a `Photometric=YCbCr`-declared BIF; some readers may render off-colour. Decide
+  whether to normalise on re-encode / set photometric per actual tile framing.
+- **Metadata is thin.** Hardcoded fallbacks (e.g. magnification → 40 when
+  unknown), no ICC carried, `<EncodeInfo>` is a minimal single-AOI/zero-overlap
+  stitch graph. Fine for the readers tested; not full DP 200 fidelity.
+- **Scope gaps (by design, Phase 1):** no `--factor`/`--target-mag`, no multi-AOI,
+  no Z-stacks.
+- **Upstream dependency:** opentile-go mis-renders our (correct) output until
+  **opentile-go#57** lands (its serpentine read bug); #58 (docs) and #59 (spatial
+  test oracle) also open.
+
+None of these block the current use (bio-formats/QuPath read it correctly); they
+are the backlog for making `--to bif` production-grade.

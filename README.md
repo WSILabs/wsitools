@@ -140,7 +140,9 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   family, see `--codec` above); the tile encode runs on a `--jobs` worker pool.
 - `wsitools convert --to bif` — **early** (experimental). Writes a Ventana/Roche
   **DP 200-shaped BIF** from any source: the full pyramid as row-major `level=N`
-  IFDs plus a generated whole-slide overview and synthesized `<iScan>`/
+  IFDs plus a whole-slide overview (the source's `overview`/`macro` carried
+  through and oriented to portrait when present, else synthesized from the
+  tissue at the DP 200 canonical 1251×3685) and synthesized `<iScan>`/
   `<EncodeInfo>` metadata (scanner model, MPP, magnification). **JPEG** sources
   are **tile-copied verbatim** (fast, no re-encode); **non-JPEG** sources
   re-encode to JPEG with **`--codec jpeg`** (self-contained tiles, on a
