@@ -19,8 +19,9 @@ const explicitVRLE = "1.2.840.10008.1.2.1"
 //
 // WORKING CONSTRUCTION (verified by TestNativePixelDataRoundTrip): unlike the
 // encapsulated path (see encapsulate.go), dicom.NewElement(tag.PixelData, ...)
-// works as-is for the native case. NewElement forces RawVR "OW" and leaves
-// ValueLength at its zero value (0). In write.go's writeElement the element's
+// works as-is for the native case. NewElement picks RawVR by bit depth ("OB"
+// for these 8-bit samples) and leaves ValueLength at its zero value (0). In
+// write.go's writeElement the element's
 // ValueLength (0) is passed through to writePixelData, where `vl == 0` is NOT
 // VLUndefinedLength, so it routes to the NATIVE branch. That branch reads
 // NativeData.Rows()/Cols()/SamplesPerPixel()/BitsPerSample() and, for
@@ -42,6 +43,12 @@ func nativePixelData(rgb []byte, rows, cols, samples int) (*dicom.Element, error
 		InternalCols:            cols,
 		InternalBitsPerSample:   8,
 	}
+	// dicom.NewElement selects the PixelData VR by native bit depth: 8-bit
+	// samples get VR "OB" (Other Byte), as DICOM requires — with "OW" a
+	// conformant reader (e.g. opentile) would read the 8-bit buffer as 16-bit
+	// words and collapse every RGB triple to grayscale. (This used to need a
+	// manual `el.RawValueRepresentation = "OB"` override here; the fork now does
+	// it at the source — WSILabs/dicom pixelDataVR, v1.1.0-wsilabs.2.)
 	el, err := dicom.NewElement(tag.PixelData, dicom.PixelDataInfo{
 		IsEncapsulated: false,
 		Frames:         []*frame.Frame{{Encapsulated: false, NativeData: nf}},
@@ -49,13 +56,5 @@ func nativePixelData(rgb []byte, rows, cols, samples int) (*dicom.Element, error
 	if err != nil {
 		return nil, err
 	}
-	// dicom.NewElement hardcodes VR "OW" (16-bit Other Word) for PixelData
-	// regardless of bit depth (element.go: `if t == tag.PixelData { rawVR = "OW" }`).
-	// Our samples are 8-bit, so DICOM requires VR "OB" (Other Byte): with OW a
-	// conformant reader (e.g. opentile) interprets the 8-bit buffer as 16-bit
-	// words and collapses every RGB triple to grayscale — a silently lossy
-	// transcode. Override to OB; PixelData's allowed VRs are {OB, OW}, so the
-	// write-side VR check accepts it.
-	el.RawValueRepresentation = "OB"
 	return el, nil
 }
