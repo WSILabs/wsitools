@@ -62,7 +62,8 @@ func TestBuildReplacementStrippedSpec_Codecs(t *testing.T) {
 		o        replaceOpts
 		wantComp uint16
 	}{
-		{"label default jpeg", replaceOpts{typ: "label"}, 7},
+		{"label default lzw (non-ome)", replaceOpts{typ: "label"}, 5},
+		{"label ome default jpeg", replaceOpts{typ: "label", format: "ome-tiff"}, 7},
 		{"overview default jpeg", replaceOpts{typ: "overview"}, 7},
 		{"explicit lzw", replaceOpts{typ: "label", compression: "lzw"}, 5},
 		{"explicit none", replaceOpts{typ: "label", compression: "none"}, 1},

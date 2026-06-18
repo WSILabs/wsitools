@@ -303,16 +303,21 @@ func buildReplacementAssocSpec(img image.Image, o replaceOpts) (*cogwsiwriter.As
 // = height, NewSubfileType via newSubfileTypeForAssoc, WSIImageType) matches the
 // verbatim associated specs writeAssociatedImages emits.
 func buildReplacementStrippedSpec(img image.Image, o replaceOpts) (*streamwriter.StrippedSpec, error) {
-	// Default to JPEG for ALL types (including label). opentile-go's OME-TIFF
-	// associated reader recognizes only Compression 7 (JPEG) and 1 (none) —
-	// LZW/Deflate associated images read back as CompressionUnknown and are not
-	// decodable (formats/ometiff/tiled.go tiffCompressionToOpentile). This is
-	// unlike the SVS/COG-WSI/generic-TIFF readers, which DO decode LZW associated
-	// images (so those paths keep the label→LZW default). An explicit
-	// --compression lzw|deflate is honored but warns it won't round-trip on read.
+	// Default codec: label → LZW (lossless, barcode/PHI-safe), other types → JPEG,
+	// matching buildReplacementIFD (the splice path) so a label replace has the
+	// same fidelity whether it splices or falls back to this rebuild. OME-TIFF is
+	// the exception: opentile-go's OME-TIFF associated reader decodes only
+	// Compression 7 (JPEG) and 1 (none) — LZW/Deflate read back as
+	// CompressionUnknown (formats/ometiff/tiled.go tiffCompressionToOpentile) — so
+	// the OME caller (format == "ome-tiff") forces JPEG for every type. The
+	// SVS/COG-WSI/generic-TIFF readers DO decode LZW associated images.
 	codec := o.compression
 	if codec == "" {
-		codec = "jpeg"
+		if o.typ == "label" && o.format != "ome-tiff" {
+			codec = "lzw"
+		} else {
+			codec = "jpeg"
+		}
 	}
 	if o.targetW != 0 || o.targetH != 0 {
 		prepared, err := fitImage(img, o)
