@@ -89,7 +89,8 @@ func runConvertBitExactTest(t *testing.T, formatSubdir string) {
 				errStr := err.Error()
 				if strings.Contains(errStr, "source compression") ||
 					strings.Contains(errStr, "format unsupported") ||
-					strings.Contains(errStr, "open source") {
+					strings.Contains(errStr, "open source") ||
+					strings.Contains(errStr, "overlapping/stitched") {
 					t.Skipf("convert skipped (expected rejection): %v", err)
 				}
 				t.Fatalf("convert: %v", err)

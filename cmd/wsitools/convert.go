@@ -101,6 +101,12 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--dzi-format must be jpeg or png, got %q", cvDZIFormat)
 	}
 
+	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't
+	// composite them (dzi/szi exempt — they use the streaming descent).
+	if err := guardStitchedSource(input, cvTo); err != nil {
+		return err
+	}
+
 	switch cvTo {
 	case "cog-wsi":
 		return runConvertCOGWSI(cmd, input, start)
