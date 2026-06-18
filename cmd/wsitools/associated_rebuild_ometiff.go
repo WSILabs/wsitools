@@ -175,6 +175,7 @@ func runAssociatedReplaceForOMETIFF(typ, input, outPath string, fl replaceFlags)
 	}
 	spec, err := buildReplacementStrippedSpec(img, replaceOpts{
 		typ:         typ,
+		format:      "ome-tiff", // forces JPEG default (opentile OME reader decodes only JPEG/none)
 		compression: fl.compression,
 		resize:      resize,
 		bg:          bg,

@@ -354,6 +354,7 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 			(src.Format() == string(opentile.FormatGenericTIFF) || src.Format() == "svs") {
 			spec, serr := buildReplacementStrippedSpec(img, replaceOpts{
 				typ:         typ,
+				format:      src.Format(),
 				compression: fl.compression,
 				resize:      resize,
 				bg:          bg,
