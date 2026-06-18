@@ -37,6 +37,32 @@ func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
 		frames = append(frames, []byte(fmt.Sprintf(
 			`<Frame XY="%d,%d" Z="0" Focus="0"/>`, col, row))...)
 	}
+
+	// TileJointInfo: one per adjacent image-tile pair. openslide's Ventana
+	// driver requires these (else "Couldn't find tile joint info") and only
+	// accepts Direction "RIGHT" (tile2 is the right image-column neighbor) or
+	// "UP" (tile2 is one image-row toward the top); it rejects the "LEFT"/"DOWN"
+	// that real Roche files emit. Tile indices are 1-based serpentine numbers.
+	// OverlapX/OverlapY are 0 (abutting tiles).
+	tile := func(col, row int) int { return imageToSerpentine(col, row, cols, rows) + 1 }
+	var joints []byte
+	for row := 0; row < rows; row++ {
+		for col := 0; col+1 < cols; col++ { // horizontal RIGHT joins
+			joints = append(joints, []byte(fmt.Sprintf(
+				`<TileJointInfo FlagJoined="1" Confidence="100" Direction="RIGHT" `+
+					`Tile1="%d" Tile2="%d" OverlapX="0" OverlapY="0"/>`,
+				tile(col, row), tile(col+1, row)))...)
+		}
+	}
+	for col := 0; col < cols; col++ {
+		for row := 1; row < rows; row++ { // vertical UP joins (tile2 one row up)
+			joints = append(joints, []byte(fmt.Sprintf(
+				`<TileJointInfo FlagJoined="1" Confidence="100" Direction="UP" `+
+					`Tile1="%d" Tile2="%d" OverlapX="0" OverlapY="0"/>`,
+				tile(col, row), tile(col, row-1)))...)
+		}
+	}
+
 	return []byte(fmt.Sprintf(
 		`<?xml version="1.0" encoding="UTF-8"?>`+
 			`<EncodeInfo Ver="2">`+
@@ -45,10 +71,11 @@ func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
 			`</SlideInfo>`+
 			`<SlideStitchInfo>`+
 			`<ImageInfo AOIScanned="1" AOIIndex="0" NumRows="%d" NumCols="%d" Width="%d" Height="%d" Pos-X="0" Pos-Y="0">`+
+			`%s`+
 			`<FrameInfo AOIScanned="1" AOIIndex="0">%s</FrameInfo>`+
 			`</ImageInfo>`+
 			`</SlideStitchInfo>`+
 			`<AoiOrigin><AOI0 OriginX="0" OriginY="0"/></AoiOrigin>`+
 			`</EncodeInfo>`,
-		tileW, tileH, rows, cols, rows, cols, tileW, tileH, frames))
+		tileW, tileH, rows, cols, rows, cols, tileW, tileH, joints, frames))
 }
