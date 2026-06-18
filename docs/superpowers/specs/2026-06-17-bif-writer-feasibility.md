@@ -467,5 +467,7 @@ pass is owed. Known rough edges:
   **opentile-go#57** lands (its serpentine read bug); #58 (docs) and #59 (spatial
   test oracle) also open.
 
+**Tracked as wsitools#11 (--factor/--target-mag), #12 (format-preserving downsample/crop), #13 (associated images + overview fidelity), #14 (ICC + colour-space), #15 (consolidate spike writers); CI round-trip via #2; read-side via opentile-go#57.**
+
 None of these block the current use (bio-formats/QuPath read it correctly); they
 are the backlog for making `--to bif` production-grade.
