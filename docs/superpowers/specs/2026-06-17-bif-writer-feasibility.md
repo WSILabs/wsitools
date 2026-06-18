@@ -13,11 +13,22 @@ below are to that PDF.
 
 ## 1. Goal
 
-Determine what it would take for wsitools to **write** a conformant BIF
-(Biolmagene Image File / Roche Ventana) and scope the smallest version worth
-building. Today wsitools can *read* BIF (via opentile-go) but `convert --to`
-targets are only `cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom` — there is no BIF
-emitter anywhere in `internal/`.
+Determine what it would take for wsitools to **write** conformant BIF
+(Biolmagene Image File / Roche Ventana). Two drivers, both first-class:
+
+1. **Originate** — `convert --to bif`: write a BIF from any opentile-readable WSI
+   (SVS, generic-TIFF, etc.).
+2. **Modify existing BIFs** — BIF→BIF transforms that keep the BIF container:
+   downsample, crop, metadata/associated-image edits, and **label removal as one
+   subset** of these.
+
+Today wsitools can *read* BIF (via opentile-go) but `convert --to` targets are
+only `cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom` and there is no BIF emitter
+anywhere in `internal/`, so neither driver is possible yet.
+
+The two drivers share a writer core but differ sharply in difficulty (§2): the
+modify path can often **copy** the source's real scanner metadata (EncodeInfo,
+iScan XMP, ICC) verbatim, where origination must **synthesize** it.
 
 ## 2. What "compliant BIF" means (and the scope boundary)
 
@@ -33,27 +44,38 @@ attempted." Therefore:
   **out of spec** and is a non-goal. It is only *readable* because openslide and
   opentile-go are permissive.
 
-### In scope (the recommended v1 — "Tier B, narrowed")
+All output targets the **spec-compliant DP 200 dialect** (BigTIFF, the IFD roles
+in §3.2, `EncodeInfo Ver≥2`, serpentine order). Within that, work splits by
+difficulty:
 
-A spec-compliant DP 200 BIF writer for the **common single-image case**:
+**(A) Modify-existing, L0-preserving — easiest, highest fidelity, recommended
+first.** Transforms that do *not* change the level-0 tile grid: label removal,
+associated-image edits, metadata edits. These **copy the source BIF's real tiles,
+EncodeInfo, iScan XMP, ICC, and probability image verbatim** and rewrite only the
+targeted bytes (e.g. blank the overview label band + clear barcode attributes for
+label removal). No EncodeInfo synthesis, no re-encode, no overview/probability
+fabrication — closest to wsitools' existing SVS `label remove` byte-splice.
 
-- **Single AOI** (one rectangular scanned region = the whole pyramid; no
-  multi-AOI convex-hull merging).
-- **Brightfield, 8-bit RGB, single focal plane** (no Z-stack; `Z-layers=1`).
-- **No tile overlap** (`OverlapX=0, OverlapY=0` — abutting tiles; spec-legal, see
-  §4.5). Source pyramids from other WSIs have non-overlapping tiles, so this is
-  the natural and correct choice.
-- **Two source modes:**
-  - *Transcode* — any opentile-readable WSI → BIF (re-encode pyramid tiles to
-    JPEG/YCbCr).
-  - *BIF→BIF transform* — verbatim tile copy (the motivating use case: produce a
-    label-stripped BIF that stays a BIF; see §8).
+**(B) Modify-existing, L0-changing — medium.** Crop and downsample change the
+level-0 tile grid, so the EncodeInfo stitch graph and tile-offset arrays must be
+**regenerated** for the new geometry (same machinery as origination), but the
+iScan XMP / ICC / scanner identity can still be carried from the source.
+
+**(C) Originate (`convert --to bif`) — hardest.** Everything synthesized from a
+non-BIF source: EncodeInfo, iScan XMP, overview + probability IFDs, ICC.
+
+The synthesis paths (B, C) are scoped to the **common single-image case**:
+single AOI; brightfield, 8-bit RGB, single focal plane (`Z-layers=1`); no tile
+overlap (`OverlapX=0, OverlapY=0` — abutting tiles; spec-legal, the natural
+choice when the source pyramid is non-overlapping). The copy path (A) inherits
+whatever the source has (incl. multi-AOI / overlap) because it doesn't touch the
+stitch graph.
 
 ### Explicit non-goals (v1)
 
-Multi-AOI scans; volumetric Z-stacks; tile overlap synthesis; the legacy-iScan
-dialect; fluorescence/non-brightfield; bit depths other than 8; producing files
-that satisfy readers we cannot test against (see §7, the oracle problem).
+*Synthesizing* multi-AOI scans, volumetric Z-stacks, or tile overlap (path A
+preserves them if already present); the legacy-iScan dialect as an output target;
+fluorescence/non-brightfield; bit depths other than 8.
 
 ## 3. Authoritative format requirements (from the whitepaper)
 
@@ -163,12 +185,19 @@ vendor metadata caller-side, emit it through a shared low-level writer.**
   as the structural template.
 
 ### 4.2 New code
+The full list below is what *origination* (path C) needs. **Path A (modify,
+L0-preserving — Phase 1) needs only item 1** plus a byte-splice: it copies the
+source's tiles, EncodeInfo/iScan/ICC, and probability IFD verbatim, so items 2–4
+(the synthesis modules) are deferred to Phases 2–3.
+
 1. **`internal/tiff/bifwriter`** — a new **spool-and-finalize** writer modeled on
    `cogwsiwriter` (NOT a streamwriter extension). Rationale: BIF tile file-offsets
    cannot be assigned until emission order (serpentine) is fixed, and the offset
    array may be sparse (empty tiles). Responsibilities: spool tiles → plan
    serpentine-ordered offsets → emit IFD 0/1/2/3+ with the role tags → patch the
-   flat IFD chain + header. Reuses `internal/tiff` primitives throughout.
+   flat IFD chain + header. Reuses `internal/tiff` primitives throughout. Also
+   hosts the path-A copy-and-splice mode (carry source IFDs verbatim, rewrite
+   targeted bytes, re-patch offsets).
 2. **`internal/bifxml` (writer side)** — synthesize the `<iScan>`, `<PreScanData>`,
    and `<EncodeInfo>` XML blobs. The EncodeInfo generator is the substantive
    piece (§3.5); deterministic for single-AOI/no-overlap/no-Z.
@@ -191,46 +220,95 @@ is the test). Origin lower-left, even stage rows L→R, odd rows R→L.
 
 ## 5. Verification strategy
 
-1. **Round-trip pixel identity:** write BIF → open with opentile-go BIF reader →
-   `hash --mode pixel` equals the source. This is the primary functional gate
-   (catches serpentine errors — wrong order fails the hash).
-2. **Conformance self-check against Appendix A:** assert the exact tag set per IFD
-   role, the mandated constant values (`ScannerModel="VENTANA DP 200"`,
-   `EncodeInfo Ver≥2`, `FlagJoined=1`, `Confidence=100`, `OverlapY=0`, odd
-   `Z-layers`), and the `level=N mag=M quality=Q` grammar. This validates against
-   the *spec*, not just the reader.
-3. **Structural byte-parity (optional):** opentile-go has a tifffile oracle
-   (`tests/oracle/tifffile_test.go`) — a tifffile-based structural read of our
-   output would be an independent cross-check of the TIFF/BigTIFF layout.
+A **multi-oracle** approach — this is the key change from the original draft,
+which over-weighted the "no validator" risk. We have several independent
+consumers to test against:
+
+**Automated (CI-able):**
+1. **opentile-go round-trip pixel identity** — write BIF → reopen → `hash --mode
+   pixel` equals the source. Primary functional gate; catches serpentine errors
+   (wrong tile order fails the hash). Necessary but, being our own reader, not
+   sufficient.
+2. **openslide as an independent oracle** — openslide has a Ventana BIF driver.
+   Read our output through openslide (Python `openslide` or `openslide-show-
+   properties` / region reads) and compare pixels/dims. **Caveat to resolve
+   empirically (§7):** opentile-go's notes say openslide *rejects* the DP 200
+   fixture `Ventana-1.bif` over `Direction="LEFT"`. Whether our **zero-overlap**
+   output trips the same path is unknown and is a Phase-0 question — if openslide
+   accepts zero-overlap DP 200, it becomes our best automated third-party gate.
+3. **Conformance self-check against Appendix A** — assert the exact per-IFD tag
+   set, mandated constants (`ScannerModel="VENTANA DP 200"`, `EncodeInfo Ver≥2`,
+   `FlagJoined=1`, `Confidence=100`, `OverlapY=0`, odd `Z-layers`), and the
+   `level=N mag=M quality=Q` grammar. Validates against the *spec*, not a reader.
+4. **tifffile structural parity (optional)** — opentile-go has a tifffile oracle;
+   a tifffile structural read independently checks the BigTIFF/IFD/tag layout.
+
+**Manual (authoritative, owner-driven):**
+5. **Roche viewer** — the definitive consumer; if Roche's own viewer renders our
+   output correctly, that is the strongest possible conformance signal. (Owner
+   has access.)
+6. **QuPath** — reads BIF via bio-formats and/or openslide, so it exercises *those*
+   readers too (a third independent code path). (Owner has access.)
+7. **Possibly Roche's own conformance tooling/SDK** — owner *may* obtain access;
+   **do not count on it** for planning.
+
+Build/test posture: gate (1)+(3) in CI from day one; add (2)+(4) once Phase 0
+settles the openslide-dialect question; treat (5)+(6) as owner-run acceptance
+checkpoints at the end of Phase 0 and each subsequent phase.
 
 ## 6. Effort & phasing
 
-- **Phase 0 — de-risk the central gap (spike):** implement the serpentine remap +
-  a minimal `bifwriter` that re-containers one source level into a tiled BIF IFD 2
-  with a hand-built `<iScan>`+`<EncodeInfo>`, and prove the round-trip pixel hash
-  against opentile on one fixture. This validates the riskiest assumption
-  (serpentine + EncodeInfo placement) before committing to the full writer.
-- **Phase 1 — full single-AOI writer:** all IFDs (0/1/2/3+), full EncodeInfo
-  synthesis, ICC, overview+probability generation, `--to bif` routing,
-  conformance self-check.
-- **Phase 2 (deferred / maybe never):** BIF→BIF verbatim transform for label
-  removal (§8); multi-AOI; Z-stacks; legacy-iScan dialect.
+Sequenced easiest-first, so each phase ships a usable capability and the hard
+synthesis work is de-risked before it's relied on.
+
+- **Phase 0 — de-risk the core (spike + dialect resolution).** Build the
+  serpentine remap + a minimal `bifwriter` that re-containers one level into a
+  tiled BIF IFD 2 with a hand-built `<iScan>`+`<EncodeInfo>`; prove opentile
+  round-trip pixel-hash on one fixture; then **run that output through openslide,
+  Roche viewer, and QuPath** to settle the dialect question (§7). Validates the
+  riskiest assumptions (serpentine placement *and* which dialect the real
+  consumers accept) before any larger commitment.
+- **Phase 1 — modify-existing, L0-preserving (path A; includes label removal).**
+  The `bifwriter` offset/IFD-chain core + verbatim copy of tiles/EncodeInfo/iScan/
+  ICC/probability, rewriting only targeted bytes. Ships `bif label remove` (and
+  the other associated/metadata edits) — real scanner data preserved, no
+  synthesis. Highest fidelity, smallest new surface.
+- **Phase 2 — synthesis core + L0-changing modifies (path B).** EncodeInfo +
+  serpentine offset *regeneration* for a new tile grid; wires up BIF→BIF
+  `downsample`/`crop` (carry source iScan/ICC, regenerate stitch graph).
+- **Phase 3 — originate (path C): `convert --to bif`.** Full synthesis from a
+  non-BIF source: iScan XMP, EncodeInfo, overview + probability IFDs, ICC,
+  per-IFD `level=…` ImageDescriptions, routing/plumbing.
+- **Deferred / maybe never:** multi-AOI synthesis; Z-stacks; legacy-iScan dialect.
 
 Rough size: comparable to the DICOM writer effort — a new writer package + a
 metadata-synthesis module + CLI wiring + a conformance harness. The EncodeInfo
-generator and serpentine ordering are the genuinely novel parts; everything else
-follows existing patterns.
+generator and serpentine ordering are the genuinely novel parts (and land in
+Phase 2); Phase 1 is mostly offset-patching + byte-splice, close to the existing
+SVS `label remove`.
 
 ## 7. Risks & open questions
 
-- **The oracle problem (biggest risk).** There is no external BIF validator
-  (no `dciodvfy` equivalent). Worse, **openslide cannot be a Tier-B oracle** — it
-  *rejects* spec-compliant DP 200 BIFs (chokes on `Direction="LEFT"`, per
-  `opentile-go/docs/formats/bif.md`). So our only reader oracle is opentile-go
-  itself, which is partly circular (it proves round-trip, not third-party
-  acceptance), plus tifffile for structural parity. **We cannot prove a real
-  Ventana/Roche system would accept our output without access to one.** The
-  conformance self-check (§5.2) mitigates but does not eliminate this.
+- **Oracle / dialect question (was "the biggest risk", now manageable).** There
+  is no single drop-in BIF validator (no `dciodvfy` equivalent), but §5's
+  multi-oracle approach covers it: opentile round-trip + openslide + Roche viewer
+  + QuPath + Appendix-A self-check. The remaining sharp question is **which BIF
+  dialect satisfies the most consumers at once.** opentile-go's notes say
+  openslide rejects the DP 200 fixture over `Direction="LEFT"`. There is a
+  genuine tension:
+  - *spec-compliant DP 200* (full EncodeInfo, Direction joints) → Roche viewer
+    should accept; openslide *might* reject;
+  - *legacy-ish / "regular BigTIFF"* (the DP 200 can also emit plain BigTIFF
+    without stitch metadata, whitepaper p.3) → openslide-friendly but not the
+    documented BIF.
+
+  **Phase 0 must resolve this empirically:** emit spec-compliant zero-overlap DP
+  200, run it through openslide and (owner) Roche viewer + QuPath, and see what
+  each accepts. If they diverge, decide whether to (a) prioritize spec-compliance
+  (Roche viewer is the authority) and accept openslide-incompatibility, or (b)
+  emit a variant that threads all consumers. This is a real unknown but it is
+  *testable now* with the oracles in hand — not the open-ended risk the first
+  draft implied.
 - **Probability + overview synthesis fidelity:** we'd be fabricating IFD 0/1 that
   no real scanner produced. Conformant per the spec, but their *content* is
   synthetic. Acceptable for v1; flag in output provenance.
@@ -242,43 +320,49 @@ follows existing patterns.
   trivial no-overlap grid; unknown whether any strict consumer expects non-zero
   overlaps or specific `Confidence`/`Pos-X/Y` semantics. Spec says OverlapX=0 is
   legal.
-- **Use-case fit:** if the real need is the label-removal use case (§8), a BIF→BIF
-  *verbatim* transform (Phase 2) is both smaller and higher-fidelity than the full
-  transcode writer — it copies real scanner tiles/metadata and only excises the
-  label, sidestepping overview/probability/ICC synthesis. That may be the right
-  first deliverable instead of Phase 1.
+- **EncodeInfo regeneration correctness (paths B/C):** the synthesized stitch
+  graph must stay self-consistent with the regenerated tile grid (NumRows/NumCols,
+  Frame order = TILE_OFFSETS order, TileJointInfo adjacency). Bugs here read back
+  scrambled — caught by the opentile round-trip hash, but it's the fiddliest code.
 
-## 8. The motivating use case (label removal)
+## 8. Label removal as a subset of modify-existing
 
-This investigation began from "remove the label but keep a BIF container." In BIF
-the printed-label PHI lives in the **overview (IFD 0)** — opentile synthesizes the
+Label removal is **one path-A transform**, not a separate track. In BIF the
+printed-label PHI lives in the **overview (IFD 0)** — opentile synthesizes the
 "label" associated image as the **top 1/3** of the overview (whitepaper's
-25mm-of-75mm label band; `formats/bif/associated.go`). So de-identifying a BIF
-means **blanking the top label band of IFD 0** (and clearing label-bearing XMP
-attributes like `Barcode1D/2D`), while copying everything else verbatim.
+25mm-of-75mm label band; `formats/bif/associated.go`). De-identifying a BIF means
+**blanking the top label band of IFD 0** and clearing label-bearing iScan XMP
+attributes (`Barcode1D`, `Barcode2D`), while copying everything else — pyramid
+tiles, probability image, EncodeInfo, ICC — **verbatim**.
 
-That is a **BIF→BIF verbatim splice** (Phase 2 here), architecturally closer to
-wsitools' existing SVS `label remove` byte-splice than to a full transcode writer:
-copy all pyramid/probability tiles unchanged, rewrite only IFD 0's pixel band and
-the affected XMP, patch offsets. It needs the `bifwriter` offset machinery but
-**not** the overview/probability/ICC synthesis or re-encoding. If label removal is
-the actual goal, recommend scoping a `bif label remove` splice directly rather
-than the general `--to bif` writer.
+That is exactly the path-A byte-splice (Phase 1): copy all tiles + metadata
+unchanged, rewrite only IFD 0's label-band pixels and the affected XMP, patch
+offsets. It needs the `bifwriter` offset machinery but **none** of the
+EncodeInfo/overview/probability/ICC *synthesis*. Architecturally it is the BIF
+analog of wsitools' existing SVS `label remove`. So it falls out almost for free
+once Phase 1's copy-and-patch core exists — no separate design needed.
 
 ## 9. Recommendation
 
-1. **A general `convert --to bif` is feasible but expensive and only
-   self-verifiable** (the oracle problem). Build it only if there's a concrete
-   consumer that needs wsitools to *originate* BIFs and that we can test against.
-2. **If the real driver is label de-identification, do the BIF→BIF verbatim
-   splice instead** (§8) — smaller, higher fidelity (real scanner data preserved),
-   and it directly answers the original question. It still needs a `bifwriter`
-   offset-patching core, so a **Phase 0 spike** (serpentine + offset patching +
-   round-trip on one fixture) de-risks *both* paths and is the recommended next
-   concrete step regardless of which we pursue.
+The driver is **general BIF write + modify** (origination *and* in-place
+transforms), with label removal as one case. Given that, and that we now have
+real external oracles (openslide automated; Roche viewer + QuPath manual):
 
-**Decision needed:** which consumer must accept the output — our own pipeline
-(opentile: achievable now), or a third-party/Roche system (needs an oracle we
-don't have)? And: is the goal originating BIFs (`--to bif`) or de-identifying
-existing ones (`bif label remove`)? The answer selects Phase 1 vs Phase 2 as the
-first build.
+1. **Proceed, sequenced easiest-first** (§6): Phase 0 spike → Phase 1 (modify,
+   L0-preserving, ships label removal) → Phase 2 (synthesis core + crop/downsample)
+   → Phase 3 (`convert --to bif`). Each phase ships a real capability and de-risks
+   the next.
+2. **Phase 0 is the gating decision point.** It answers the one genuine unknown —
+   **which dialect the real consumers accept** (spec-compliant zero-overlap DP 200
+   through openslide / Roche viewer / QuPath). Cheap to build (one level, hand-
+   written XML, one fixture round-trip) and it determines everything downstream.
+3. **All output targets spec-compliant DP 200**; if Phase-0 oracle testing shows
+   openslide can't read it, treat Roche viewer as the authority and keep openslide
+   as a best-effort gate (don't compromise spec-compliance for it).
+
+**Recommended next concrete step:** scope Phase 0 as a small implementation plan
+(serpentine remap + minimal `bifwriter` + hand-authored iScan/EncodeInfo for one
+re-containered level + opentile round-trip test), then run the owner-side oracle
+checks on its output before planning Phase 1+. The only input needed from the
+owner is access to the BIF fixtures (have them) and the manual viewer checks at
+the end of Phase 0.
