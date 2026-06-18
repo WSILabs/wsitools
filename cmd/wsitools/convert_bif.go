@@ -23,8 +23,8 @@ import (
 // tile-copied verbatim; non-JPEG sources require --codec jpeg, which decodes and
 // re-encodes each tile to JPEG (the BIF codec). Single-AOI, no Z.
 //
-// Limitations (Phase 1): re-encode is serial (slow for large non-JPEG slides);
-// no source associated images carried; no probability map;
+// Re-encode runs on a worker pool (--workers / GOMAXPROCS). Limitations
+// (Phase 1): no source associated images carried; no probability map;
 // --factor/--target-mag not yet supported.
 func runConvertBIF(cmd *cobra.Command, input string, start time.Time) error {
 	if cvFactor != 1 || cvTargetMag != 0 {
