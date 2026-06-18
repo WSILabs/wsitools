@@ -62,7 +62,7 @@ Examples:
 
 func init() {
 	convertCmd.Flags().StringVarP(&cvOutput, "output", "o", "", "output file path (required)")
-	convertCmd.Flags().StringVar(&cvTo, "to", "", "conversion target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom)")
+	convertCmd.Flags().StringVar(&cvTo, "to", "", "conversion target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif)")
 	convertCmd.Flags().BoolVarP(&cvForce, "force", "f", false, "overwrite output if it exists")
 	convertCmd.Flags().StringVar(&cvBigTIFFFlag, "bigtiff", "auto", "auto|on|off")
 	convertCmd.Flags().BoolVar(&cvNoAssociated, "no-associated", false, "skip label/macro/thumbnail/overview")
@@ -118,10 +118,12 @@ func runConvert(cmd *cobra.Command, args []string) error {
 			return runConvertFactor(cmd, input, "dicom", start)
 		}
 		return runConvertDICOM(cmd, input, start)
+	case "bif":
+		return runConvertBIF(cmd, input, start)
 	case "":
 		return fmt.Errorf("--to is required")
 	default:
-		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom)", cvTo)
+		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif)", cvTo)
 	}
 }
 

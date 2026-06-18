@@ -3,7 +3,7 @@
 Go-based utilities for whole-slide imaging (WSI) files used in digital
 pathology. CLI bundles read-side inspection (`info`, `dump-ifds`, `extract`,
 `hash`, `region`, `validate`), write-side conversion (`convert --to {cog-wsi, dzi,
-szi, svs, tiff, ome-tiff, dicom}`, `downsample`, `crop`), associated-image
+szi, svs, tiff, ome-tiff, dicom, bif}`, `downsample`, `crop`), associated-image
 editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
 (`doctor`, `version`).
 
@@ -23,7 +23,15 @@ editing (`label|macro|thumbnail|overview remove|replace`), and diagnostics
     `downsample` and `convert --to svs|tiff|ome-tiff`.
   - `internal/tiff/cogwsiwriter` — spool-and-finalize COG-WSI writer;
     backs `convert --to cog-wsi`.
-  Both are pure Go; cgo only inside codec wrappers.
+  - `internal/tiff/bifwriter` — Ventana/Roche **BIF** (DP 200) writer; backs
+    `convert --to bif` (driver in `cmd/wsitools/convert_bif.go`). Verbatim
+    JPEG tile-copy, full pyramid + generated overview + synthesized `<iScan>`/
+    `<EncodeInfo>` XMP. **Tiles stored ROW-MAJOR** (real DP 200, per the file's
+    own `<Frame>` nodes — NOT serpentine, despite the whitepaper prose);
+    `TileJointInfo` stitch IDs use the serpentine physical numbering. Validated
+    against bio-formats/QuPath. opentile-go's BIF reader has a serpentine-storage
+    bug (filed: opentile-go#57/#58/#59) so it mis-renders this output until fixed.
+  All are pure Go; cgo only inside codec wrappers.
 - DICOM-WSM writer = `internal/dicomwriter` (`WritePyramid`/`WriteVolumeInstance`,
   built on `suyashkumar/dicom`); backs `convert --to dicom`. It reads compressed
   frames verbatim from a `source.Source` and emits TILED_FULL WSM instances.
