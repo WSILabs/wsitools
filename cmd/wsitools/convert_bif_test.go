@@ -92,6 +92,29 @@ func mustInfo(t *testing.T, bin, path string) []byte {
 	return out
 }
 
+// TestConvertToBIFOpentileRoundTrip: a verbatim SVS→BIF conversion reads back
+// through opentile (wsitools' own reader) with an identical pixel hash — i.e.
+// opentile places the row-major BIF tiles correctly (opentile-go #57, v0.45.3).
+func TestConvertToBIFOpentileRoundTrip(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "rt.bif")
+	if o, err := runBin(bin, "convert", "--to", "bif", "-f", "-o", out, src); err != nil {
+		t.Fatalf("convert --to bif: %v\n%s", err, o)
+	}
+	digest := func(p string) string {
+		o, _ := runBin(bin, "hash", "--mode", "pixel", p)
+		return pixelDigest(o)
+	}
+	ds, db := digest(src), digest(out)
+	if ds == "" || ds != db {
+		t.Errorf("opentile read of BIF != source pixels:\n src=%s\n bif=%s", ds, db)
+	}
+}
+
 // TestConvertToBIFRejectsBadCodec: BIF only supports --codec jpeg.
 func TestConvertToBIFRejectsBadCodec(t *testing.T) {
 	bin := stripedBinary(t)

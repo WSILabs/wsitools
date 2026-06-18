@@ -146,12 +146,13 @@ for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
   `<EncodeInfo>` metadata (scanner model, MPP, magnification). **JPEG** sources
   are **tile-copied verbatim** (fast, no re-encode); **non-JPEG** sources
   re-encode to JPEG with **`--codec jpeg`** (self-contained tiles, on a
-  `--workers` pool). Output renders correctly in **bio-formats / QuPath**. Tile
-  storage is **row-major** with serpentine-numbered stitch joins, matching
-  genuine `Ventana-1.bif` (the whitepaper's "serpentine" describes the
-  stitch-graph numbering, not the pixel storage — opentile-go's reader has a
-  serpentine bug here, filed upstream). Limitations: single-AOI, no Z; no source
-  associated images or probability map carried; no `--factor`/`--target-mag`.
+  `--workers` pool). Output renders correctly in **bio-formats / QuPath** and (as
+  of opentile-go v0.45.3) round-trips **pixel-identically** through wsitools' own
+  reader. Tile storage is **row-major** with serpentine-numbered stitch joins,
+  matching genuine `Ventana-1.bif` (the whitepaper's "serpentine" describes the
+  stitch-graph numbering, not the pixel storage — opentile-go's BIF read bug we
+  found here is fixed in v0.45.3 / #57). Limitations: single-AOI, no Z; no
+  separate label/thumbnail or probability map carried; no `--factor`/`--target-mag`.
 - `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
   40x → 20x), **format-preserving**: the output is the same container as the
   source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,

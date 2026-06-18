@@ -463,9 +463,8 @@ pass is owed. Known rough edges:
   stitch graph. Fine for the readers tested; not full DP 200 fidelity.
 - **Scope gaps (by design, Phase 1):** no `--factor`/`--target-mag`, no multi-AOI,
   no Z-stacks.
-- **Upstream dependency:** opentile-go mis-renders our (correct) output until
-  **opentile-go#57** lands (its serpentine read bug); #58 (docs) and #59 (spatial
-  test oracle) also open.
+- **Upstream dependency: RESOLVED.** opentile-go #57/#58/#59 fixed in **v0.45.3**
+  — opentile now reads our output pixel-identically (round-trip test added).
 
 **Tracked as wsitools#11 (--factor/--target-mag), #12 (format-preserving downsample/crop), #13 (associated images + overview fidelity), #14 (ICC + colour-space), #15 (consolidate spike writers); CI round-trip via #2; read-side via opentile-go#57.**
 
