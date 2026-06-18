@@ -273,31 +273,44 @@ func TestSVSThumbnailReplaceSingleLevel(t *testing.T) {
 	}
 }
 
-// TestSVSThumbnailReplaceMultiLevelGated: on a multi-level slide the thumbnail
-// (IFD 1) is followed by tiled pyramid levels that the in-place splice can't
-// relocate, so the replace must fail clearly (ErrUnexpectedLayout reported as
-// ErrUnsupportedAssoc) and write no output. Needs a multi-level SVS fixture
-// (CMU-1.svs); the single-level CI fixture exercises the success path above.
+// TestSVSThumbnailReplaceMultiLevelGated: on a multi-level slide where the
+// in-place splice can't relocate the thumbnail (IFD 1 precedes tiled pyramid
+// levels whose L0 data is interleaved with the thumbnail offsets), rebuildSVS
+// takes over and produces a correct output. Needs a multi-level SVS fixture
+// (CMU-1.svs) that triggers ErrUnexpectedLayout from the splice engine.
 func TestSVSThumbnailReplaceMultiLevelGated(t *testing.T) {
 	p := firstExisting(t, "svs/CMU-1.svs")
 	if p == "" {
 		t.Skip("no multi-level SVS fixture (CMU-1.svs)")
 	}
 	in := copyFile(t, p)
-	if _, _, ok := assocOfType(t, in, "thumbnail"); !ok {
+	origSize, origBytes, ok := assocOfType(t, in, "thumbnail")
+	if !ok {
 		t.Skip("fixture has no thumbnail")
 	}
 	png := filepath.Join(t.TempDir(), "x.png")
-	writeSolidPNG(t, png, 400, 300, color.RGBA{10, 20, 30, 255})
+	writeSolidPNG(t, png, origSize.X, origSize.Y, color.RGBA{10, 20, 30, 255})
 	out := filepath.Join(t.TempDir(), "out.svs")
-	err := runAssociatedReplaceFor("thumbnail", in, out, replaceFlags{
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedReplaceFor("thumbnail", in, out, replaceFlags{
 		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, resize: "fit", bgHex: "F5F5E6", force: true,
-	})
-	if !errors.Is(err, ErrUnsupportedAssoc) {
-		t.Fatalf("want ErrUnsupportedAssoc for multi-level SVS thumbnail replace, got %v", err)
+	}); err != nil {
+		t.Fatalf("thumbnail replace via rebuild: %v", err)
 	}
-	if _, statErr := os.Stat(out); statErr == nil {
-		t.Errorf("output written despite thumbnail gate")
+	_, newBytes, ok := assocOfType(t, out, "thumbnail")
+	if !ok {
+		t.Fatalf("thumbnail missing/unclassified after multi-level replace")
+	}
+	if bytes.Equal(origBytes, newBytes) {
+		t.Errorf("thumbnail content unchanged after replace")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed after thumbnail replace")
+	}
+	for _, ty := range []string{"label", "overview"} {
+		if _, _, ok := assocOfType(t, out, ty); !ok {
+			t.Errorf("%s vanished after thumbnail replace", ty)
+		}
 	}
 }
 
@@ -724,6 +737,66 @@ func TestOMETIFFEditWarnsLossy(t *testing.T) {
 	}
 	if got := buf.String(); !strings.Contains(got, "rudimentary") || !strings.Contains(got, "Bio-Formats") {
 		t.Errorf("lossy warning not emitted on replace; slog output:\n%s", got)
+	}
+}
+
+// TestSVSMultiLevelThumbnailReplace: replacing the thumbnail on a multi-level SVS
+// (which can't splice) goes through the rebuild and lands the new thumbnail at
+// IFD 1, classified correctly; pyramid pixel-identical; label/overview intact.
+func TestSVSMultiLevelThumbnailReplace(t *testing.T) {
+	in := copyFile(t, multiLevelSVSFixture(t))
+	origSize, origBytes, ok := assocOfType(t, in, "thumbnail")
+	if !ok {
+		t.Skip("fixture has no thumbnail")
+	}
+	png := filepath.Join(t.TempDir(), "x.png")
+	writeSolidPNG(t, png, origSize.X, origSize.Y, color.RGBA{10, 20, 30, 255})
+	out := filepath.Join(t.TempDir(), "out.svs")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedReplaceFor("thumbnail", in, out, replaceFlags{
+		assocCommonFlags: assocCommonFlags{fsync: false}, image: png, resize: "fit", bgHex: "F5F5E6", force: true,
+	}); err != nil {
+		t.Fatalf("thumbnail replace: %v", err)
+	}
+	_, newBytes, ok := assocOfType(t, out, "thumbnail")
+	if !ok {
+		t.Fatalf("thumbnail missing/unclassified after multi-level replace")
+	}
+	if bytes.Equal(origBytes, newBytes) {
+		t.Errorf("thumbnail content unchanged after replace")
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed after thumbnail replace")
+	}
+	for _, ty := range []string{"label", "overview"} {
+		if _, _, ok := assocOfType(t, out, ty); !ok {
+			t.Errorf("%s vanished after thumbnail replace", ty)
+		}
+	}
+}
+
+// TestSVSMultiLevelThumbnailRemove: removing the thumbnail on a multi-level SVS
+// succeeds via rebuild; thumbnail gone, label/overview kept, pyramid intact.
+func TestSVSMultiLevelThumbnailRemove(t *testing.T) {
+	in := copyFile(t, multiLevelSVSFixture(t))
+	if _, _, ok := assocOfType(t, in, "thumbnail"); !ok {
+		t.Skip("fixture has no thumbnail")
+	}
+	out := filepath.Join(t.TempDir(), "out.svs")
+	digestBefore := level0Digest(t, in)
+	if err := runAssociatedRemoveFor("thumbnail", in, out, removeFlags{assocCommonFlags{fsync: false}}); err != nil {
+		t.Fatalf("thumbnail remove: %v", err)
+	}
+	if _, _, ok := assocOfType(t, out, "thumbnail"); ok {
+		t.Errorf("thumbnail still present after remove")
+	}
+	for _, ty := range []string{"label", "overview"} {
+		if _, _, ok := assocOfType(t, out, ty); !ok {
+			t.Errorf("%s vanished after thumbnail remove", ty)
+		}
+	}
+	if level0Digest(t, out) != digestBefore {
+		t.Errorf("pyramid changed after thumbnail remove")
 	}
 }
 
