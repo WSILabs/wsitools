@@ -170,11 +170,13 @@ fixture"). CI pulls it via the existing `svs.tar`.
 - `associated thumbnail remove` on the multi-level slide → succeeds; thumbnail
   gone; label/overview intact.
 
-**Unit test** (no fixture; runs in CI regardless): a minimal in-memory fake
-`source.Source` with two tiled levels + a `"thumbnail"` associated image →
-`writeTIFFTileCopy(container="svs")` into a temp file → re-parse the IFD chain
-(via `internal/tiff/edit.Parse` or `dump-ifds`) and assert: IFD 1 is the
-non-tiled thumbnail, IFDs 0/2/… are the tiled pyramid levels in order.
+**Unit test — dropped (YAGNI).** A fake `source.Source` (heavy multi-method
+interface + `faithfulStrippedSpec` reading real strips) is high-effort for
+coverage the integration tests already provide once `239551.svs` is in CI.
+Coverage is instead: the integration tests above (multi-level path) + the
+existing single-level tests (`TestSVSOverviewReplaceWorks`,
+`TestSVSThumbnailReplaceSingleLevel`, convert single-level) guarding the IFD-1
+injection's no-op path.
 
 **Existing single-level coverage** (`TestSVSOverviewReplaceWorks`,
 `TestSVSThumbnailReplaceSingleLevel`, the convert single-level tests) must stay
