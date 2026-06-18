@@ -31,12 +31,48 @@ func iScanXMP(m IScanMeta) []byte {
 // (TILE_OFFSETS) order, and AoiOrigin (0,0). TileJointInfo overlaps are all 0
 // (abutting tiles). Reader requires Ver>=2.
 func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
+	// Frame nodes declare the storage order of TILE_OFFSETS (whitepaper p.14):
+	// Frame[k] = image (col,row) of the k-th stored tile. Real DP 200 is
+	// ROW-MAJOR (Frame[k] = (k%cols, k/cols)), which is what we emit and store.
 	var frames []byte
 	for idx := 0; idx < cols*rows; idx++ {
-		col, row := serpentineToImage(idx, cols, rows)
+		col, row := idx%cols, idx/cols
 		frames = append(frames, []byte(fmt.Sprintf(
 			`<Frame XY="%d,%d" Z="0" Focus="0"/>`, col, row))...)
 	}
+
+	// TileJointInfo: one per adjacent image-tile pair, mirroring REAL Roche
+	// DP 200 exactly (verified byte-for-byte against Ventana-1.bif's 922 joins).
+	// Horizontal joins use Direction "LEFT" with Tile1=left-column /
+	// Tile2=right-column neighbor; vertical joins use "UP" with Tile1=lower-row /
+	// Tile2=upper-row(=row-1). OverlapX/OverlapY=0 (abutting; a value real files
+	// also use).
+	//
+	// IMPORTANT — TWO tile-numbering systems coexist in BIF (whitepaper Fig 2 +
+	// p.15): the pixel STORAGE order (TILE_OFFSETS) is ROW-MAJOR, declared by the
+	// <Frame> nodes above; but the stitch-graph Tile1/Tile2 IDs use the physical
+	// SERPENTINE numbering (tile 1 = lower-left, snake up). All 922 real joins are
+	// consistent only under serpentine numbering. So tiles are STORED row-major
+	// while joins are NUMBERED serpentine — do not conflate them.
+	tile := func(col, row int) int { return imageToSerpentine(col, row, cols, rows) + 1 }
+	var joints []byte
+	for row := 0; row < rows; row++ {
+		for col := 0; col+1 < cols; col++ { // horizontal LEFT joins
+			joints = append(joints, []byte(fmt.Sprintf(
+				`<TileJointInfo FlagJoined="1" Confidence="100" Direction="LEFT" `+
+					`Tile1="%d" Tile2="%d" OverlapX="0" OverlapY="0"/>`,
+				tile(col, row), tile(col+1, row)))...)
+		}
+	}
+	for col := 0; col < cols; col++ {
+		for row := 1; row < rows; row++ { // vertical UP joins (tile2 one row up)
+			joints = append(joints, []byte(fmt.Sprintf(
+				`<TileJointInfo FlagJoined="1" Confidence="100" Direction="UP" `+
+					`Tile1="%d" Tile2="%d" OverlapX="0" OverlapY="0"/>`,
+				tile(col, row), tile(col, row-1)))...)
+		}
+	}
+
 	return []byte(fmt.Sprintf(
 		`<?xml version="1.0" encoding="UTF-8"?>`+
 			`<EncodeInfo Ver="2">`+
@@ -45,10 +81,11 @@ func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
 			`</SlideInfo>`+
 			`<SlideStitchInfo>`+
 			`<ImageInfo AOIScanned="1" AOIIndex="0" NumRows="%d" NumCols="%d" Width="%d" Height="%d" Pos-X="0" Pos-Y="0">`+
+			`%s`+
 			`<FrameInfo AOIScanned="1" AOIIndex="0">%s</FrameInfo>`+
 			`</ImageInfo>`+
 			`</SlideStitchInfo>`+
 			`<AoiOrigin><AOI0 OriginX="0" OriginY="0"/></AoiOrigin>`+
 			`</EncodeInfo>`,
-		tileW, tileH, rows, cols, rows, cols, tileW, tileH, frames))
+		tileW, tileH, rows, cols, rows, cols, tileW, tileH, joints, frames))
 }
