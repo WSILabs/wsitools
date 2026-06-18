@@ -31,9 +31,12 @@ func iScanXMP(m IScanMeta) []byte {
 // (TILE_OFFSETS) order, and AoiOrigin (0,0). TileJointInfo overlaps are all 0
 // (abutting tiles). Reader requires Ver>=2.
 func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
+	// Frame nodes declare the storage order of TILE_OFFSETS (whitepaper p.14):
+	// Frame[k] = image (col,row) of the k-th stored tile. Real DP 200 is
+	// ROW-MAJOR (Frame[k] = (k%cols, k/cols)), which is what we emit and store.
 	var frames []byte
 	for idx := 0; idx < cols*rows; idx++ {
-		col, row := serpentineToImage(idx, cols, rows)
+		col, row := idx%cols, idx/cols
 		frames = append(frames, []byte(fmt.Sprintf(
 			`<Frame XY="%d,%d" Z="0" Focus="0"/>`, col, row))...)
 	}
@@ -49,7 +52,7 @@ func encodeInfoXMP(cols, rows, tileW, tileH int) []byte {
 	// reject these "LEFT" joins — but openslide reads DP 200 tiles row-major and
 	// cannot render real serpentine Roche slides anyway, so it is a metadata-only
 	// oracle here; we do NOT distort the stitch graph to satisfy it.
-	tile := func(col, row int) int { return imageToSerpentine(col, row, cols, rows) + 1 }
+	tile := func(col, row int) int { return row*cols + col + 1 } // 1-based row-major
 	var joints []byte
 	for row := 0; row < rows; row++ {
 		for col := 0; col+1 < cols; col++ { // horizontal LEFT joins

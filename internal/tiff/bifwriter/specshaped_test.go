@@ -1,6 +1,7 @@
 package bifwriter
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,14 +9,21 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
-func TestSpecShapedOpensInOpentile(t *testing.T) {
+// TestSpecShapedRowMajorAndOpens: the two-IFD spec-shaped output (overview +
+// EncodeInfo) opens as bif AND stores its pyramid tiles ROW-MAJOR. The
+// spec-shaped path builds the pyramid IFD + EncodeInfo Frame order
+// independently of WriteSingleLevel, so verify placement there too — via the
+// reader-independent TILE_OFFSETS check (opentile's serpentine remap is buggy).
+// If BIF_SPIKE_OUT is set, the artifact is written there for manual viewer
+// testing (bio-formats / QuPath / openslide).
+func TestSpecShapedRowMajorAndOpens(t *testing.T) {
 	src, err := source.Open(filepath.Join(fixtureDir(t), "svs", "CMU-1-Small-Region.svs"))
 	if err != nil {
 		t.Skipf("open source: %v", err)
 	}
 	defer src.Close()
+	lvl := src.Levels()[0]
 
-	// If BIF_SPIKE_OUT is set, write there for manual viewer testing; else tmp.
 	out := os.Getenv("BIF_SPIKE_OUT")
 	if out == "" {
 		out = filepath.Join(t.TempDir(), "specshaped.bif")
@@ -24,7 +32,7 @@ func TestSpecShapedOpensInOpentile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSpecShaped(f, FromLevel(src.Levels()[0]), IScanMeta{Magnification: 40, ScanRes: 0.25}); err != nil {
+	if err := WriteSpecShaped(f, FromLevel(lvl), IScanMeta{Magnification: 40, ScanRes: 0.25}); err != nil {
 		f.Close()
 		t.Fatalf("WriteSpecShaped: %v", err)
 	}
@@ -40,31 +48,22 @@ func TestSpecShapedOpensInOpentile(t *testing.T) {
 		t.Fatalf("detected %q, want bif", got.Format())
 	}
 
-	// Pixel-identity over the pyramid level: the spec-shaped path builds the
-	// pyramid IFD and the EncodeInfo Frame order independently, so verify the
-	// serpentine placement survives there too (not just that the file opens).
-	lvl := src.Levels()[0]
-	gl := got.Levels()[0]
-	cols := ceilDiv(lvl.Size().X, lvl.TileSize().X)
-	rows := ceilDiv(lvl.Size().Y, lvl.TileSize().Y)
+	// Reader-independent row-major placement check on the pyramid IFD.
+	bl := parseBIFLevel(t, out)
+	cols := ceilDivT(lvl.Size().X, lvl.TileSize().X)
+	rows := ceilDivT(lvl.Size().Y, lvl.TileSize().Y)
+	if len(bl.tileBytes) != cols*rows {
+		t.Fatalf("tile count %d != %d", len(bl.tileBytes), cols*rows)
+	}
+	buf := make([]byte, lvl.TileMaxSize())
 	for row := 0; row < rows; row++ {
 		for col := 0; col < cols; col++ {
-			want, err := lvl.DecodedTile(col, row)
+			n, err := lvl.TileInto(col, row, buf)
 			if err != nil {
-				t.Fatalf("source DecodedTile(%d,%d): %v", col, row, err)
+				t.Fatalf("source TileInto(%d,%d): %v", col, row, err)
 			}
-			have, err := gl.DecodedTile(col, row)
-			if err != nil {
-				t.Fatalf("bif DecodedTile(%d,%d): %v", col, row, err)
-			}
-			if len(want.Pix) != len(have.Pix) {
-				t.Fatalf("tile (%d,%d) pix len %d != %d", col, row, len(have.Pix), len(want.Pix))
-			}
-			for i := range want.Pix {
-				if want.Pix[i] != have.Pix[i] {
-					t.Fatalf("spec-shaped tile (%d,%d) pixel %d differs: src=%d bif=%d",
-						col, row, i, want.Pix[i], have.Pix[i])
-				}
+			if !bytes.Equal(bl.tileBytes[row*cols+col], buf[:n]) {
+				t.Fatalf("spec-shaped tile (%d,%d) not at row-major index %d", col, row, row*cols+col)
 			}
 		}
 	}

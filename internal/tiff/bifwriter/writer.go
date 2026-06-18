@@ -55,7 +55,13 @@ func WriteSingleLevel(w io.WriterAt, src TileSource, meta IScanMeta) error {
 			if err != nil {
 				return fmt.Errorf("bifwriter: read tile (%d,%d): %w", col, row, err)
 			}
-			idx := imageToSerpentine(col, row, cols, rows)
+			// Real Roche DP 200 stores tiles ROW-MAJOR top-left (verified
+			// against Ventana-1.bif's own <Frame> nodes: Frame[k] = (k%cols,
+			// k/cols)). The whitepaper's "serpentine" prose does NOT match the
+			// actual storage; bio-formats/QuPath assume row-major and render it
+			// correctly. (opentile-go hardcodes a serpentine remap — an upstream
+			// bug that scrambles real DP 200 files; tracked separately.)
+			idx := row*cols + col
 			b := make([]byte, nb)
 			copy(b, buf[:nb])
 			tileBytes[idx] = b
@@ -118,8 +124,12 @@ func WriteSingleLevel(w io.WriterAt, src TileSource, meta IScanMeta) error {
 // supplied serpentine-ordered tile offsets/counts and the iScan XMP.
 func buildLevelIFD(src TileSource, cols, rows int, offsets, counts []uint64, xmp []byte) (ifd, ext []byte, err error) {
 	b := tiff.NewEntryBuilder(true)
-	b.AddLong(tiff.TagImageWidth, []uint32{uint32(src.SizeW())})
-	b.AddLong(tiff.TagImageLength, []uint32{uint32(src.SizeH())})
+	// Pad declared dimensions to whole tiles (cols*tw × rows*th), as real Roche
+	// does (e.g. Ventana-1 L0 = 24576 = 24×1024). Edge tiles already carry
+	// padding pixels; bio-formats computes its grid via integer sizeX/tileWidth,
+	// so a non-multiple width drops the last column/row.
+	b.AddLong(tiff.TagImageWidth, []uint32{uint32(cols * src.TileW())})
+	b.AddLong(tiff.TagImageLength, []uint32{uint32(rows * src.TileH())})
 	b.AddShort(tiff.TagBitsPerSample, []uint16{8, 8, 8})
 	b.AddShort(tiff.TagCompression, []uint16{tiff.CompressionJPEG})
 	b.AddShort(tiff.TagPhotometricInterpretation, []uint16{6}) // YCbCr
@@ -167,7 +177,13 @@ func WriteSpecShaped(w io.WriterAt, src TileSource, meta IScanMeta) error {
 			if err != nil {
 				return fmt.Errorf("bifwriter: read tile (%d,%d): %w", col, row, err)
 			}
-			idx := imageToSerpentine(col, row, cols, rows)
+			// Real Roche DP 200 stores tiles ROW-MAJOR top-left (verified
+			// against Ventana-1.bif's own <Frame> nodes: Frame[k] = (k%cols,
+			// k/cols)). The whitepaper's "serpentine" prose does NOT match the
+			// actual storage; bio-formats/QuPath assume row-major and render it
+			// correctly. (opentile-go hardcodes a serpentine remap — an upstream
+			// bug that scrambles real DP 200 files; tracked separately.)
+			idx := row*cols + col
 			b := make([]byte, nb)
 			copy(b, buf[:nb])
 			tileBytes[idx] = b
@@ -250,8 +266,12 @@ func WriteSpecShaped(w io.WriterAt, src TileSource, meta IScanMeta) error {
 // buildLevelIFDAt is buildLevelIFD with an explicit ifd offset (for IFD 1).
 func buildLevelIFDAt(off uint64, src TileSource, cols, rows int, offsets, counts []uint64, xmp []byte) (ifd, ext []byte, err error) {
 	b := tiff.NewEntryBuilder(true)
-	b.AddLong(tiff.TagImageWidth, []uint32{uint32(src.SizeW())})
-	b.AddLong(tiff.TagImageLength, []uint32{uint32(src.SizeH())})
+	// Pad declared dimensions to whole tiles (cols*tw × rows*th), as real Roche
+	// does (e.g. Ventana-1 L0 = 24576 = 24×1024). Edge tiles already carry
+	// padding pixels; bio-formats computes its grid via integer sizeX/tileWidth,
+	// so a non-multiple width drops the last column/row.
+	b.AddLong(tiff.TagImageWidth, []uint32{uint32(cols * src.TileW())})
+	b.AddLong(tiff.TagImageLength, []uint32{uint32(rows * src.TileH())})
 	b.AddShort(tiff.TagBitsPerSample, []uint16{8, 8, 8})
 	b.AddShort(tiff.TagCompression, []uint16{tiff.CompressionJPEG})
 	b.AddShort(tiff.TagPhotometricInterpretation, []uint16{6})
