@@ -771,6 +771,28 @@ func mustRun(t *testing.T, bin string, args ...string) []byte {
 	return out
 }
 
+// TestConvertToSVSMultiLevelReencodeKeepsThumbnail: the --codec re-encode path
+// must also keep the thumbnail+overview on a multi-level SVS.
+func TestConvertToSVSMultiLevelReencodeKeepsThumbnail(t *testing.T) {
+	bin := stripedBinary(t)
+	in := multiLevelSVSFixture(t)
+	for _, ty := range []string{"thumbnail", "overview"} {
+		if _, _, ok := assocOfType(t, in, ty); !ok {
+			t.Skipf("fixture lacks %s", ty)
+		}
+	}
+	out := filepath.Join(t.TempDir(), "out.svs")
+	if o, err := runBin(bin, "convert", "--to", "svs", "--codec", "jpeg", "-f", "-o", out, in); err != nil {
+		t.Fatalf("convert --to svs --codec jpeg: %v\n%s", err, o)
+	}
+	info, _ := runBin(bin, "info", out)
+	for _, ty := range []string{"thumbnail", "label", "overview"} {
+		if !strings.Contains(string(info), ty) {
+			t.Errorf("re-encoded multi-level SVS dropped %s:\n%s", ty, info)
+		}
+	}
+}
+
 // TestOMETIFFRealLeicaOverviewRemove exercises the multi-image real Leica
 // OME-TIFF path (macro-series + main-series). Self-skips in -short mode and
 // when the fixture is absent (e.g. CI).

@@ -332,13 +332,13 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 		return fmt.Errorf("create output: %w", err)
 	}
 
-	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc); err != nil {
+	omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
+	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic); err != nil {
 		w.Abort()
 		return err
 	}
 
 	if !cvNoAssociated {
-		omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
 		if err := writeAssociatedImages(src, w, resolvedContainer, omeSynthetic, omeEditPlan{}); err != nil {
 			w.Abort()
 			return err
@@ -422,10 +422,13 @@ func parseQualityKnobs(quality string) (map[string]string, error) {
 	return knobs, nil
 }
 
-func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {
+func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool) error {
 	for _, lvl := range src.Levels() {
 		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers, container, srcImageDesc); err != nil {
 			return fmt.Errorf("level %d: %w", lvl.Index(), err)
+		}
+		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan); err != nil {
+			return err
 		}
 	}
 	return nil
