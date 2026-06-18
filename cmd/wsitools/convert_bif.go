@@ -3,6 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	stddraw "image/draw"
 	"math"
 	"os"
 	"runtime"
@@ -23,9 +26,11 @@ import (
 // tile-copied verbatim; non-JPEG sources require --codec jpeg, which decodes and
 // re-encodes each tile to JPEG (the BIF codec). Single-AOI, no Z.
 //
-// Re-encode runs on a worker pool (--workers / GOMAXPROCS). Limitations
-// (Phase 1): no source associated images carried; no probability map;
-// --factor/--target-mag not yet supported.
+// The overview ("Label_Image") carries through the source's whole-slide
+// overview/macro when present (oriented to portrait), else it is synthesized
+// from the tissue (see buildBIFOverview). Re-encode runs on a worker pool
+// (--workers / GOMAXPROCS). Limitations (Phase 1): no separate label/thumbnail
+// or probability map carried; no --factor/--target-mag.
 func runConvertBIF(cmd *cobra.Command, input string, start time.Time) error {
 	if cvFactor != 1 || cvTargetMag != 0 {
 		return fmt.Errorf("--factor/--target-mag is not yet supported for --to bif")
@@ -97,7 +102,7 @@ func runConvertBIF(cmd *cobra.Command, input string, start time.Time) error {
 		plevels[i] = bifwriter.PyramidLevel{Src: ts, Mag: mag}
 	}
 
-	ov, err := buildBIFOverview(levels[len(levels)-1])
+	ov, err := buildBIFOverview(src)
 	if err != nil {
 		return fmt.Errorf("build overview: %w", err)
 	}
@@ -143,31 +148,119 @@ func runConvertBIF(cmd *cobra.Command, input string, start time.Time) error {
 // buildBIFOverview generates the whole-slide overview (Label_Image) from a
 // source level, nearest-neighbour subsampled so its longest side is <= 2048 px
 // (bounded memory: one decoded tile + the output buffer). Returns packed RGB888.
-func buildBIFOverview(lvl source.Level) (bifwriter.Overview, error) {
+// bifOverviewW/H are the DP 200 canonical overview ("Label_Image") dimensions.
+// All BIF fixtures' overviews are ~1:3 portrait (the whole 25×75 mm slide);
+// they disagree on exact size (legacy iScan 1008×3008 JPEG, DP 200 1251×3685
+// uncompressed) — per the convention to trust the DP 200 BIF, we emit 1251×3685.
+const (
+	bifOverviewW = 1251
+	bifOverviewH = 3685
+)
+
+// buildBIFOverview produces the IFD-0 overview ("Label_Image", uncompressed RGB,
+// 1251×3685 portrait). It CARRIES THROUGH a source whole-slide image when a good
+// match exists — a source associated image of type "overview"/"macro", oriented
+// to portrait and letterboxed onto the slide canvas — OTHERWISE it SYNTHESIZES a
+// macro-style image: a white slide with the tissue (smallest pyramid level)
+// placed in the bottom 2/3 (the tissue region; the top 1/3 is the blank label
+// band the reader crops as the "label"). A tissue thumbnail is NOT used (it is
+// not a whole-slide match), so it falls through to synthesis.
+func buildBIFOverview(src source.Source) (bifwriter.Overview, error) {
+	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+
+	// 1. Carry through a source whole-slide overview/macro.
+	if a := pickOverviewAssoc(src); a != nil {
+		if di, err := a.Decode(decoder.DecodeOptions{Format: decoder.PixelFormatRGB}); err == nil {
+			img := decoderToRGBA(di)
+			if img.Bounds().Dx() > img.Bounds().Dy() {
+				img = rotate90CW(img) // landscape (e.g. Aperio macro) → portrait
+			}
+			return packOverview(fitTo(img, bifOverviewW, bifOverviewH, white)), nil
+		}
+		// decode failed → fall through to synthesis
+	}
+
+	// 2. Synthesize: white label band (top 1/3) + tissue (bottom 2/3).
+	levels := src.Levels()
+	tissue, err := decodeLevelToRGBA(levels[len(levels)-1], 2048)
+	if err != nil {
+		return bifwriter.Overview{}, fmt.Errorf("decode overview tissue: %w", err)
+	}
+	canvas := image.NewRGBA(image.Rect(0, 0, bifOverviewW, bifOverviewH))
+	stddraw.Draw(canvas, canvas.Bounds(), &image.Uniform{C: white}, image.Point{}, stddraw.Src)
+	bandH := bifOverviewH / 3 // 25 mm label band of the 75 mm slide
+	fitted := fitTo(tissue, bifOverviewW, bifOverviewH-bandH, white)
+	stddraw.Draw(canvas, image.Rect(0, bandH, bifOverviewW, bifOverviewH), fitted, image.Point{}, stddraw.Src)
+	return packOverview(canvas), nil
+}
+
+// pickOverviewAssoc returns the first source associated image that is a
+// whole-slide overview/macro (not a tissue thumbnail), or nil.
+func pickOverviewAssoc(src source.Source) source.AssociatedImage {
+	for _, a := range src.Associated() {
+		switch a.Type() {
+		case "overview", "macro":
+			return a
+		}
+	}
+	return nil
+}
+
+func decoderToRGBA(di *decoder.Image) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, di.Width, di.Height))
+	for y := 0; y < di.Height; y++ {
+		srow := di.Pix[y*di.Stride:]
+		drow := img.Pix[y*img.Stride:]
+		for x := 0; x < di.Width; x++ {
+			drow[x*4] = srow[x*3]
+			drow[x*4+1] = srow[x*3+1]
+			drow[x*4+2] = srow[x*3+2]
+			drow[x*4+3] = 255
+		}
+	}
+	return img
+}
+
+// rotate90CW rotates an RGBA image 90° clockwise (landscape → portrait, putting
+// a left-edge label at the top, matching the BIF Label_Image convention).
+func rotate90CW(s *image.RGBA) *image.RGBA {
+	b := s.Bounds()
+	w, h := b.Dx(), b.Dy()
+	d := image.NewRGBA(image.Rect(0, 0, h, w))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			si := s.PixOffset(b.Min.X+x, b.Min.Y+y)
+			dindex := d.PixOffset(h-1-y, x)
+			copy(d.Pix[dindex:dindex+4], s.Pix[si:si+4])
+		}
+	}
+	return d
+}
+
+// decodeLevelToRGBA decodes a pyramid level into an RGBA image, nearest-neighbour
+// subsampled so its longest side is <= capDim (bounded memory).
+func decodeLevelToRGBA(lvl source.Level, capDim int) (*image.RGBA, error) {
 	sw, sh := lvl.Size().X, lvl.Size().Y
 	tw, th := lvl.TileSize().X, lvl.TileSize().Y
 	if sw <= 0 || sh <= 0 || tw <= 0 || th <= 0 {
-		return bifwriter.Overview{}, fmt.Errorf("degenerate overview source level %dx%d tile %dx%d", sw, sh, tw, th)
+		return nil, fmt.Errorf("degenerate level %dx%d tile %dx%d", sw, sh, tw, th)
 	}
 	cols := (sw + tw - 1) / tw
 	rows := (sh + th - 1) / th
-
-	const capDim = 2048
 	scale := 1
 	for sw/scale > capDim || sh/scale > capDim {
 		scale *= 2
 	}
 	ow := (sw + scale - 1) / scale
 	oh := (sh + scale - 1) / scale
-	rgb := make([]byte, ow*oh*3)
-
+	img := image.NewRGBA(image.Rect(0, 0, ow, oh))
 	for row := 0; row < rows; row++ {
 		for col := 0; col < cols; col++ {
-			img, err := lvl.DecodedTile(col, row)
+			di, err := lvl.DecodedTile(col, row)
 			if err != nil {
-				return bifwriter.Overview{}, fmt.Errorf("decode tile (%d,%d): %w", col, row, err)
+				return nil, fmt.Errorf("decode tile (%d,%d): %w", col, row, err)
 			}
-			for y := 0; y < img.Height; y++ {
+			for y := 0; y < di.Height; y++ {
 				gy := row*th + y
 				if gy >= sh {
 					break
@@ -176,7 +269,7 @@ func buildBIFOverview(lvl source.Level) (bifwriter.Overview, error) {
 				if oy >= oh {
 					continue
 				}
-				for x := 0; x < img.Width; x++ {
+				for x := 0; x < di.Width; x++ {
 					gx := col*tw + x
 					if gx >= sw {
 						break
@@ -185,16 +278,33 @@ func buildBIFOverview(lvl source.Level) (bifwriter.Overview, error) {
 					if ox >= ow {
 						continue
 					}
-					si := y*img.Stride + x*3
-					di := (oy*ow + ox) * 3
-					rgb[di] = img.Pix[si]
-					rgb[di+1] = img.Pix[si+1]
-					rgb[di+2] = img.Pix[si+2]
+					si := y*di.Stride + x*3
+					dindex := img.PixOffset(ox, oy)
+					img.Pix[dindex] = di.Pix[si]
+					img.Pix[dindex+1] = di.Pix[si+1]
+					img.Pix[dindex+2] = di.Pix[si+2]
+					img.Pix[dindex+3] = 255
 				}
 			}
 		}
 	}
-	return bifwriter.Overview{W: ow, H: oh, RGB: rgb}, nil
+	return img, nil
+}
+
+// packOverview converts an RGBA image to the packed RGB888 bifwriter.Overview.
+func packOverview(img *image.RGBA) bifwriter.Overview {
+	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	rgb := make([]byte, w*h*3)
+	for y := 0; y < h; y++ {
+		srow := img.Pix[y*img.Stride:]
+		for x := 0; x < w; x++ {
+			o := (y*w + x) * 3
+			rgb[o] = srow[x*4]
+			rgb[o+1] = srow[x*4+1]
+			rgb[o+2] = srow[x*4+2]
+		}
+	}
+	return bifwriter.Overview{W: w, H: h, RGB: rgb}
 }
 
 // standaloneJPEG is the jpeg encoder's self-contained-tile capability (a
