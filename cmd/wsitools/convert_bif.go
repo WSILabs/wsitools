@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -65,10 +68,10 @@ func runConvertBIF(cmd *cobra.Command, input string, start time.Time) error {
 	// per-level TileSource (verbatim copy or JPEG re-encode).
 	l0w := levels[0].Size().X
 	plevels := make([]bifwriter.PyramidLevel, len(levels))
-	var encoders []standaloneJPEG
+	var reencoders []*parallelReencodeSource
 	defer func() {
-		for _, e := range encoders {
-			e.Close()
+		for _, r := range reencoders {
+			r.Close()
 		}
 	}()
 	for i, lvl := range levels {
@@ -78,12 +81,12 @@ func runConvertBIF(cmd *cobra.Command, input string, start time.Time) error {
 		}
 		var ts bifwriter.TileSource
 		if reencode {
-			enc, err := newBIFJPEGEncoder(lvl.TileSize().X, lvl.TileSize().Y, cvQuality)
+			rs, err := newParallelReencodeSource(lvl, cvQuality, cvWorkers)
 			if err != nil {
-				return fmt.Errorf("jpeg encoder for level %d: %w", lvl.Index(), err)
+				return fmt.Errorf("jpeg re-encoder for level %d: %w", lvl.Index(), err)
 			}
-			encoders = append(encoders, enc)
-			ts = reencodeSource{lvl: lvl, tw: lvl.TileSize().X, th: lvl.TileSize().Y, enc: enc}
+			reencoders = append(reencoders, rs)
+			ts = rs
 		} else {
 			ts = bifwriter.FromLevel(lvl)
 		}
@@ -202,37 +205,137 @@ type standaloneJPEG interface {
 	Close() error
 }
 
-// reencodeSource adapts a source.Level into a bifwriter.TileSource that decodes
-// each tile and re-encodes it to a self-contained JPEG (the BIF codec) — used
-// under --codec jpeg for non-JPEG sources. NOTE: serial decode+encode
-// (WritePyramid reads tiles in order); slow for large slides — a worker pool is
-// a later optimization.
-type reencodeSource struct {
-	lvl    source.Level
-	tw, th int
-	enc    standaloneJPEG
+var errReencodeClosed = errors.New("re-encode source closed")
+
+// parallelReencodeSource is a bifwriter.TileSource that decodes + re-encodes a
+// level's tiles to self-contained JPEG concurrently (one encoder per worker).
+// It exploits WritePyramid's strict row-major TileInto order: workers run ahead
+// up to a bounded window of the consumed index, so memory is capped (~window
+// encoded tiles) regardless of level size, and CPU is fully utilised. Used under
+// --codec jpeg for non-JPEG sources.
+type parallelReencodeSource struct {
+	lvl        source.Level
+	tw, th     int
+	cols, n    int
+
+	mu       sync.Mutex
+	cond     *sync.Cond
+	ready    map[int][]byte // idx -> encoded bytes, awaiting TileInto
+	err      error
+	next     int // next tile index to dispatch (work-stealing)
+	consumed int // count of tiles taken by TileInto (== next idx wanted)
+	window   int
+
+	encoders []standaloneJPEG
+	wg       sync.WaitGroup
 }
 
-func (s reencodeSource) SizeW() int       { return s.lvl.Size().X }
-func (s reencodeSource) SizeH() int       { return s.lvl.Size().Y }
-func (s reencodeSource) TileW() int       { return s.tw }
-func (s reencodeSource) TileH() int       { return s.th }
-func (s reencodeSource) TileMaxSize() int { return s.tw*s.th*3 + 4096 }
+func newParallelReencodeSource(lvl source.Level, quality string, workers int) (*parallelReencodeSource, error) {
+	tw, th := lvl.TileSize().X, lvl.TileSize().Y
+	cols := (lvl.Size().X + tw - 1) / tw
+	rows := (lvl.Size().Y + th - 1) / th
+	if workers < 1 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	s := &parallelReencodeSource{
+		lvl: lvl, tw: tw, th: th, cols: cols, n: cols * rows,
+		ready: make(map[int][]byte), window: 2*workers + 4,
+	}
+	s.cond = sync.NewCond(&s.mu)
+	for i := 0; i < workers; i++ {
+		enc, err := newBIFJPEGEncoder(tw, th, quality)
+		if err != nil {
+			s.Close()
+			return nil, err
+		}
+		s.encoders = append(s.encoders, enc)
+	}
+	for _, enc := range s.encoders {
+		s.wg.Add(1)
+		go s.worker(enc)
+	}
+	return s, nil
+}
 
-func (s reencodeSource) TileInto(x, y int, dst []byte) (int, error) {
-	img, err := s.lvl.DecodedTile(x, y)
-	if err != nil {
-		return 0, fmt.Errorf("decode tile (%d,%d): %w", x, y, err)
+func (s *parallelReencodeSource) SizeW() int       { return s.lvl.Size().X }
+func (s *parallelReencodeSource) SizeH() int       { return s.lvl.Size().Y }
+func (s *parallelReencodeSource) TileW() int       { return s.tw }
+func (s *parallelReencodeSource) TileH() int       { return s.th }
+func (s *parallelReencodeSource) TileMaxSize() int { return s.tw*s.th*3 + 4096 }
+
+func (s *parallelReencodeSource) worker(enc standaloneJPEG) {
+	defer s.wg.Done()
+	for {
+		s.mu.Lock()
+		for s.err == nil && s.next < s.n && s.next >= s.consumed+s.window {
+			s.cond.Wait() // window gate: don't run too far ahead of the writer
+		}
+		if s.err != nil || s.next >= s.n {
+			s.mu.Unlock()
+			return
+		}
+		idx := s.next
+		s.next++
+		s.mu.Unlock()
+
+		col, row := idx%s.cols, idx/s.cols
+		img, err := s.lvl.DecodedTile(col, row)
+		var b []byte
+		if err == nil {
+			b, err = enc.EncodeStandalone(packTileRGB(img, s.tw, s.th), s.tw, s.th)
+		}
+
+		s.mu.Lock()
+		if err != nil {
+			if s.err == nil {
+				s.err = fmt.Errorf("re-encode tile (%d,%d): %w", col, row, err)
+			}
+			s.cond.Broadcast()
+			s.mu.Unlock()
+			return
+		}
+		s.ready[idx] = b
+		s.cond.Broadcast()
+		s.mu.Unlock()
 	}
-	rgb := packTileRGB(img, s.tw, s.th)
-	out, err := s.enc.EncodeStandalone(rgb, s.tw, s.th)
-	if err != nil {
-		return 0, fmt.Errorf("encode tile (%d,%d): %w", x, y, err)
+}
+
+func (s *parallelReencodeSource) TileInto(x, y int, dst []byte) (int, error) {
+	idx := y*s.cols + x
+	s.mu.Lock()
+	for s.ready[idx] == nil && s.err == nil {
+		s.cond.Wait()
 	}
-	if len(out) > len(dst) {
-		return 0, fmt.Errorf("re-encoded tile (%d,%d) is %d bytes, exceeds buffer %d", x, y, len(out), len(dst))
+	if s.err != nil {
+		s.mu.Unlock()
+		return 0, s.err
 	}
-	return copy(dst, out), nil
+	b := s.ready[idx]
+	delete(s.ready, idx)
+	s.consumed++
+	s.cond.Broadcast() // release window-gated workers
+	s.mu.Unlock()
+
+	if len(b) > len(dst) {
+		return 0, fmt.Errorf("re-encoded tile (%d,%d) is %d bytes, exceeds buffer %d", x, y, len(b), len(dst))
+	}
+	return copy(dst, b), nil
+}
+
+// Close stops the workers (unblocking any that are window-gated) and releases
+// the encoders. Safe to call after normal completion or on abort.
+func (s *parallelReencodeSource) Close() error {
+	s.mu.Lock()
+	if s.err == nil {
+		s.err = errReencodeClosed
+	}
+	s.cond.Broadcast()
+	s.mu.Unlock()
+	s.wg.Wait()
+	for _, e := range s.encoders {
+		e.Close()
+	}
+	return nil
 }
 
 // packTileRGB packs a decoded tile into a tw×th tightly-packed RGB888 buffer,
