@@ -858,10 +858,11 @@ func TestConvertToSVSMultiLevelReencodeKeepsThumbnail(t *testing.T) {
 	if o, err := runBin(bin, "convert", "--to", "svs", "--codec", "jpeg", "-f", "-o", out, in); err != nil {
 		t.Fatalf("convert --to svs --codec jpeg: %v\n%s", err, o)
 	}
-	info, _ := runBin(bin, "info", out)
+	// Assert opentile re-classifies each type (positional for the SVS thumbnail),
+	// not just that the string appears in info — matches the tile-copy test.
 	for _, ty := range []string{"thumbnail", "label", "overview"} {
-		if !strings.Contains(string(info), ty) {
-			t.Errorf("re-encoded multi-level SVS dropped %s:\n%s", ty, info)
+		if _, _, ok := assocOfType(t, out, ty); !ok {
+			t.Errorf("re-encoded multi-level SVS dropped %s (not classified by opentile)", ty)
 		}
 	}
 }
