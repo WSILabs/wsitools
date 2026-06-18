@@ -44,11 +44,15 @@ func nativePixelData(rgb []byte, rows, cols, samples int) (*dicom.Element, error
 		InternalBitsPerSample:   8,
 	}
 	// dicom.NewElement selects the PixelData VR by native bit depth: 8-bit
-	// samples get VR "OB" (Other Byte), as DICOM requires — with "OW" a
-	// conformant reader (e.g. opentile) would read the 8-bit buffer as 16-bit
-	// words and collapse every RGB triple to grayscale. (This used to need a
-	// manual `el.RawValueRepresentation = "OB"` override here; the fork now does
-	// it at the source — WSILabs/dicom pixelDataVR, v1.1.0-wsilabs.2.)
+	// samples get VR "OB" (Other Byte), the conventional choice for <=8-bit
+	// native data (PS3.5 §8.2: in Explicit VR, OB "may also be used" for
+	// BitsAllocated <= 8; OW is also valid). This used to need a manual
+	// `el.RawValueRepresentation = "OB"` override here; the fork now picks OB at
+	// the source (WSILabs/dicom pixelDataVR, v1.1.0-wsilabs.2), removing the
+	// brittle reach-into-internals. NB this is a convention/robustness change,
+	// not a corruption fix — OW round-trips identically through dciodvfy,
+	// pydicom, and opentile (verified); the prior "OW collapses RGB to
+	// grayscale" note did not reproduce.
 	el, err := dicom.NewElement(tag.PixelData, dicom.PixelDataInfo{
 		IsEncapsulated: false,
 		Frames:         []*frame.Frame{{Encapsulated: false, NativeData: nf}},
