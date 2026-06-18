@@ -742,64 +742,72 @@ func omeAssociatedSpecs(src source.Source, plan omeEditPlan) []OMEAssoc {
 	return out
 }
 
+// emitOneAssociated emits associated image `a` as a single stripped IFD, applying
+// the edit plan and the container's classification tags. Returns whether an IFD
+// was written (false when the plan removes it, an OME-unmapped type is filtered
+// under synthetic OME output, or the codec can't be faithfully copied). The
+// caller owns plan.replace bookkeeping (the `replaced` flag) — this helper does
+// not track it.
+func emitOneAssociated(src source.Source, w *streamwriter.Writer, a source.AssociatedImage, container string, omeSynthetic bool, plan omeEditPlan) (bool, error) {
+	if plan.remove != "" && a.Type() == plan.remove {
+		return false, nil
+	}
+	if plan.replace != "" && a.Type() == plan.replace {
+		// Under synthetic OME output, an OME-unmapped type emits no <Image>, so
+		// it must emit no IFD either (else OME-XML and IFDs desync).
+		if container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "" {
+			return false, nil
+		}
+		if err := w.AddStripped(*plan.spec); err != nil {
+			return false, fmt.Errorf("write associated %s: %w", a.Type(), err)
+		}
+		return true, nil
+	}
+	if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Type()) == "" {
+		return false, nil
+	}
+	spec, err := faithfulStrippedSpec(a)
+	if err != nil {
+		if errors.Is(err, errSkipAssociated) {
+			slog.Warn("skipping associated", "type", a.Type(), "reason", err)
+			return false, nil
+		}
+		return false, fmt.Errorf("associated %s: %w", a.Type(), err)
+	}
+	spec.BitsPerSample = []uint16{8, 8, 8}
+	spec.NewSubfileType = newSubfileTypeForAssoc(container, a.Type())
+	spec.WSIImageType = a.Type()
+	// SVS-shaped output: emit Aperio-flavored NewSubfileType via ExtraTags
+	// (macro=9, label=1). Clear spec.NewSubfileType so the writer doesn't also
+	// emit a default value — EntryBuilder doesn't dedup, so a duplicate tag
+	// would corrupt the IFD.
+	if container == "svs" {
+		switch a.Type() {
+		case "macro", "overview":
+			spec.NewSubfileType = 0
+			spec.ExtraTags = buildSVSMacroExtraTags()
+		case "label":
+			spec.NewSubfileType = 0
+			spec.ExtraTags = buildSVSLabelExtraTags()
+		}
+	}
+	if err := w.AddStripped(spec); err != nil {
+		return false, fmt.Errorf("write associated %s: %w", a.Type(), err)
+	}
+	return true, nil
+}
+
 func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool, plan omeEditPlan) error {
 	if plan.dropAll {
 		return nil
 	}
 	replaced := false
 	for _, a := range src.Associated() {
-		if plan.remove != "" && a.Type() == plan.remove {
-			continue
-		}
 		if plan.replace != "" && a.Type() == plan.replace {
-			// Keep IFDs in lockstep with omeAssociatedSpecs: under synthetic
-			// OME output, a type with no OME mapping emits no <Image>, so it
-			// must emit no IFD either (else OME-XML and IFDs desync).
-			if container == "ome-tiff" && omeSynthetic && omeAssocName(plan.replace) == "" {
-				replaced = true
-				continue
-			}
-			if err := w.AddStripped(*plan.spec); err != nil {
-				return fmt.Errorf("write associated %s: %w", a.Type(), err)
-			}
 			replaced = true
-			continue
 		}
-		// Synthetic OME path only: keep the written associated IFDs in sync
-		// with the <Image> entries omeAssociatedSpecs emitted (recognized
-		// types, same order). The native ome→ome path keeps the verbatim
-		// source OME-XML, which already describes its own associated images,
-		// so it is not filtered here.
-		if container == "ome-tiff" && omeSynthetic && omeAssocName(a.Type()) == "" {
-			continue
-		}
-		spec, err := faithfulStrippedSpec(a)
-		if err != nil {
-			if errors.Is(err, errSkipAssociated) {
-				slog.Warn("skipping associated", "type", a.Type(), "reason", err)
-				continue
-			}
-			return fmt.Errorf("associated %s: %w", a.Type(), err)
-		}
-		spec.BitsPerSample = []uint16{8, 8, 8}
-		spec.NewSubfileType = newSubfileTypeForAssoc(container, a.Type())
-		spec.WSIImageType = a.Type()
-		// SVS-shaped output: emit Aperio-flavored NewSubfileType via
-		// ExtraTags (macro=9, label=1). Clear spec.NewSubfileType so the
-		// writer doesn't also emit a default value — EntryBuilder doesn't
-		// dedup, so a duplicate tag would corrupt the IFD.
-		if container == "svs" {
-			switch a.Type() {
-			case "macro", "overview":
-				spec.NewSubfileType = 0
-				spec.ExtraTags = buildSVSMacroExtraTags()
-			case "label":
-				spec.NewSubfileType = 0
-				spec.ExtraTags = buildSVSLabelExtraTags()
-			}
-		}
-		if err := w.AddStripped(spec); err != nil {
-			return fmt.Errorf("write associated %s: %w", a.Type(), err)
+		if _, err := emitOneAssociated(src, w, a, container, omeSynthetic, plan); err != nil {
+			return err
 		}
 	}
 	// Upsert: plan.replace was not present in the source set. Skip the IFD for
