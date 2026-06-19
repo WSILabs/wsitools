@@ -142,17 +142,16 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	rectSet := cmd.Flags().Changed("rect") || cmd.Flags().Changed("x") ||
 		cmd.Flags().Changed("y") || cmd.Flags().Changed("w") || cmd.Flags().Changed("h")
 	if rectSet {
-		if err := validateRectCombo(rectSet, cvFactor, cvCodec, cvTo); err != nil {
+		if err := validateRectCombo(rectSet, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
 			return err
 		}
 		rx, ry, rw, rh, err := resolveRectValues(cmd, cvRect, cvRectX, cvRectY, cvRectW, cvRectH)
 		if err != nil {
 			return err
 		}
-		workers := resolveWorkers(cvWorkers, cmd.Flags().Changed("workers"), cvJobs, cmd.Flags().Changed("jobs"))
 		// convert --rect is always lossy in Phase 1 (--lossless stays a crop flag).
 		return runCrop(cmd.Context(), input, cvOutput, rx, ry, rw, rh,
-			qualityIntForConvert(), workers, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
+			qualityIntForConvert(), cvWorkers, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
 	}
 
 	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't
@@ -202,12 +201,12 @@ func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 // validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3a.
 // Slice 3a ships crop+container-change at factor 1, codec jpeg, into
 // svs/tiff/ome-tiff/cog-wsi/dicom. factor, codec, and dzi/szi come in later slices.
-func validateRectCombo(rectSet bool, factor int, codec, to string) error {
+func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) error {
 	if !rectSet {
 		return nil
 	}
-	if factor != 1 {
-		return fmt.Errorf("--rect with --factor is not yet supported; for now crop then downsample separately")
+	if factor != 1 || targetMag != 0 {
+		return fmt.Errorf("--rect with --factor/--target-mag is not yet supported; for now crop then downsample separately")
 	}
 	if codec != "" {
 		return fmt.Errorf("--rect with --codec is not yet supported")
