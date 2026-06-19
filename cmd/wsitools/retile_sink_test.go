@@ -5,6 +5,7 @@ import (
 	stdjpeg "image/jpeg"
 	"testing"
 
+	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/wsitools/internal/codec"
 	_ "github.com/wsilabs/wsitools/internal/codec/all"
 )
@@ -36,6 +37,27 @@ func TestCodecTileEncoderAbbreviatedRoundTrip(t *testing.T) {
 	// LevelHeader (tag 347) must be non-empty so the writer can supply the tables.
 	if len(enc.LevelHeader()) == 0 {
 		t.Errorf("LevelHeader empty; abbreviated tiles would be undecodable")
+	}
+}
+
+func TestOctaveLevelSpecsForFloors(t *testing.T) {
+	// 1000×800, tile 256 → flooredLevelCount=3; specs finest-first, Index==k,
+	// overlap 0, octave dims.
+	specs := octaveLevelSpecsFor(opentile.Size{W: 1000, H: 800}, 256)
+	if len(specs) != 3 {
+		t.Fatalf("levels = %d, want 3", len(specs))
+	}
+	if specs[0].Index != 0 || specs[0].Width != 1000 || specs[0].Height != 800 || specs[0].Overlap != 0 {
+		t.Errorf("L0 = %+v, want Index0 1000×800 overlap0", specs[0])
+	}
+	if specs[1].Width != 500 || specs[1].Height != 400 {
+		t.Errorf("L1 = %d×%d, want 500×400", specs[1].Width, specs[1].Height)
+	}
+	if specs[2].Width != 250 || specs[2].Height != 200 {
+		t.Errorf("L2 = %d×%d, want 250×200", specs[2].Width, specs[2].Height)
+	}
+	if specs[0].TileW != 256 || specs[0].TileH != 256 {
+		t.Errorf("tile = %d×%d, want 256", specs[0].TileW, specs[0].TileH)
 	}
 }
 

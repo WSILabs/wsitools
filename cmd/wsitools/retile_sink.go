@@ -1,6 +1,10 @@
 package main
 
-import "github.com/wsilabs/wsitools/internal/codec"
+import (
+	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/wsitools/internal/codec"
+	retile "github.com/wsilabs/wsitools/internal/retile"
+)
 
 // codecTileEncoder adapts a codec.Encoder to retile.TileEncoder. EncodeTile
 // returns the ABBREVIATED tile body (no DQT/DHT); the level's JPEGTables tag
@@ -34,4 +38,11 @@ func min2(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// octaveLevelSpecsFor builds the floored octave LevelSpec list for a stitched
+// source: OutL0 dims, square tiles of size tile, overlap 0, halving until the
+// smaller dim ≤ tile. Finest-first, Index==k (the engine + sinks agree on this).
+func octaveLevelSpecsFor(outL0 opentile.Size, tile int) []retile.LevelSpec {
+	return retile.ComputeLevels(outL0, tile, tile, 0 /*overlap*/, 2 /*ratio*/, flooredLevelCount(outL0.W, outL0.H, tile))
 }
