@@ -112,14 +112,17 @@ func Run(ctx context.Context, spec Spec) error {
 	close(writeJobs)
 	sinkWG.Wait()
 
-	if srcErr != nil {
-		return srcErr
-	}
+	// Prefer encErr: it is only ever set by a genuine encode failure (never by
+	// cancellation), so when set it is the root cause — and any srcErr in that
+	// case is the downstream context.Canceled that onEncErr triggered itself.
 	encMu.Lock()
 	ee := encErr
 	encMu.Unlock()
 	if ee != nil {
 		return ee
+	}
+	if srcErr != nil {
+		return srcErr
 	}
 	return sinkErr
 }

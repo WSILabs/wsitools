@@ -7,6 +7,7 @@ import (
 	stdjpeg "image/jpeg"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -79,6 +80,46 @@ func TestRunEmitsFullOctavePyramid(t *testing.T) {
 	last := len(levels) - 1
 	if sink.perLevel[last] != 1 {
 		t.Errorf("coarsest level tiles = %d, want 1", sink.perLevel[last])
+	}
+}
+
+// TestRunSurfacesEncodeErrorNotCancel proves Run returns the REAL encode error,
+// not the context.Canceled it triggers itself via onEncErr→cancel (which makes
+// ScaledStrips' Next() return context.Canceled as srcErr). Reuses the package's
+// nthErrorEncoder (errors on the nth EncodeTile) and captureSink (accepts any
+// body, so the failure path is the encoder — not the sink's JPEG-decode check).
+func TestRunSurfacesEncodeErrorNotCancel(t *testing.T) {
+	path := filepath.Join(testdir(), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	slide, err := opentile.OpenFile(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer slide.Close()
+
+	l0 := slide.Pyramids()[0].Levels[0]
+	srcW, srcH := l0.Size.W, l0.Size.H
+	const ts = 256
+	levels := ComputeLevels(opentile.Size{W: srcW, H: srcH}, ts, ts, 1 /*overlap*/, 2 /*ratio*/, octaveCount(srcW, srcH))
+
+	sink := &captureSink{} // accepts everything, so the failure path is the encoder
+	err = Run(context.Background(), Spec{
+		Slide:     slide,
+		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: srcW, H: srcH}},
+		OutL0:     opentile.Size{W: srcW, H: srcH},
+		Levels:    levels,
+		Kernel:    resample.Nearest,
+		Encoder:   &nthErrorEncoder{n: 3}, // fail on the 3rd encoded tile
+		Sink:      sink,
+		Workers:   4,
+	})
+	if err == nil {
+		t.Fatal("Run returned nil; want the encode error")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("Run returned %q, want it to contain \"boom\" (encode error must not be masked by context.Canceled)", err.Error())
 	}
 }
 
