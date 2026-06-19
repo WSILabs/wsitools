@@ -61,7 +61,7 @@ func cropTilePlan(tx, ty, srcTileW, srcTileH, srcW, srcH, cropX, cropY, cropW, c
 // [cropX,cropX+cropW) × [cropY,cropY+cropH) and writes it, anchored at (0,0),
 // into outL0 (an RGB888 raster of size cropW*cropH*3). It decodes only the
 // source tiles overlapping the crop and pastes each tile's overlapping
-// sub-rect — memory-bounded like MaterializeReducedL0, but offset (no scaling).
+// sub-rect — memory-bounded (only tiles touching the crop rect), offset (no scaling).
 func MaterializeCroppedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []byte, cropX, cropY, cropW, cropH int) error {
 	srcTileW := srcL0.TileSize.W
 	srcTileH := srcL0.TileSize.H
@@ -90,9 +90,9 @@ func MaterializeCroppedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []by
 			if err != nil {
 				return fmt.Errorf("decode source tile (%d,%d): %w", tx, ty, err)
 			}
-			// Defensive clamp (matches MaterializeReducedL0): cropTilePlan
-			// derives validW/validH from image bounds, but the decoded tile is
-			// the authoritative pixel source — never read past it.
+			// Defensive clamp: cropTilePlan derives validW/validH from image
+			// bounds, but the decoded tile is the authoritative pixel source
+			// — never read past it.
 			if validW > decW {
 				validW = decW
 			}

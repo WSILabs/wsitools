@@ -4,87 +4,12 @@
 package downscale
 
 import (
-	"context"
 	"errors"
-	"fmt"
 
 	opentile "github.com/wsilabs/opentile-go"
 	otdecoder "github.com/wsilabs/opentile-go/decoder"
 	otresample "github.com/wsilabs/opentile-go/resample"
 )
-
-// MaterializeReducedL0 decodes every source-L0 tile reduced by 1/factor and
-// pastes the result into outL0 at the correct image-space position. Each tile
-// is reduced codec-agnostically (see DecodeReducedTile): codec-domain scaled
-// decode where the source codec supports it (JPEG IDCT fast-scale, JP2K/HTJ2K
-// wavelet resolution decode), else full-decode + chained 2x2 box-average.
-func MaterializeReducedL0(ctx context.Context, srcL0 *opentile.Level, outL0 []byte, outW, outH, factor int) error {
-	srcGrid := srcL0.Grid
-	srcTileW := srcL0.TileSize.W
-	srcTileH := srcL0.TileSize.H
-	srcW := srcL0.Size.W
-	srcH := srcL0.Size.H
-
-	for ty := 0; ty < srcGrid.H; ty++ {
-		for tx := 0; tx < srcGrid.W; tx++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			// Compute the image-space destination rect for this source tile.
-			// The source tile covers [sx0, sx1) × [sy0, sy1) in source-pixel
-			// space, clamped at the image bounds. The corresponding output
-			// region is [sx0/factor, sx1/factor) × [sy0/factor, sy1/factor).
-			sx0 := tx * srcTileW
-			sy0 := ty * srcTileH
-			sx1 := sx0 + srcTileW
-			sy1 := sy0 + srcTileH
-			if sx1 > srcW {
-				sx1 = srcW
-			}
-			if sy1 > srcH {
-				sy1 = srcH
-			}
-			validSrcW := sx1 - sx0
-			validSrcH := sy1 - sy0
-
-			// Codec-domain scaled decode where the source codec supports it
-			// (JPEG IDCT, JP2K/HTJ2K wavelet resolution), else full-decode +
-			// box-halve. Self-contained per tile, so seam-free.
-			decoded, decW, decH, err := DecodeReducedTile(srcL0, tx, ty, srcTileW, srcTileH, factor)
-			if err != nil {
-				return fmt.Errorf("decode tile (%d,%d): %w", tx, ty, err)
-			}
-
-			// The valid region inside the decoded tile (in decoded-pixel
-			// units): only the pixels corresponding to actual image content,
-			// not padding past the slide edge.
-			validDecW := (validSrcW + factor - 1) / factor
-			validDecH := (validSrcH + factor - 1) / factor
-			if validDecW > decW {
-				validDecW = decW
-			}
-			if validDecH > decH {
-				validDecH = decH
-			}
-
-			// Destination position in the output L0 raster.
-			dx := sx0 / factor
-			dy := sy0 / factor
-			// Clamp to output bounds (defensive: rounding could nudge past
-			// outW/outH at the slide edge).
-			if dx+validDecW > outW {
-				validDecW = outW - dx
-			}
-			if dy+validDecH > outH {
-				validDecH = outH - dy
-			}
-			PasteIntoRaster(outL0, outW, outH, dx, dy, decoded, decW, validDecW, validDecH)
-		}
-	}
-	return nil
-}
 
 // PasteIntoRaster copies the top-left validW×validH region of the decoded RGB
 // tile (which has stride decW*3) into the dst raster at position (dx, dy).
