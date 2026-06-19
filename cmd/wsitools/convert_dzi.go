@@ -1,12 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -159,10 +155,12 @@ func (s *dziWriterSink) WriteTile(level, col, row int, encoded []byte) error {
 }
 
 // dziStandaloneEncoder produces self-contained tiles: JPEG via libjpeg-turbo
-// (EncodeStandalone) or stdlib PNG. Implements retile.TileEncoder.
+// (EncodeStandalone) or PNG via the registered internal/codec/png encoder.
+// Implements retile.TileEncoder.
 type dziStandaloneEncoder struct {
 	format string
-	jpeg   *jpeg.Encoder // nil for png
+	jpeg   *jpeg.Encoder // non-nil for jpeg
+	png    codec.Encoder // non-nil for png
 }
 
 func newDZIStandaloneEncoder(format string, tileSize, quality int) (*dziStandaloneEncoder, error) {
@@ -177,7 +175,18 @@ func newDZIStandaloneEncoder(format string, tileSize, quality int) (*dziStandalo
 		}
 		return &dziStandaloneEncoder{format: "jpeg", jpeg: enc}, nil
 	case "png":
-		return &dziStandaloneEncoder{format: "png"}, nil
+		fac, err := codec.Lookup("png")
+		if err != nil {
+			return nil, fmt.Errorf("png codec unavailable: %w", err)
+		}
+		enc, err := fac.NewEncoder(
+			codec.LevelGeometry{TileWidth: tileSize, TileHeight: tileSize, PixelFormat: codec.PixelFormatRGB8},
+			codec.Quality{},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("png.NewEncoder: %w", err)
+		}
+		return &dziStandaloneEncoder{format: "png", png: enc}, nil
 	default:
 		return nil, fmt.Errorf("unsupported dzi format %q", format)
 	}
@@ -188,11 +197,7 @@ func (e *dziStandaloneEncoder) EncodeTile(rgb []byte, w, h int) ([]byte, error) 
 	case "jpeg":
 		return e.jpeg.EncodeStandalone(rgb, w, h)
 	case "png":
-		var b bytes.Buffer
-		if err := png.Encode(&b, &rgbBytesAsImage{pix: rgb, stride: w * 3, w: w, h: h}); err != nil {
-			return nil, err
-		}
-		return b.Bytes(), nil
+		return e.png.EncodeTile(rgb, w, h, nil)
 	default:
 		return nil, fmt.Errorf("unsupported dzi format %q", e.format)
 	}
@@ -202,23 +207,10 @@ func (e *dziStandaloneEncoder) Close() error {
 	if e.jpeg != nil {
 		return e.jpeg.Close()
 	}
+	if e.png != nil {
+		return e.png.Close()
+	}
 	return nil
-}
-
-// rgbBytesAsImage wraps a raw RGB byte buffer as image.Image for stdlib PNG.
-// Reports NRGBA with alpha hard-coded to 255 (opaque), matching the prior PNG
-// wrapper so PNG output is logically identical.
-type rgbBytesAsImage struct {
-	pix    []byte
-	stride int
-	w, h   int
-}
-
-func (r *rgbBytesAsImage) ColorModel() color.Model { return color.NRGBAModel }
-func (r *rgbBytesAsImage) Bounds() image.Rectangle { return image.Rect(0, 0, r.w, r.h) }
-func (r *rgbBytesAsImage) At(x, y int) color.Color {
-	i := y*r.stride + x*3
-	return color.NRGBA{R: r.pix[i+0], G: r.pix[i+1], B: r.pix[i+2], A: 0xFF}
 }
 
 // resolveFactor resolves the effective downsample factor from --factor /
