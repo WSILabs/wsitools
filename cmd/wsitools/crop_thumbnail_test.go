@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"image"
-	"image/jpeg"
+	stdjpeg "image/jpeg"
+	"os"
+	"path/filepath"
 	"testing"
 
 	opentile "github.com/wsilabs/opentile-go"
 	otdecoder "github.com/wsilabs/opentile-go/decoder"
+	_ "github.com/wsilabs/opentile-go/decoder/all"
+	_ "github.com/wsilabs/opentile-go/formats/all"
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
@@ -60,7 +64,7 @@ func TestRegenCropThumbnailAssoc(t *testing.T) {
 		t.Errorf("regen size = %v, want %dx%d", th.Size(), wantW, wantH)
 	}
 	jb, _ := th.Bytes()
-	img, err := jpeg.Decode(bytes.NewReader(jb))
+	img, err := stdjpeg.Decode(bytes.NewReader(jb))
 	if err != nil {
 		t.Fatalf("regen thumbnail bytes not a decodable JPEG: %v", err)
 	}
@@ -104,5 +108,33 @@ func TestThumbDims(t *testing.T) {
 	w, h = thumbDims(300, 200, 1024)
 	if w != 300 || h != 200 {
 		t.Errorf("tiny = %dx%d, want 300x200 (no upscale)", w, h)
+	}
+}
+
+func TestStreamCropThumbnailDimsAndDecode(t *testing.T) {
+	path := filepath.Join(testdir(), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	slide, err := opentile.OpenFile(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer slide.Close()
+	rect := opentile.Region{Origin: opentile.Point{X: 100, Y: 100}, Size: opentile.Size{W: 1024, H: 1024}}
+	jpegBytes, tw, th, err := streamCropThumbnail(slide, rect, 1024, 1024, 80)
+	if err != nil {
+		t.Fatalf("streamCropThumbnail: %v", err)
+	}
+	wantW, wantH := thumbDims(1024, 1024, thumbLongSide)
+	if tw != wantW || th != wantH {
+		t.Errorf("thumb dims = %d×%d, want %d×%d", tw, th, wantW, wantH)
+	}
+	img, derr := stdjpeg.Decode(bytes.NewReader(jpegBytes))
+	if derr != nil {
+		t.Fatalf("thumbnail not a decodable JPEG: %v", derr)
+	}
+	if b := img.Bounds(); b.Dx() != tw || b.Dy() != th {
+		t.Errorf("decoded thumb = %v, want %d×%d", b, tw, th)
 	}
 }
