@@ -18,6 +18,20 @@ import (
 	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
+// scaleMPPMag scales resolution metadata for a downsample by `factor`: MPP grows,
+// magnification shrinks. factor 1 is the identity (plain crop preserves
+// resolution), so the same call serves both crop and crop+downsample.
+func scaleMPPMag(mppX, mppY, mag float64, factor int) (float64, float64, float64) {
+	f := float64(factor)
+	return mppX * f, mppY * f, mag / f
+}
+
+// outDimsForFactor floors source dims by factor (matches the engine's box-reduce
+// and flooredLevelCount). factor 1 returns the dims unchanged.
+func outDimsForFactor(w, h, factor int) (int, int) {
+	return w / factor, h / factor
+}
+
 // cropSourceScale returns the source MPP (X,Y) and magnification, preferring the
 // Aperio ImageDescription, else opentile metadata. Crop preserves resolution, so
 // these are emitted unchanged (no factor scaling).
@@ -74,6 +88,8 @@ type cropEmitParams struct {
 	bigtiffFlag  string
 	noAssociated bool
 	force        bool
+	factor       int
+	outW, outH   int
 	lossless     bool
 	stx0, sty0   int
 	outTilesX    int
@@ -83,7 +99,8 @@ type cropEmitParams struct {
 
 func cropToTIFF(p cropEmitParams) error {
 	mppX, mppY, mag := cropSourceScale(p.input, p.src)
-	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.l0W, p.l0H)
+	mppX, mppY, mag = scaleMPPMag(mppX, mppY, mag, p.factor)
+	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.outW, p.outH)
 
 	codec := "jpeg"
 	if p.lossless {
@@ -137,7 +154,7 @@ func cropToTIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.l0W, H: p.l0H}, p.quality, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -168,9 +185,10 @@ func cropToTIFF(p cropEmitParams) error {
 
 func cropToOMETIFF(p cropEmitParams) error {
 	mppX, mppY, mag := cropSourceScale(p.input, p.src)
-	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.l0W, p.l0H)
+	mppX, mppY, mag = scaleMPPMag(mppX, mppY, mag, p.factor)
+	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.outW, p.outH)
 
-	ttw, tth := thumbDims(p.l0W, p.l0H, thumbLongSide)
+	ttw, tth := thumbDims(p.outW, p.outH, thumbLongSide)
 	var omeAssocs []OMEAssoc
 	if !p.noAssociated {
 		for _, a := range p.src.AssociatedImages() {
@@ -185,7 +203,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 			omeAssocs = append(omeAssocs, OMEAssoc{Name: name, W: aw, H: ah})
 		}
 	}
-	omeXML := SyntheticOMEDescriptionWithMag(uint32(p.l0W), uint32(p.l0H), mppX, mppY, mag, "Image", string(p.src.Format()), omeAssocs)
+	omeXML := SyntheticOMEDescriptionWithMag(uint32(p.outW), uint32(p.outH), mppX, mppY, mag, "Image", string(p.src.Format()), omeAssocs)
 
 	w, err := streamwriter.Create(p.output, streamwriter.Options{
 		BigTIFF:              bigtiffMode,
@@ -236,7 +254,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.l0W, H: p.l0H}, p.quality, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -273,6 +291,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 // MPP/magnification.
 func cropToCOGWSI(p cropEmitParams) error {
 	mppX, mppY, mag := cropSourceScale(p.input, p.src)
+	mppX, mppY, mag = scaleMPPMag(mppX, mppY, mag, p.factor)
 
 	bigTIFFMode, err := parseBigTIFFFlag(p.bigtiffFlag)
 	if err != nil {
@@ -324,7 +343,7 @@ func cropToCOGWSI(p cropEmitParams) error {
 		}
 	} else {
 		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
-		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.l0W, H: p.l0H}, p.quality, p.workers); err != nil {
+		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers); err != nil {
 			aborted = true
 			return fmt.Errorf("build pyramid: %w", err)
 		}
@@ -436,6 +455,12 @@ func cropToDICOM(p cropEmitParams) error {
 	// Lossy: stream the crop rect through the retile engine into a spool, then
 	// emit DICOM. No cropped raster is materialized (p.l0 is nil here).
 	rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
+	// Scale metadata for the lossy path only; lossless uses the unscaled md above.
+	lossyMD := md
+	lossyMD.MPPX, lossyMD.MPPY, lossyMD.Magnification = scaleMPPMag(md.MPPX, md.MPPY, md.Magnification, p.factor)
+	if md.MPP != 0 {
+		lossyMD.MPP = md.MPP * float64(p.factor)
+	}
 	// Regenerate the crop thumbnail from a small streaming read (no p.l0 raster).
 	if !p.noAssociated {
 		jpegBytes, tw, th, terr := streamCropThumbnail(p.src, rect, p.l0W, p.l0H, p.quality)
@@ -444,7 +469,7 @@ func cropToDICOM(p cropEmitParams) error {
 		}
 		assoc = replaceThumbnailAssoc(assoc, jpegBytes, tw, th)
 	}
-	return runDICOMEngine(p.ctx, p.src, rect, opentile.Size{W: p.l0W, H: p.l0H}, "jpeg", p.quality, p.workers, src.Format(), md, assoc, dicomwriter.Options{
+	return runDICOMEngine(p.ctx, p.src, rect, opentile.Size{W: p.outW, H: p.outH}, "jpeg", p.quality, p.workers, src.Format(), lossyMD, assoc, dicomwriter.Options{
 		Associated:  !p.noAssociated,
 		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
 	}, p.output, p.force)

@@ -65,7 +65,7 @@ effective snapped rect when the input is not already tile-aligned.`,
 		}
 		workers := resolveWorkers(cropWorkers, cmd.Flags().Changed("workers"), cropJobs, cmd.Flags().Changed("jobs"))
 		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
-			cropQuality, workers, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", time.Now())
+			cropQuality, workers, 1, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", time.Now())
 	},
 }
 
@@ -130,7 +130,7 @@ func validateCropBounds(x, y, w, h, l0W, l0H int) error {
 // runCrop takes all options as explicit parameters (no global-flag reads),
 // mirroring downsampleToSVS, so it stays testable and reusable. The cobra RunE
 // closure resolves the flag globals and passes them in.
-func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, target string, start time.Time) error {
+func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers, factor int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, target string, start time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -169,6 +169,16 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	}
 	if target == "" {
 		target = srcTarget
+	}
+
+	if factor < 1 {
+		factor = 1
+	}
+	if factor != 1 && lossless {
+		return fmt.Errorf("--lossless cannot be combined with downsampling")
+	}
+	if factor != 1 && target == "svs" {
+		return fmt.Errorf("crop+downsample to SVS is not yet supported; use --to tiff|ome-tiff|cog-wsi|dicom")
 	}
 
 	srcL0 := src.Levels()[0]
@@ -219,12 +229,17 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 			return fmt.Errorf("materialize cropped L0: %w", err)
 		}
 	}
-	nLevels := flooredLevelCount(ew, eh, outputTileSize)
+	outW, outH := outDimsForFactor(ew, eh, factor)
+	if outW <= 0 || outH <= 0 {
+		return fmt.Errorf("--factor %d too large for crop extent %dx%d", factor, ew, eh)
+	}
+	nLevels := flooredLevelCount(outW, outH, outputTileSize)
 
 	p := cropEmitParams{
 		ctx: ctx, src: src, srcL0: srcL0, input: input, output: output,
 		l0: outL0, l0W: ew, l0H: eh, ex: ex, ey: ey, nLevels: nLevels, quality: q, workers: workers,
 		order: order, bigtiffFlag: bigtiffFlag, noAssociated: noAssociated, force: force,
+		factor: factor, outW: outW, outH: outH,
 		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
 		start: start,
 	}
