@@ -14,6 +14,7 @@ func TestConvertRectComboGuards(t *testing.T) {
 		{"rect+factor+svs", "", "svs", "crop+downsample to SVS", true, 2, 0},
 		{"rect+targetmag+svs", "", "svs", "crop+downsample to SVS", true, 1, 20},
 		{"rect+factor+dzi", "", "dzi", "--rect with --to dzi", true, 2, 0},
+		{"rect+szi", "", "szi", "--rect with --to szi", true, 2, 0},
 		{"rect+codec", "avif", "tiff", "--rect with --codec", true, 1, 0},
 	}
 	for _, c := range cases {
@@ -35,5 +36,8 @@ func TestConvertRectComboAllowed(t *testing.T) {
 	}
 	if err := validateRectCombo(false, 2, 0, "avif", "dzi"); err != nil {
 		t.Fatalf("no rect = always allowed, got %v", err)
+	}
+	if err := validateRectCombo(true, 1, 0, "", "svs"); err != nil {
+		t.Fatalf("plain crop (factor 1) to svs must be allowed, got %v", err)
 	}
 }
