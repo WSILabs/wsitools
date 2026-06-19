@@ -163,6 +163,9 @@ func streamCropThumbnail(slide *opentile.Slide, rect opentile.Region, ew, eh, qu
 			filled++
 		}
 	}
+	if filled != th {
+		return nil, 0, 0, fmt.Errorf("thumbnail short read: got %d of %d rows", filled, th)
+	}
 	jpegBytes, err = encodeThumbnailJPEG(rgb, tw, th, quality)
 	if err != nil {
 		return nil, 0, 0, err
