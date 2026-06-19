@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -960,31 +961,45 @@ func downsampleToDICOM(ctx context.Context, input, output string, factor, target
 	return nil
 }
 
-// buildPyramidCOGWSI materialises the reduced L0 raster and iterates through
-// all pyramid levels encoding JPEG tiles into a cogwsiwriter.Writer. It mirrors
-// buildPyramid (which targets streamwriter.Writer) but does not support a
-// postL0Hook (COG-WSI layout has no SVS-style interleaved thumbnail IFD).
+// buildPyramidCOGWSI streams the reduced-resolution pyramid into a
+// cogwsiwriter.Writer via the retile engine. It mirrors buildPyramid (which
+// targets streamwriter.Writer) but has no postL0Hook (COG-WSI layout has no
+// SVS-style interleaved thumbnail IFD).
 func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwriter.Writer, factor, quality, workers int) error {
-	srcLevels := src.Levels()
-	srcL0 := srcLevels[0]
-	srcW := srcL0.Size.W
-	srcH := srcL0.Size.H
-	outW := srcW / factor
-	outH := srcH / factor
-
-	nLevels := len(srcLevels)
-
-	rasterBytes := int64(outW) * int64(outH) * 3
-	if rasterBytes < 0 {
-		return fmt.Errorf("output L0 raster size overflows int64")
+	srcL0 := src.Levels()[0]
+	srcSize := opentile.Size{W: srcL0.Size.W, H: srcL0.Size.H}
+	outL0 := opentile.Size{W: srcSize.W / factor, H: srcSize.H / factor}
+	if outL0.W <= 0 || outL0.H <= 0 {
+		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
-	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeReducedL0(ctx, srcL0, outL0, outW, outH, factor); err != nil {
-		return err
+	levels := octaveLevelSpecsFor(outL0, outputTileSize)
+
+	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
+		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
+	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+	if err != nil {
+		return fmt.Errorf("new encoder: %w", err)
+	}
+	defer enc.Close()
+
+	handles := make([]*cogwsiwriter.LevelHandle, len(levels))
+	for i := range levels {
+		h, err := w.AddLevel(cogwsiwriter.LevelSpec{
+			ImageWidth: uint32(levels[i].Width), ImageHeight: uint32(levels[i].Height),
+			TileWidth: outputTileSize, TileHeight: outputTileSize,
+			Compression: enc.TIFFCompressionTag(), Photometric: 2,
+			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
+			JPEGTables: enc.LevelHeader(),
+			IsL0:       i == 0,
+		})
+		if err != nil {
+			return fmt.Errorf("add level %d: %w", i, err)
+		}
+		handles[i] = h
 	}
 
-	_ = workers // reserved for future parallel encode path
-	return buildPyramidFromRasterCOGWSI(ctx, w, outL0, outW, outH, nLevels, quality)
+	sink := newCogwsiSink(handles, levels)
+	return runDownsampleEngine(ctx, src, srcSize, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
 }
 
 // buildPyramidFromRasterCOGWSI encodes an in-memory RGB888 L0 raster into a

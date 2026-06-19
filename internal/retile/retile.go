@@ -39,6 +39,17 @@ func Run(ctx context.Context, spec Spec) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var encMu sync.Mutex
+	var encErr error
+	onEncErr := func(e error) {
+		encMu.Lock()
+		if encErr == nil {
+			encErr = e
+		}
+		encMu.Unlock()
+		cancel()
+	}
+
 	encodeJobs := make(chan encodeJob, 2*workers)
 	writeJobs := make(chan writeJob, 2*workers)
 
@@ -58,7 +69,7 @@ func Run(ctx context.Context, spec Spec) error {
 		encWG.Add(1)
 		go func() {
 			defer encWG.Done()
-			encoderWorker(ctx, encodeJobs, writeJobs, spec.Encoder)
+			encoderWorker(ctx, encodeJobs, writeJobs, spec.Encoder, onEncErr)
 		}()
 	}
 
@@ -101,6 +112,15 @@ func Run(ctx context.Context, spec Spec) error {
 	close(writeJobs)
 	sinkWG.Wait()
 
+	// Prefer encErr: it is only ever set by a genuine encode failure (never by
+	// cancellation), so when set it is the root cause — and any srcErr in that
+	// case is the downstream context.Canceled that onEncErr triggered itself.
+	encMu.Lock()
+	ee := encErr
+	encMu.Unlock()
+	if ee != nil {
+		return ee
+	}
 	if srcErr != nil {
 		return srcErr
 	}
