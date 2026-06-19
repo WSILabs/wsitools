@@ -62,6 +62,9 @@ func TestDZIStandaloneEncoderPNG(t *testing.T) {
 	}
 	defer enc.Close()
 	rgb := make([]byte, 8*8*3)
+	for i := range rgb {
+		rgb[i] = byte(i * 3)
+	}
 	body, err := enc.EncodeTile(rgb, 8, 8)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
@@ -72,5 +75,12 @@ func TestDZIStandaloneEncoderPNG(t *testing.T) {
 	}
 	if b := img.Bounds(); b.Dx() != 8 || b.Dy() != 8 {
 		t.Errorf("png dims = %v, want 8×8", b)
+	}
+	// Verify losslessness: a non-trivial pixel must round-trip exactly.
+	r, g, b2, _ := img.At(1, 0).RGBA()
+	i := 1 * 3
+	if byte(r>>8) != rgb[i] || byte(g>>8) != rgb[i+1] || byte(b2>>8) != rgb[i+2] {
+		t.Errorf("pixel (1,0) mismatch: got %d,%d,%d want %d,%d,%d",
+			byte(r>>8), byte(g>>8), byte(b2>>8), rgb[i], rgb[i+1], rgb[i+2])
 	}
 }
