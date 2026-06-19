@@ -89,11 +89,7 @@ func init() {
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
-	convertCmd.Flags().StringVar(&cvRect, "rect", "", "crop rectangle X,Y,W,H (level-0 coords); crops before container change")
-	convertCmd.Flags().IntVar(&cvRectX, "x", 0, "crop X (level-0 coords; with --y/--w/--h)")
-	convertCmd.Flags().IntVar(&cvRectY, "y", 0, "crop Y (level-0 coords)")
-	convertCmd.Flags().IntVar(&cvRectW, "w", 0, "crop width (level-0 pixels)")
-	convertCmd.Flags().IntVar(&cvRectH, "h", 0, "crop height (level-0 pixels)")
+	registerRectFlags(convertCmd)
 	_ = convertCmd.Flags().MarkDeprecated("dzi-format", "use --codec jpeg|png")
 	_ = convertCmd.MarkFlagRequired("output")
 	rootCmd.AddCommand(convertCmd)
@@ -205,6 +201,15 @@ func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 		return cogwsiwriter.BigTIFFOff, nil
 	}
 	return 0, fmt.Errorf("--bigtiff %q: want auto|on|off", v)
+}
+
+// registerRectFlags binds --rect/--x/--y/--w/--h on cmd to the cv* rect globals.
+func registerRectFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&cvRect, "rect", "", "crop rectangle X,Y,W,H (level-0 coords); crops before container change")
+	cmd.Flags().IntVar(&cvRectX, "x", 0, "crop X (level-0 coords; with --y/--w/--h)")
+	cmd.Flags().IntVar(&cvRectY, "y", 0, "crop Y (level-0 coords)")
+	cmd.Flags().IntVar(&cvRectW, "w", 0, "crop width (level-0 pixels)")
+	cmd.Flags().IntVar(&cvRectH, "h", 0, "crop height (level-0 pixels)")
 }
 
 // validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3b.

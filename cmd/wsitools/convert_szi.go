@@ -53,7 +53,11 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err != nil {
 		return err
 	}
-	outW, outH, err := reducedDims(srcW, srcH, factor)
+	srcRegion, err := resolveConvertRect(cmd, srcW, srcH)
+	if err != nil {
+		return err
+	}
+	outW, outH, err := reducedDims(srcRegion.Size.W, srcRegion.Size.H, factor)
 	if err != nil {
 		return err
 	}
@@ -73,7 +77,7 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 		Name: name, Width: outW, Height: outH,
 		Format: dziFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
 	}
-	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcW, srcH); err != nil {
+	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion); err != nil {
 		return err
 	}
 	if err := w.WriteScanProperties(src.Metadata()); err != nil {
