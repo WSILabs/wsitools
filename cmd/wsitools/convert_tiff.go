@@ -351,6 +351,13 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			w.Abort()
 			return err
 		}
+	} else if levels, ok := transcodeOctaveLevels(srcLevelDimsFromSlide(slide)); ok {
+		// Same-geometry transcode: route through the engine, preserving the
+		// source pyramid structure (select-octave). Emits associated itself.
+		if err := convertTranscodeTIFF(cmd.Context(), slide, src, w, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic, workers, fac, knobs, levels); err != nil {
+			w.Abort()
+			return err
+		}
 	} else {
 		if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic); err != nil {
 			w.Abort()
