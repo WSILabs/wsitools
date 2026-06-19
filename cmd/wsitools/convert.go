@@ -208,8 +208,8 @@ func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 }
 
 // validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3b.
-// Slice 3b adds --factor/--target-mag to the rect path for non-SVS containers.
-// SVS crop+downsample and dzi/szi rect remain deferred.
+// Slice 3b adds --factor/--target-mag to the rect path for all TIFF-family containers.
+// dzi/szi rect remain deferred.
 func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) error {
 	if !rectSet {
 		return nil
@@ -219,9 +219,6 @@ func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) er
 	}
 	if to == "dzi" || to == "szi" {
 		return fmt.Errorf("--rect with --to %s is not yet supported", to)
-	}
-	if (factor != 1 || targetMag != 0) && to == "svs" {
-		return fmt.Errorf("crop+downsample to SVS is not yet supported; use --to tiff|ome-tiff|cog-wsi|dicom")
 	}
 	return nil
 }

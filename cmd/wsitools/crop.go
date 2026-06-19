@@ -177,9 +177,6 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if factor != 1 && lossless {
 		return fmt.Errorf("--lossless cannot be combined with downsampling")
 	}
-	if factor != 1 && target == "svs" {
-		return fmt.Errorf("crop+downsample to SVS is not yet supported; use --to tiff|ome-tiff|cog-wsi|dicom")
-	}
 
 	srcL0 := src.Levels()[0]
 	baseW, baseH := srcL0.Size.W, srcL0.Size.H
@@ -192,7 +189,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	}
 
 	if target == "svs" {
-		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, order, bigtiffFlag, noAssociated, lossless, start)
+		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, factor, order, bigtiffFlag, noAssociated, lossless, start)
 	}
 
 	// Non-SVS sources carry no Aperio ImageDescription to mine for a source Q
@@ -260,7 +257,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 // cropEmitSVS is the SVS-specific crop emitter. It receives an already-opened
 // source slide and all resolved options. The front-end (runCrop) owns: OpenFile,
 // format guard, validateCropBounds, lossless guard, and tileorder.ByName.
-func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string, x, y, w, h, quality, workers int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated, lossless bool, start time.Time) error {
+func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string, x, y, w, h, quality, workers, factor int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated, lossless bool, start time.Time) error {
 	srcL0 := src.Levels()[0]
 	baseW, baseH := srcL0.Size.W, srcL0.Size.H
 
@@ -295,6 +292,10 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		}
 	}
 	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, ex, ey, ew, eh, outputTileSize, outputTileSize, quality)
+	outW, outH := outDimsForFactor(ew, eh, factor)
+	cropDesc = scaleAperioResolutionTokens(cropDesc, factor)
+	outMPP := desc.MPP * float64(factor)
+	outMag := desc.AppMag / float64(factor)
 
 	var bigtiffMode tiff.BigTIFFMode
 	switch bigtiffFlag {
@@ -323,9 +324,9 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		FormatName:       "svs",
 		AcceptedOrders:   acceptedOrdersForFormat("svs"),
 		DefaultOrder:     order,
-		MPPX:             desc.MPP,
-		MPPY:             desc.MPP,
-		Magnification:    desc.AppMag,
+		MPPX:             outMPP,
+		MPPY:             outMPP,
+		Magnification:    outMag,
 		ICCProfile:       src.ICCProfile(),
 	})
 	if err != nil {
@@ -350,7 +351,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		}
 	}
 
-	nLevels := flooredLevelCount(ew, eh, outputTileSize)
+	nLevels := flooredLevelCount(outW, outH, outputTileSize)
 	if lossless {
 		// Strategy B (lossless): copy L0 tiles verbatim, rebuild lower levels.
 		// Needs the decoded crop raster for the thumbnail + once-halved lowers.
@@ -396,7 +397,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: ew, H: eh}, quality, workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: outW, H: outH}, quality, workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
