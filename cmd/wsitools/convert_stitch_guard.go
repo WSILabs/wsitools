@@ -6,21 +6,31 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
-// guardStitchedSource refuses converting a source with overlapping/stitched
-// tiles to a per-tile target. opentile v0.46+ reports a stitched Level.Size that
-// disagrees with the raw tile Grid (a Ventana BIF's tiles physically overlap, so
-// Grid has more tile columns than the stitched Size needs). The per-tile
-// tile-copy / re-encode convert paths can't consume that: they crash ("tile out
-// of grid"), panic (ome-tiff), or silently place tiles at naive un-compacted
-// positions (dicom/bif). dzi/szi go through the streaming descent (ScaledStrips),
-// which composites the stitched image correctly, so they are exempt. The general
-// fix is the streaming retile engine
-// (docs/superpowers/specs/2026-06-18-retiling-engine-design.md).
-//
-// Detection: opentile-go's Level.Overlapping (#71 / v0.48.0) is the authoritative
-// signal that a level's stored tiles overlap (Grid does not tile Size).
+// guardTargetHandlesOverlap reports whether target can consume an overlapping/
+// stitched source. dzi/szi composite via their own streaming descent; cog-wsi/
+// svs/tiff/ome-tiff route through the retile engine (SP2 M2). dicom (derivedsource
+// path) and bif (no engine sink yet) cannot, so they stay guarded.
+func guardTargetHandlesOverlap(target string) bool {
+	switch target {
+	case "", "dzi", "szi", "cog-wsi", "svs", "tiff", "ome-tiff":
+		return true
+	default:
+		return false
+	}
+}
+
+func overlapGuardError(input, target string) error {
+	return fmt.Errorf("%s has overlapping/stitched tiles (e.g. a Ventana BIF): "+
+		"re-tiling to %s is not yet supported — convert to a TIFF-family target "+
+		"(cog-wsi/svs/tiff/ome-tiff) or dzi/szi, which composite the stitched image", input, target)
+}
+
+// guardStitchedSource refuses converting a stitched source only to a target that
+// cannot consume it (dicom/bif). Overlap-capable targets return nil and handle
+// the source via their own descent (dzi/szi) or the retile engine (the four
+// TIFF-family targets, SP2 M2).
 func guardStitchedSource(input, target string) error {
-	if target == "" || target == "dzi" || target == "szi" {
+	if guardTargetHandlesOverlap(target) {
 		return nil
 	}
 	src, err := source.Open(input)
@@ -30,10 +40,7 @@ func guardStitchedSource(input, target string) error {
 	defer src.Close()
 	for _, lvl := range src.Levels() {
 		if lvl.Overlapping() {
-			return fmt.Errorf("%s has overlapping/stitched tiles (e.g. a Ventana BIF): "+
-				"re-tiling to %s is not yet supported — convert to dzi or szi (which "+
-				"composite the stitched image correctly), or wait for the streaming "+
-				"retile engine", input, target)
+			return overlapGuardError(input, target)
 		}
 	}
 	return nil

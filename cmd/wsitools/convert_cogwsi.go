@@ -38,7 +38,7 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 		return fmt.Errorf("--tile-order: %w", err)
 	}
 
-	src, err := source.Open(input)
+	src, slide, err := source.OpenWithSlide(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {
 			return fmt.Errorf("source format unsupported: %w", err)
@@ -47,10 +47,16 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 	}
 	defer src.Close()
 
-	for _, lvl := range src.Levels() {
-		if compressionTagFor(lvl.Compression()) == 0 {
-			return fmt.Errorf("level %d: source compression %s has no standard TIFF Compression tag; cannot tile-copy",
-				lvl.Index(), lvl.Compression())
+	overlapping := sourceIsOverlapping(src)
+
+	if !overlapping {
+		// Verbatim tile-copy requires a tile-copyable source compression. The
+		// engine path re-encodes, so it does not.
+		for _, lvl := range src.Levels() {
+			if compressionTagFor(lvl.Compression()) == 0 {
+				return fmt.Errorf("level %d: source compression %s has no standard TIFF Compression tag; cannot tile-copy",
+					lvl.Index(), lvl.Compression())
+			}
 		}
 	}
 	if len(src.Levels()) == 0 {
@@ -82,7 +88,17 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 	}
 
 	plan := assocEditPlan{dropAll: cvNoAssociated}
-	if err := writeCOGWSI(w, src, plan); err != nil {
+	if overlapping {
+		knobs, kerr := parseQualityKnobs(cvQuality)
+		if kerr != nil {
+			w.Abort()
+			return fmt.Errorf("--quality: %w", kerr)
+		}
+		err = convertStitchedCOGWSI(cmd.Context(), slide, src, w, plan, cvWorkers, knobs, "jpeg")
+	} else {
+		err = writeCOGWSI(w, src, plan)
+	}
+	if err != nil {
 		w.Abort()
 		return err
 	}

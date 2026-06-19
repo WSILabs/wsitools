@@ -55,6 +55,14 @@ func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) 
 		}
 	}
 
+	return writeCOGWSIAssociated(w, src, plan)
+}
+
+// writeCOGWSIAssociated writes src's associated images into w per plan. It does
+// NOT Abort/Close w — the caller owns the writer lifecycle. Split out of
+// writeCOGWSI so the retile-engine path (which builds the pyramid itself) can
+// reuse the verbatim associated-image copy.
+func writeCOGWSIAssociated(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) error {
 	if plan.dropAll {
 		return nil
 	}
