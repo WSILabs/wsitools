@@ -27,6 +27,7 @@ var (
 	cropOutput    string
 	cropQuality   int
 	cropWorkers   int
+	cropJobs      int
 	cropTileOrder string
 	cropBigTIFF   string
 	cropForce     bool
@@ -62,8 +63,9 @@ effective snapped rect when the input is not already tile-aligned.`,
 		if err != nil {
 			return err
 		}
+		workers := resolveWorkers(cropWorkers, cmd.Flags().Changed("workers"), cropJobs, cmd.Flags().Changed("jobs"))
 		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
-			cropQuality, cropWorkers, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, time.Now())
+			cropQuality, workers, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, time.Now())
 	},
 }
 
@@ -76,6 +78,7 @@ func init() {
 	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output path, same container as source (required)")
 	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: source Q for SVS, else 90)")
 	cropCmd.Flags().IntVar(&cropWorkers, "workers", 0, "Encode workers (default: NumCPU)")
+	cropCmd.Flags().IntVar(&cropJobs, "jobs", 0, "alias of --workers")
 	cropCmd.Flags().StringVar(&cropTileOrder, "tile-order", "row-major", "Tile order: row-major|hilbert|morton")
 	cropCmd.Flags().StringVar(&cropBigTIFF, "bigtiff", "auto", "BigTIFF mode: auto|on|off")
 	cropCmd.Flags().BoolVarP(&cropForce, "force", "f", false, "Overwrite existing output")

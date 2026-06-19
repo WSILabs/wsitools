@@ -63,6 +63,7 @@ var (
 	dsTargetMag int
 	dsQuality   int
 	dsJobs      int
+	dsWorkers   int
 	dsForce     bool
 	dsTileOrder string
 )
@@ -104,6 +105,7 @@ func init() {
 	downsampleCmd.Flags().IntVar(&dsTargetMag, "target-mag", 0, "alternative to --factor: derive factor from source AppMag")
 	downsampleCmd.Flags().IntVar(&dsQuality, "quality", 90, "JPEG quality 1..100")
 	downsampleCmd.Flags().IntVar(&dsJobs, "jobs", runtime.NumCPU(), "worker goroutines")
+	downsampleCmd.Flags().IntVar(&dsWorkers, "workers", 0, "alias of --jobs")
 	downsampleCmd.Flags().BoolVarP(&dsForce, "force", "f", false, "overwrite output if it exists")
 	downsampleCmd.Flags().StringVar(&dsTileOrder, "tile-order", "row-major",
 		"Tile emission order within each level (row-major|hilbert|morton). "+
@@ -116,6 +118,7 @@ func init() {
 func runDownsample(cmd *cobra.Command, args []string) error {
 	input := args[0]
 	start := time.Now()
+	dsJobs = resolveWorkers(dsJobs, cmd.Flags().Changed("jobs"), dsWorkers, cmd.Flags().Changed("workers"))
 
 	slog.Info("starting downsample",
 		"input", input,
