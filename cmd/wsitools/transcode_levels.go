@@ -66,6 +66,8 @@ func transcodeOctaveLevels(src []srcLevelDims) ([]retile.LevelSpec, bool) {
 			})
 			emitIdx++
 		} else {
+			// Intermediate octave: never emits tiles, so Index/Cols/Rows are unused;
+			// TileH=256 is only the internal box-reduction strip height.
 			levels = append(levels, retile.LevelSpec{
 				Index: -1, Width: w, Height: h,
 				Cols: 0, Rows: 0, TileW: 256, TileH: 256,
