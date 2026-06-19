@@ -70,12 +70,11 @@ func Run(ctx context.Context, spec Spec) error {
 		sinkDrainer(writeJobs, spec.Sink, &sinkErr)
 	}()
 
+	// workers is always > 0 here (normalized to NumCPU above).
 	stripOpts := []opentile.StripOption{
 		opentile.WithStripContext(ctx),
 		opentile.WithStripKernel(spec.Kernel),
-	}
-	if workers > 0 {
-		stripOpts = append(stripOpts, opentile.WithStripWorkers(workers))
+		opentile.WithStripWorkers(workers),
 	}
 	it := spec.Slide.Pyramid(0).ScaledStrips(spec.SrcRegion, spec.OutL0, spec.Levels[0].TileH, stripOpts...)
 	defer it.Close()

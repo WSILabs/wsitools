@@ -6,7 +6,7 @@ import "context"
 // is engine-relative (0 = finest). Sinks translate Index to container numbering.
 type LevelSpec struct {
 	Index         int
-	Width, Height int // level pixel dims
+	Width, Height int // level pixel dims (Height is set for sinks — e.g. TIFF IFDs; the engine derives content height from Rows/TileH and the strip)
 	Cols, Rows    int // tile grid
 	TileW, TileH  int
 	Overlap       int // 0 for TIFF-family/cog-wsi; 1 for DZI
