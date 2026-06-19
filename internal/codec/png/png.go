@@ -7,6 +7,7 @@ package png
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	stdpng "image/png"
@@ -32,8 +33,12 @@ type Encoder struct{}
 func (e *Encoder) LevelHeader() []byte { return nil }
 
 // EncodeTile encodes w×h RGB888 pixels as a complete PNG. The dst hint is
-// ignored (image/png allocates its own buffer).
+// ignored: image/png allocates its own buffer internally (a stdlib limitation,
+// not a reusable-buffer opportunity).
 func (e *Encoder) EncodeTile(rgb []byte, w, h int, _ []byte) ([]byte, error) {
+	if len(rgb) < w*h*3 {
+		return nil, fmt.Errorf("codec/png: rgb buffer too small (have %d, need %d)", len(rgb), w*h*3)
+	}
 	var b bytes.Buffer
 	if err := stdpng.Encode(&b, &rgbImage{pix: rgb, stride: w * 3, w: w, h: h}); err != nil {
 		return nil, err
@@ -41,7 +46,8 @@ func (e *Encoder) EncodeTile(rgb []byte, w, h int, _ []byte) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// TIFFCompressionTag returns 0: PNG is not a TIFF tile codec (DZI/SZI only).
+// TIFFCompressionTag returns 0: PNG is not a TIFF tile codec. Callers writing a
+// TIFF MUST assert this is non-zero before use (DZI/SZI is the only valid sink).
 func (e *Encoder) TIFFCompressionTag() uint16 { return 0 }
 
 func (e *Encoder) Close() error { return nil }

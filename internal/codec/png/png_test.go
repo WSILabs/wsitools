@@ -49,6 +49,15 @@ func TestPNGEncoderRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPNGEncoderRejectsShortBuffer(t *testing.T) {
+	enc := &Encoder{}
+	defer enc.Close()
+	// 10x10 RGB888 needs 300 bytes; give 50 → must error, not panic.
+	if _, err := enc.EncodeTile(make([]byte, 50), 10, 10, nil); err == nil {
+		t.Fatal("expected error on under-sized rgb buffer, got nil")
+	}
+}
+
 func TestPNGRegisteredAndNotTIFF(t *testing.T) {
 	fac, err := codec.Lookup("png")
 	if err != nil {
