@@ -73,6 +73,7 @@ type cropEmitParams struct {
 	order        tileorder.OrderStrategy
 	bigtiffFlag  string
 	noAssociated bool
+	force        bool
 	lossless     bool
 	stx0, sty0   int
 	outTilesX    int
@@ -425,7 +426,7 @@ func cropToDICOM(p cropEmitParams) error {
 			// Crop extracts a spatial region at full resolution: ImageType[3]=NONE,
 			// not RESAMPLED (which downsample uses to signal spatial reduction).
 			L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-		}, p.output, cropForce); err != nil {
+		}, p.output, p.force); err != nil {
 			return err
 		}
 		fmt.Printf("wrote %s\n", p.output)
@@ -446,5 +447,5 @@ func cropToDICOM(p cropEmitParams) error {
 	return runDICOMEngine(p.ctx, p.src, rect, opentile.Size{W: p.l0W, H: p.l0H}, "jpeg", p.quality, p.workers, src.Format(), md, assoc, dicomwriter.Options{
 		Associated:  !p.noAssociated,
 		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-	}, p.output, cropForce)
+	}, p.output, p.force)
 }
