@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	opentile "github.com/wsilabs/opentile-go"
 
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
@@ -82,7 +83,6 @@ func init() {
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
 	_ = convertCmd.Flags().MarkDeprecated("dzi-format", "use --codec jpeg|png")
 	_ = convertCmd.MarkFlagRequired("output")
-	_ = convertCmd.MarkFlagRequired("to")
 	rootCmd.AddCommand(convertCmd)
 }
 
@@ -96,6 +96,21 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		if cvFactor != 1 && !isValidFactor(cvFactor) {
 			return fmt.Errorf("--factor must be one of {2,4,8,16}, got %d", cvFactor)
 		}
+	}
+
+	// Infer --to from the source format when the flag is absent.
+	if cvTo == "" {
+		f, err := opentile.OpenFile(input)
+		if err != nil {
+			return fmt.Errorf("open source: %w", err)
+		}
+		srcFormat := string(f.Format())
+		_ = f.Close()
+		resolved, err := resolveConvertTarget("", srcFormat)
+		if err != nil {
+			return err
+		}
+		cvTo = resolved
 	}
 
 	codecSet := cmd.Flags().Changed("codec")
@@ -137,7 +152,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	case "bif":
 		return runConvertBIF(cmd, input, start)
 	case "":
-		return fmt.Errorf("--to is required")
+		return fmt.Errorf("internal: --to unresolved")
 	default:
 		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif)", cvTo)
 	}
