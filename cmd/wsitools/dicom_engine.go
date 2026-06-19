@@ -1,16 +1,64 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
+	"os"
 	"strconv"
 
+	opentile "github.com/wsilabs/opentile-go"
 	"github.com/wsilabs/opentile-go/decoder"
+	resample "github.com/wsilabs/opentile-go/resample"
 	"github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
+	dicomwriter "github.com/wsilabs/wsitools/internal/dicomwriter"
 	"github.com/wsilabs/wsitools/internal/retile"
 	"github.com/wsilabs/wsitools/internal/source"
 )
+
+// runDICOMEngine streams srcRegion → outL0 through the engine into a spool, then
+// hands a spoolSource to emitDICOM. md/assoc/format describe the OUTPUT (md
+// scale-adjusted by the caller). codecName selects the frame codec (default jpeg).
+func runDICOMEngine(ctx context.Context, slide *opentile.Slide, srcRegion opentile.Region, outL0 opentile.Size, codecName string, quality, workers int, format string, md source.Metadata, assoc []source.AssociatedImage, opts dicomwriter.Options, output string, force bool) error {
+	levels := octaveLevelSpecsFor(outL0, outputTileSize)
+
+	enc, comp, err := newDicomFrameEncoder(codecName, quality)
+	if err != nil {
+		return err
+	}
+	defer enc.Close()
+
+	spoolDir, err := os.MkdirTemp("", "wsitools-dcm-spool-*")
+	if err != nil {
+		return err
+	}
+	sink, err := newSpoolTileSink(spoolDir, levels)
+	if err != nil {
+		_ = os.RemoveAll(spoolDir)
+		return err
+	}
+
+	kernel := resample.Box
+	if outL0 == srcRegion.Size {
+		kernel = resample.Nearest // identity (crop)
+	}
+	runErr := retile.Run(ctx, retile.Spec{
+		Slide: slide, SrcRegion: srcRegion, OutL0: outL0, Levels: levels,
+		Kernel: kernel, Encoder: enc, Sink: sink, Workers: workers,
+	})
+	if runErr != nil {
+		sink.remove()
+		_ = os.RemoveAll(spoolDir)
+		return runErr
+	}
+
+	// The spools stay OPEN; spoolSource reads frames via ReadAt. src.Close() →
+	// sink.remove() closes+removes them after emitDICOM finishes pulling.
+	src := newSpoolSource(sink, format, comp, md, assoc)
+	defer func() { _ = src.Close(); _ = os.RemoveAll(spoolDir) }()
+	return emitDICOM(src, opts, output, force)
+}
 
 // spoolTileSink implements retile.TileSink, spooling each level's frames to a
 // per-level tileSpool indexed by row-major tile position.

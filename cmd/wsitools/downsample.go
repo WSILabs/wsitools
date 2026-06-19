@@ -158,6 +158,7 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		"", // bigtiff: "" means auto (downsample has no --bigtiff flag)
 		dsForce,
 		false, // noAssociated: downsample always passes through associated images
+		"jpeg",
 	); err != nil {
 		return err
 	}

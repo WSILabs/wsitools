@@ -198,12 +198,12 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 			fmt.Printf("lossless: snapped crop to %d,%d %dx%d (tile-aligned)\n", ex, ey, ew, eh)
 		}
 	}
-	// The raster L0 is only needed by paths that consume it: the lossless rebuild
-	// (lower levels + thumbnail) and the DICOM emitter (derivedsource + thumbnail).
-	// The lossy engine targets (tiff/ome-tiff/cog-wsi) stream from the source and
-	// never touch p.l0, so skip materialization there.
+	// The raster L0 is only needed by the lossless rebuild (lower levels +
+	// thumbnail + lossless DICOM L0). The lossy engine targets (tiff/ome-tiff/
+	// cog-wsi/dicom) stream from the source and never touch p.l0, so skip
+	// materialization there.
 	var outL0 []byte
-	if lossless || target == "dicom" {
+	if lossless {
 		rasterBytes := int64(ew) * int64(eh) * 3
 		if rasterBytes < 0 {
 			return fmt.Errorf("cropped L0 raster size overflows int64")
