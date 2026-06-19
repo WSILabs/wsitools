@@ -233,6 +233,14 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	if outL0.W <= 0 || outL0.H <= 0 {
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
+	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, quality, workers, postL0Hook)
+}
+
+// buildEnginePyramid builds a streamwriter jpeg pyramid by streaming srcRegion
+// through the retile engine to outL0 (octave-floored levels). postL0Hook runs
+// after L0's AddLevel, before L1 (the thumbnail-IFD interleave). Shared by
+// downsample (full-L0 region, outL0=L0/factor) and crop (rect region, identity).
+func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, quality, workers int, postL0Hook func() error) error {
 	levels := octaveLevelSpecsFor(outL0, outputTileSize)
 
 	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
@@ -281,7 +289,7 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	}
 
 	sink := newStreamwriterSink(handles)
-	return runDownsampleEngine(ctx, src, srcSize, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
+	return runEngineRetile(ctx, slide, srcRegion, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
 }
 
 // buildPyramidFromRaster encodes an in-memory RGB888 L0 raster into a tiled

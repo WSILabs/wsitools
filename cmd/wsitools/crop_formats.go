@@ -66,6 +66,7 @@ type cropEmitParams struct {
 	output       string
 	l0           []byte
 	l0W, l0H     int
+	ex, ey       int
 	nLevels      int
 	quality      int
 	workers      int
@@ -124,15 +125,30 @@ func cropToTIFF(p cropEmitParams) error {
 			}
 		}
 	} else {
-		if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
+		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
+		var postL0Hook func() error
+		if !p.noAssociated {
+			postL0Hook = func() error {
+				jpegBytes, tw, th, terr := streamCropThumbnail(p.src, rect, p.l0W, p.l0H, p.quality)
+				if terr != nil {
+					return terr
+				}
+				return addCropThumbnailStripped(w, jpegBytes, tw, th)
+			}
+		}
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.l0W, H: p.l0H}, p.quality, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
 	if !p.noAssociated {
 		for _, a := range p.src.AssociatedImages() {
 			if a.Type() == opentile.AssociatedThumbnail {
-				if err := regenCropThumbnail(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
-					return fmt.Errorf("regenerate thumbnail: %w", err)
+				// Lossy already emitted the thumbnail via the post-L0 hook; only
+				// the lossless (raster) path regenerates it here.
+				if p.lossless {
+					if err := regenCropThumbnail(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
+						return fmt.Errorf("regenerate thumbnail: %w", err)
+					}
 				}
 				continue
 			}
@@ -208,7 +224,18 @@ func cropToOMETIFF(p cropEmitParams) error {
 			}
 		}
 	} else {
-		if err := buildPyramidFromRaster(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality, p.workers, nil); err != nil {
+		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
+		var postL0Hook func() error
+		if !p.noAssociated {
+			postL0Hook = func() error {
+				jpegBytes, tw, th, terr := streamCropThumbnail(p.src, rect, p.l0W, p.l0H, p.quality)
+				if terr != nil {
+					return terr
+				}
+				return addCropThumbnailStripped(w, jpegBytes, tw, th)
+			}
+		}
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.l0W, H: p.l0H}, p.quality, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -218,8 +245,12 @@ func cropToOMETIFF(p cropEmitParams) error {
 				continue
 			}
 			if a.Type() == opentile.AssociatedThumbnail {
-				if err := regenCropThumbnail(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
-					return fmt.Errorf("regenerate thumbnail: %w", err)
+				// Lossy already emitted the thumbnail via the post-L0 hook; only
+				// the lossless (raster) path regenerates it here.
+				if p.lossless {
+					if err := regenCropThumbnail(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
+						return fmt.Errorf("regenerate thumbnail: %w", err)
+					}
 				}
 				continue
 			}
@@ -291,7 +322,8 @@ func cropToCOGWSI(p cropEmitParams) error {
 			}
 		}
 	} else {
-		if err := buildPyramidFromRasterCOGWSI(p.ctx, w, p.l0, p.l0W, p.l0H, p.nLevels, p.quality); err != nil {
+		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
+		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.l0W, H: p.l0H}, p.quality, p.workers); err != nil {
 			aborted = true
 			return fmt.Errorf("build pyramid: %w", err)
 		}
@@ -299,9 +331,34 @@ func cropToCOGWSI(p cropEmitParams) error {
 	if !p.noAssociated {
 		for _, a := range p.src.AssociatedImages() {
 			if a.Type() == opentile.AssociatedThumbnail {
-				if err := regenCropThumbnailCOGWSI(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
-					aborted = true
-					return fmt.Errorf("regenerate thumbnail: %w", err)
+				if p.lossless {
+					// Lossless holds the decoded crop raster; downscale it.
+					if err := regenCropThumbnailCOGWSI(w, p.l0, p.l0W, p.l0H, p.quality); err != nil {
+						aborted = true
+						return fmt.Errorf("regenerate thumbnail: %w", err)
+					}
+				} else {
+					// Lossy: read+downscale the crop rect from the source (no raster).
+					rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
+					jpegBytes, tw, th, terr := streamCropThumbnail(p.src, rect, p.l0W, p.l0H, p.quality)
+					if terr != nil {
+						aborted = true
+						return fmt.Errorf("regenerate thumbnail: %w", terr)
+					}
+					if err := w.AddAssociated(cogwsiwriter.AssociatedSpec{
+						Type:            tiff.WSIImageTypeThumbnail,
+						Width:           uint32(tw),
+						Height:          uint32(th),
+						Compression:     tiff.CompressionJPEG,
+						Photometric:     6,
+						BitsPerSample:   []uint16{8, 8, 8},
+						SamplesPerPixel: 3,
+						Bytes:           jpegBytes,
+						RowsPerStrip:    uint32(th),
+					}); err != nil {
+						aborted = true
+						return fmt.Errorf("add thumbnail: %w", err)
+					}
 				}
 				continue
 			}

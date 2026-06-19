@@ -47,12 +47,16 @@ func sumLevelTiles(levels []retile.LevelSpec) int64 {
 	return n
 }
 
-// runDownsampleEngine runs one streaming retile pass: ScaledStrips scales the
-// full source L0 to outL0 (Box, area-averaging) and the engine box-2x derives
-// the octave pyramid in `levels`, encoding via enc into sink. It wraps sink in a
-// progress bar (unless --quiet) and ALWAYS finishes the sink (joining its drain
-// goroutines) even on a Run error, preferring the Run error.
-func runDownsampleEngine(ctx context.Context, slide *opentile.Slide, srcL0, outL0 opentile.Size, levels []retile.LevelSpec, enc retile.TileEncoder, sink retileSink, workers int) error {
+// runEngineRetile runs one streaming retile pass over srcRegion → outL0. The
+// kernel is Nearest at identity scale (crop / factor-1) and Box on a real
+// downscale (downsample). It wraps the sink in a progress bar and ALWAYS
+// finishes it (joining drains), preferring the Run error.
+func runEngineRetile(ctx context.Context, slide *opentile.Slide, srcRegion opentile.Region, outL0 opentile.Size, levels []retile.LevelSpec, enc retile.TileEncoder, sink retileSink, workers int) error {
+	kernel := resample.Box
+	if outL0 == srcRegion.Size {
+		kernel = resample.Nearest // identity read (crop): no resampling
+	}
+
 	var progress *mpb.Progress
 	var wrapped retileSink = sink
 	if !flagQuiet {
@@ -66,10 +70,10 @@ func runDownsampleEngine(ctx context.Context, slide *opentile.Slide, srcL0, outL
 
 	runErr := retile.Run(ctx, retile.Spec{
 		Slide:     slide,
-		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcL0},
+		SrcRegion: srcRegion,
 		OutL0:     outL0,
 		Levels:    levels,
-		Kernel:    resample.Box,
+		Kernel:    kernel,
 		Encoder:   enc,
 		Sink:      wrapped,
 		Workers:   workers,

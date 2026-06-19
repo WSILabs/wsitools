@@ -972,6 +972,14 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 	if outL0.W <= 0 || outL0.H <= 0 {
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
+	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, quality, workers)
+}
+
+// buildEnginePyramidCOGWSI streams srcRegion through the retile engine into a
+// cogwsiwriter.Writer at outL0 (octave-floored levels). It mirrors
+// buildEnginePyramid but targets COG-WSI (no postL0Hook; no SVS thumbnail IFD).
+// Shared by downsample (full-L0 region) and crop (rect region, identity).
+func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, quality, workers int) error {
 	levels := octaveLevelSpecsFor(outL0, outputTileSize)
 
 	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
@@ -999,7 +1007,7 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 	}
 
 	sink := newCogwsiSink(handles, levels)
-	return runDownsampleEngine(ctx, src, srcSize, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
+	return runEngineRetile(ctx, slide, srcRegion, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
 }
 
 // buildPyramidFromRasterCOGWSI encodes an in-memory RGB888 L0 raster into a

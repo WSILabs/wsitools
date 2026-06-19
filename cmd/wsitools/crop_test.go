@@ -2,15 +2,17 @@ package main
 
 import "testing"
 
+// Crop now unifies its pyramid level count on flooredLevelCount (shared with the
+// retile engine), replacing the old cropPyramidLevels helper.
 func TestCropPyramidLevels(t *testing.T) {
-	if n := cropPyramidLevels(27836, 25633, 256); n != 7 {
-		t.Errorf("cropPyramidLevels(27836,25633) = %d, want 7", n)
+	if n := flooredLevelCount(27836, 25633, 256); n != 8 {
+		t.Errorf("flooredLevelCount(27836,25633) = %d, want 8", n)
 	}
-	if n := cropPyramidLevels(200, 150, 256); n != 1 {
-		t.Errorf("cropPyramidLevels(200,150) = %d, want 1", n)
+	if n := flooredLevelCount(200, 150, 256); n != 1 {
+		t.Errorf("flooredLevelCount(200,150) = %d, want 1", n)
 	}
-	if n := cropPyramidLevels(512, 512, 256); n != 2 {
-		t.Errorf("cropPyramidLevels(512,512) = %d, want 2", n)
+	if n := flooredLevelCount(512, 512, 256); n != 2 {
+		t.Errorf("flooredLevelCount(512,512) = %d, want 2", n)
 	}
 }
 
