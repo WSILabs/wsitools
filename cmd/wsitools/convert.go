@@ -32,7 +32,7 @@ var (
 )
 
 var convertCmd = &cobra.Command{
-	Use:   "convert --to <target> -o <output> [flags] <input>",
+	Use:   "convert [--to <target>] -o <output> [flags] <input>",
 	Short: "Convert a WSI to a new container losslessly (tile-copy)",
 	Long: `Convert losslessly copies compressed tile bytes from a source WSI
 into a new container without decoding or re-encoding. In v0.6 the only
@@ -106,7 +106,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		}
 		srcFormat := string(f.Format())
 		_ = f.Close()
-		resolved, err := resolveConvertTarget("", srcFormat)
+		resolved, err := resolveConvertTarget(cvTo, srcFormat)
 		if err != nil {
 			return err
 		}
