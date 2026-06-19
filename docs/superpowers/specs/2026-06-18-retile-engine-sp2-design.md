@@ -22,11 +22,10 @@ now *works*, retiring the hard-error guard) and the L0-in-RAM problem (survey C5
 
 Architecture is fixed by the parent spec: two paths (verbatim | streaming
 descent), opentile owns READ (`ScaledStrips`), encode stays in wsitools
-(`internal/codec`). **SP1 (opentile-go#71, the `Level.Overlapping()` signal) is
-still finalizing upstream**, so SP2 detects overlap with the **heuristic**
-`Grid().X > ceil(Size.X/TileSize.X)` (the same check the shipped stitch guard
-uses); when #71 lands, that single predicate is swapped for `Level.Overlapping()`.
-SP2 does not block on #71.
+(`internal/codec`). **SP1 (opentile-go#71) LANDED — v0.48.0 ships
+`Level.Overlapping`**, now exposed on wsitools' `source.Level` as `Overlapping()
+bool` and consumed by the stitch guard (the heuristic is retired). SP2 uses
+`lvl.Overlapping()` as the path-selection predicate.
 
 ## The engine — `internal/retile`
 
@@ -185,7 +184,7 @@ sink).
 | `internal/retile.ComputeLevels` | output pyramid geometry (shared by engine + drivers) | — |
 | `TileSink` + per-container sinks | route encoded pyramid tiles to a writer's level handles | dzi / szi / cogwsiwriter / streamwriter |
 | convert drivers (reorged) | writer setup + associated + metadata + build `Spec` + `Run` + close | retile engine, existing writers, overlap heuristic |
-| overlap predicate | `Grid > ceil(Size/tile)` now; `Level.Overlapping()` (#71) later | source.Level |
+| overlap predicate | `source.Level.Overlapping()` (opentile-go #71 / v0.48.0) | source.Level |
 
 ## Deferred
 

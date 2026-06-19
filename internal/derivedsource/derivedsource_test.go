@@ -167,6 +167,7 @@ func (f *fakeLevel) Index() int                                     { return 0 }
 func (f *fakeLevel) Size() image.Point                              { return image.Point{X: 1000, Y: 1000} }
 func (f *fakeLevel) TileSize() image.Point                          { return f.tileSize }
 func (f *fakeLevel) Grid() image.Point                              { return image.Point{X: 4, Y: 4} }
+func (f *fakeLevel) Overlapping() bool                              { return false }
 func (f *fakeLevel) Compression() source.Compression                { return f.comp }
 func (f *fakeLevel) TileMaxSize() int                               { return 8 }
 func (f *fakeLevel) DecodedTile(x, y int) (*otdecoder.Image, error) { return nil, nil }

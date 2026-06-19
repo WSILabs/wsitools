@@ -38,6 +38,7 @@ func (l *transcodeLevel) Index() int                      { return l.index }
 func (l *transcodeLevel) Size() image.Point               { return l.src.Size() }
 func (l *transcodeLevel) TileSize() image.Point           { return l.src.TileSize() }
 func (l *transcodeLevel) Grid() image.Point               { return l.src.Grid() }
+func (l *transcodeLevel) Overlapping() bool               { return l.src.Overlapping() }
 func (l *transcodeLevel) Compression() source.Compression { return source.CompressionJPEG }
 func (l *transcodeLevel) TileMaxSize() int                { return l.tileW*l.tileH*3 + 2048 }
 

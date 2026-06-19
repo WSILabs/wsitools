@@ -17,8 +17,8 @@ import (
 // fix is the streaming retile engine
 // (docs/superpowers/specs/2026-06-18-retiling-engine-design.md).
 //
-// Detection: a normal level's last tile is partial, so Grid == ceil(Size/tile);
-// an overlapping level has extra full tile columns/rows, so Grid > ceil(Size/tile).
+// Detection: opentile-go's Level.Overlapping (#71 / v0.48.0) is the authoritative
+// signal that a level's stored tiles overlap (Grid does not tile Size).
 func guardStitchedSource(input, target string) error {
 	if target == "" || target == "dzi" || target == "szi" {
 		return nil
@@ -29,13 +29,7 @@ func guardStitchedSource(input, target string) error {
 	}
 	defer src.Close()
 	for _, lvl := range src.Levels() {
-		sz, ts, g := lvl.Size(), lvl.TileSize(), lvl.Grid()
-		if ts.X <= 0 || ts.Y <= 0 {
-			continue
-		}
-		ceilX := (sz.X + ts.X - 1) / ts.X
-		ceilY := (sz.Y + ts.Y - 1) / ts.Y
-		if g.X > ceilX || g.Y > ceilY {
+		if lvl.Overlapping() {
 			return fmt.Errorf("%s has overlapping/stitched tiles (e.g. a Ventana BIF): "+
 				"re-tiling to %s is not yet supported — convert to dzi or szi (which "+
 				"composite the stitched image correctly), or wait for the streaming "+
