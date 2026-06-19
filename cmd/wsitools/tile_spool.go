@@ -57,8 +57,12 @@ func (s *tileSpool) get(idx int) ([]byte, error) {
 		return nil, fmt.Errorf("tileSpool: tile %d not written", idx)
 	}
 	buf := make([]byte, e.n)
-	if _, err := s.f.ReadAt(buf, e.off); err != nil && err != io.EOF {
+	n, err := s.f.ReadAt(buf, e.off)
+	if err != nil && err != io.EOF {
 		return nil, err
+	}
+	if n != e.n {
+		return nil, fmt.Errorf("tileSpool: tile %d short read (%d of %d) — spool corrupt", idx, n, e.n)
 	}
 	return buf, nil
 }

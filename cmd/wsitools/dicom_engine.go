@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	opentile "github.com/wsilabs/opentile-go"
@@ -70,7 +71,7 @@ type spoolTileSink struct {
 func newSpoolTileSink(dir string, levels []retile.LevelSpec) (*spoolTileSink, error) {
 	spools := make([]*tileSpool, len(levels))
 	for i, ls := range levels {
-		sp, err := newTileSpool(fmt.Sprintf("%s/L%d", dir, i), ls.Cols*ls.Rows)
+		sp, err := newTileSpool(filepath.Join(dir, fmt.Sprintf("L%d", i)), ls.Cols*ls.Rows)
 		if err != nil {
 			return nil, err
 		}
