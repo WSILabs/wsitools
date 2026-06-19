@@ -227,22 +227,61 @@ func countTilesForLevel(w, h int) int {
 // The caller uses this to inject the thumbnail IFD between L0 and L1 to match
 // Aperio's quirky IFD ordering convention.
 func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writer, factor, quality, workers int, postL0Hook func() error) error {
-	srcLevels := src.Levels()
-	srcL0 := srcLevels[0]
-	outW := srcL0.Size.W / factor
-	outH := srcL0.Size.H / factor
+	srcL0 := src.Levels()[0]
+	srcSize := opentile.Size{W: srcL0.Size.W, H: srcL0.Size.H}
+	outL0 := opentile.Size{W: srcSize.W / factor, H: srcSize.H / factor}
+	if outL0.W <= 0 || outL0.H <= 0 {
+		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
+	}
+	levels := octaveLevelSpecsFor(outL0, outputTileSize)
 
-	rasterBytes := int64(outW) * int64(outH) * 3
-	if rasterBytes < 0 {
-		return fmt.Errorf("output L0 raster size overflows int64")
+	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
+		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
+	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+	if err != nil {
+		return fmt.Errorf("new encoder: %w", err)
 	}
-	slog.Debug("materialising output L0 raster", "out_w", outW, "out_h", outH, "raster_mb", rasterBytes/(1024*1024))
-	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeReducedL0(ctx, srcL0, outL0, outW, outH, factor); err != nil {
-		return err
+	defer enc.Close()
+	tables := enc.LevelHeader()
+
+	specFor := func(i int) streamwriter.LevelSpec {
+		return streamwriter.LevelSpec{
+			ImageWidth:      uint32(levels[i].Width),
+			ImageHeight:     uint32(levels[i].Height),
+			TileWidth:       outputTileSize,
+			TileHeight:      outputTileSize,
+			Compression:     tiff.CompressionJPEG,
+			Photometric:     2,
+			SamplesPerPixel: 3,
+			BitsPerSample:   []uint16{8, 8, 8},
+			JPEGTables:      tables,
+			NewSubfileType:  0,
+			WSIImageType:    tiff.WSIImageTypePyramid,
+		}
 	}
-	// downsample keeps one output level per source level (unchanged behaviour).
-	return buildPyramidFromRaster(ctx, w, outL0, outW, outH, len(srcLevels), quality, workers, postL0Hook)
+
+	handles := make([]*streamwriter.LevelHandle, len(levels))
+	h0, err := w.AddLevel(specFor(0))
+	if err != nil {
+		return fmt.Errorf("add level 0: %w", err)
+	}
+	handles[0] = h0
+	// postL0Hook (thumbnail IFD) must land at IFD 1 — between L0 and L1 AddLevels.
+	if postL0Hook != nil {
+		if err := postL0Hook(); err != nil {
+			return fmt.Errorf("post-L0 hook: %w", err)
+		}
+	}
+	for i := 1; i < len(levels); i++ {
+		h, err := w.AddLevel(specFor(i))
+		if err != nil {
+			return fmt.Errorf("add level %d: %w", i, err)
+		}
+		handles[i] = h
+	}
+
+	sink := newStreamwriterSink(handles)
+	return runDownsampleEngine(ctx, src, srcSize, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
 }
 
 // buildPyramidFromRaster encodes an in-memory RGB888 L0 raster into a tiled
