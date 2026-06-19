@@ -174,3 +174,99 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 	}
 	return writeAssociatedImages(src, w, container, omeSynthetic, plan)
 }
+
+// losslessReporter is the optional interface a codec.Encoder implements when it
+// can produce byte-exact output. encoderIsLossless returns false for encoders
+// that don't implement it (always-lossy codecs).
+type losslessReporter interface{ IsLossless() bool }
+
+func encoderIsLossless(enc codec.Encoder) bool {
+	lr, ok := enc.(losslessReporter)
+	return ok && lr.IsLossless()
+}
+
+// convertTranscodeTIFF re-encodes a non-overlapping source to a new codec while
+// preserving its pyramid structure (select-octave): the engine decodes L0 once,
+// box-derives the octave chain, and encodes ONLY the octaves matching a source
+// level (the Intermediate ones feed reduction). `levels` is the full octave chain
+// from transcodeOctaveLevels (finest-first); emitted levels carry contiguous
+// Index 0..M-1 + their source tile size.
+func convertTranscodeTIFF(ctx context.Context, slide *opentile.Slide, src source.Source, w *streamwriter.Writer, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool, workers int, fac codec.EncoderFactory, knobs map[string]string, levels []retile.LevelSpec) error {
+	l0 := slide.Pyramid(0).Levels[0]
+
+	enc, err := fac.NewEncoder(codec.LevelGeometry{TileWidth: levels[0].TileW, TileHeight: levels[0].TileH, PixelFormat: codec.PixelFormatRGB8}, codec.Quality{Knobs: knobs})
+	if err != nil {
+		return err
+	}
+	defer enc.Close()
+
+	// Emitted levels (finest-first); their Index is the contiguous emit position.
+	var emitted []retile.LevelSpec
+	for _, ls := range levels {
+		if !ls.Intermediate {
+			emitted = append(emitted, ls)
+		}
+	}
+
+	swSpec := func(ls retile.LevelSpec) streamwriter.LevelSpec {
+		spec := streamwriter.LevelSpec{
+			ImageWidth: uint32(ls.Width), ImageHeight: uint32(ls.Height),
+			TileWidth: uint32(ls.TileW), TileHeight: uint32(ls.TileH),
+			Compression: enc.TIFFCompressionTag(), Photometric: 2,
+			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
+			JPEGTables:     enc.LevelHeader(),
+			NewSubfileType: newSubfileTypeForLevel(ls.Index, container),
+			WSIImageType:   tiff.WSIImageTypePyramid,
+		}
+		if ls.Index == 0 && srcImageDesc != "" && (container == "svs" || container == "ome-tiff") {
+			spec.ExtraTags = buildL0ImageDescriptionTag(srcImageDesc)
+		}
+		return spec
+	}
+
+	handles := make([]*streamwriter.LevelHandle, len(emitted))
+	h0, err := w.AddLevel(swSpec(emitted[0]))
+	if err != nil {
+		return fmt.Errorf("add level 0: %w", err)
+	}
+	handles[0] = h0
+	if _, err := emitSVSThumbnailAtL0(src, w, 0, container, omeSynthetic, plan); err != nil {
+		return err
+	}
+	for e := 1; e < len(emitted); e++ {
+		h, err := w.AddLevel(swSpec(emitted[e]))
+		if err != nil {
+			return fmt.Errorf("add level %d: %w", e, err)
+		}
+		handles[e] = h
+	}
+
+	sink := newStreamwriterSink(handles)
+	runErr := retile.Run(ctx, retile.Spec{
+		Slide:     slide,
+		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
+		OutL0:     l0.Size, // identity: transcode is same geometry
+		Levels:    levels,  // FULL octave chain (emit + intermediate)
+		Kernel:    resample.Nearest,
+		Encoder:   &codecTileEncoder{enc: enc},
+		Sink:      sink,
+		Workers:   workers,
+	})
+	if ferr := sink.finish(); ferr != nil && runErr == nil {
+		runErr = ferr
+	}
+	if runErr != nil {
+		return runErr
+	}
+	return writeAssociatedImages(src, w, container, omeSynthetic, plan)
+}
+
+// srcLevelDimsFromSlide extracts srcLevelDims from the opentile slide levels.
+func srcLevelDimsFromSlide(slide *opentile.Slide) []srcLevelDims {
+	lv := slide.Pyramid(0).Levels
+	out := make([]srcLevelDims, len(lv))
+	for i, l := range lv {
+		out[i] = srcLevelDims{W: l.Size.W, H: l.Size.H, TileW: l.TileSize.W, TileH: l.TileSize.H}
+	}
+	return out
+}

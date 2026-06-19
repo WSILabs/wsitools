@@ -96,12 +96,23 @@ fall back to the existing `transcodePyramid` (per-level, exact dims) — safe fo
 any exotic non-power-of-2 source. `transcodePyramid`/`transcodeLevel` are **kept**
 (SP3 may delete if the fallback proves dead).
 
+**Lossless → per-level (added during verification):** the engine reads L0 via
+`ScaledStrips`, which is NOT byte-identical to opentile's direct tile decode
+(~0.1/255 chroma/strip differences). That is invisible under a lossy re-encode but
+FATAL for a **lossless** transcode (`--codec jpeg2000 --quality reversible=true`,
+webp `lossless=true`, jxl distance 0), which must be byte-exact. So lossless
+transcode routes to `transcodePyramid` (per-level, same `DecodedTile` path the
+pixel-hash uses → byte-identical), preserving the source's exact level dims.
+Detection is codec-owned: an optional `IsLossless() bool` on the encoder
+(jp2k/webp/jpegxl implement it), probed in the driver via `encoderIsLossless`.
+
 ## Routing summary (`runConvertTIFFReencode`)
 
 ```
-overlapping(src)                       → convertStitchedTIFF      (M2, octave-floored)
-!overlapping, transcodeOctaveLevels ok → convertTranscodeTIFF     (M4, select-octave)   ← NEW
-!overlapping, not ok                   → transcodePyramid          (fallback, per-level)
+overlapping(src)                                  → convertStitchedTIFF  (M2, octave-floored)
+!overlapping, lossless                            → transcodePyramid      (per-level, byte-exact)
+!overlapping, lossy, transcodeOctaveLevels ok     → convertTranscodeTIFF  (M4, select-octave)  ← NEW
+!overlapping, lossy, not ok                       → transcodePyramid      (fallback, per-level)
 ```
 `--factor` is handled earlier (M3) and never reaches here.
 

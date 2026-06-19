@@ -168,6 +168,9 @@ func (*Encoder) LevelHeader() []byte        { return nil }
 func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEGXL }
 func (*Encoder) Close() error               { return nil }
 
+// IsLossless reports whether this encoder produces byte-exact output (distance 0).
+func (e *Encoder) IsLossless() bool { return e.distance == 0 }
+
 func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {
 	if len(rgb) < w*h*3 {
 		return nil, fmt.Errorf("codec/jpegxl: rgb buffer %d < %d*%d*3", len(rgb), w, h)
