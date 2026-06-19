@@ -70,7 +70,7 @@ func init() {
 		"Tile emission order within each level (row-major|hilbert|morton). "+
 			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
 			"accept all three.")
-	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpeg2000|jpegxl|avif|webp|htj2k); absent = tile-copy when eligible")
+	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpeg2000|jpegxl|avif|webp|htj2k; jpeg|png for dzi|szi); absent = tile-copy when eligible")
 	convertCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs accepted)")
 	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
 	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi (1 = no scaling; one of {2,4,8,16})")
@@ -78,6 +78,7 @@ func init() {
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
+	_ = convertCmd.Flags().MarkDeprecated("dzi-format", "use --codec jpeg|png")
 	_ = convertCmd.MarkFlagRequired("output")
 	_ = convertCmd.MarkFlagRequired("to")
 	rootCmd.AddCommand(convertCmd)
@@ -94,11 +95,18 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if (cvTo == "dzi" || cvTo == "szi") && cvCodec != "" {
-		return fmt.Errorf("--codec is not valid with --to %s (use --dzi-format)", cvTo)
-	}
-	if (cvTo == "dzi" || cvTo == "szi") && cvDZIFormat != "jpeg" && cvDZIFormat != "png" {
-		return fmt.Errorf("--dzi-format must be jpeg or png, got %q", cvDZIFormat)
+	codecSet := cmd.Flags().Changed("codec")
+	dziFormatSet := cmd.Flags().Changed("dzi-format")
+	if cvTo == "dzi" || cvTo == "szi" {
+		// DZI/SZI: --codec (or the deprecated --dzi-format) selects the tile
+		// format; validated to jpeg|png by the resolver in runConvertDZI/SZI.
+		if _, err := resolveDZIFormat(cvCodec, codecSet, cvDZIFormat, dziFormatSet); err != nil {
+			return err
+		}
+	} else if cvCodec == "png" {
+		// PNG is a Deep Zoom tile format only; it is not a readable WSI-container
+		// tile codec (opentile does not read PNG-compressed TIFF tiles).
+		return fmt.Errorf("--codec png is only valid with --to dzi|szi (not %q)", cvTo)
 	}
 
 	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't

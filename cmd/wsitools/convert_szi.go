@@ -58,16 +58,20 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 		return err
 	}
 
+	dziFormat, err := resolveDZIFormat(cvCodec, cmd.Flags().Changed("codec"), cvDZIFormat, cmd.Flags().Changed("dzi-format"))
+	if err != nil {
+		return err
+	}
 	w, err := szi.NewWriter(f, szi.Config{
 		Name: name, Width: outW, Height: outH,
-		Format: cvDZIFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
+		Format: dziFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
 	})
 	if err != nil {
 		return err
 	}
 	cfg := dzi.Config{
 		Name: name, Width: outW, Height: outH,
-		Format: cvDZIFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
+		Format: dziFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
 	}
 	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcW, srcH); err != nil {
 		return err
