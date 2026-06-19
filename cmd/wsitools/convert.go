@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -29,6 +31,12 @@ var (
 
 	cvFactor    int
 	cvTargetMag int
+
+	cvRect  string
+	cvRectX int
+	cvRectY int
+	cvRectW int
+	cvRectH int
 )
 
 var convertCmd = &cobra.Command{
@@ -81,6 +89,11 @@ func init() {
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
+	convertCmd.Flags().StringVar(&cvRect, "rect", "", "crop rectangle X,Y,W,H (level-0 coords); crops before container change")
+	convertCmd.Flags().IntVar(&cvRectX, "x", 0, "crop X (level-0 coords; with --y/--w/--h)")
+	convertCmd.Flags().IntVar(&cvRectY, "y", 0, "crop Y (level-0 coords)")
+	convertCmd.Flags().IntVar(&cvRectW, "w", 0, "crop width (level-0 pixels)")
+	convertCmd.Flags().IntVar(&cvRectH, "h", 0, "crop height (level-0 pixels)")
 	_ = convertCmd.Flags().MarkDeprecated("dzi-format", "use --codec jpeg|png")
 	_ = convertCmd.MarkFlagRequired("output")
 	rootCmd.AddCommand(convertCmd)
@@ -126,6 +139,22 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--codec png is only valid with --to dzi|szi (not %q)", cvTo)
 	}
 
+	rectSet := cmd.Flags().Changed("rect") || cmd.Flags().Changed("x") ||
+		cmd.Flags().Changed("y") || cmd.Flags().Changed("w") || cmd.Flags().Changed("h")
+	if rectSet {
+		if err := validateRectCombo(rectSet, cvFactor, cvCodec, cvTo); err != nil {
+			return err
+		}
+		rx, ry, rw, rh, err := resolveRectValues(cmd, cvRect, cvRectX, cvRectY, cvRectW, cvRectH)
+		if err != nil {
+			return err
+		}
+		workers := resolveWorkers(cvWorkers, cmd.Flags().Changed("workers"), cvJobs, cmd.Flags().Changed("jobs"))
+		// convert --rect is always lossy in Phase 1 (--lossless stays a crop flag).
+		return runCrop(cmd.Context(), input, cvOutput, rx, ry, rw, rh,
+			qualityIntForConvert(), workers, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
+	}
+
 	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't
 	// composite them (dzi/szi exempt — they use the streaming descent).
 	if err := guardStitchedSource(input, cvTo); err != nil {
@@ -168,6 +197,38 @@ func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 		return cogwsiwriter.BigTIFFOff, nil
 	}
 	return 0, fmt.Errorf("--bigtiff %q: want auto|on|off", v)
+}
+
+// validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3a.
+// Slice 3a ships crop+container-change at factor 1, codec jpeg, into
+// svs/tiff/ome-tiff/cog-wsi/dicom. factor, codec, and dzi/szi come in later slices.
+func validateRectCombo(rectSet bool, factor int, codec, to string) error {
+	if !rectSet {
+		return nil
+	}
+	if factor != 1 {
+		return fmt.Errorf("--rect with --factor is not yet supported; for now crop then downsample separately")
+	}
+	if codec != "" {
+		return fmt.Errorf("--rect with --codec is not yet supported")
+	}
+	if to == "dzi" || to == "szi" {
+		return fmt.Errorf("--rect with --to %s is not yet supported", to)
+	}
+	return nil
+}
+
+// qualityIntForConvert maps convert's string --quality to runCrop's int quality.
+// Empty/unparseable → 0 (runCrop applies its source-Q-for-SVS-else-90 default).
+// A bare integer (e.g. "85") is honored.
+func qualityIntForConvert() int {
+	if cvQuality == "" {
+		return 0
+	}
+	if q, err := strconv.Atoi(strings.TrimSpace(cvQuality)); err == nil {
+		return q
+	}
+	return 0
 }
 
 // compressionTagFor maps source.Compression to a TIFF Compression tag value.
