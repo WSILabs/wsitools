@@ -77,3 +77,28 @@ func TestBuildCropImageDescription(t *testing.T) {
 		}
 	}
 }
+
+func TestScaleAperioResolutionTokens(t *testing.T) {
+	in := "78000x30462 [0,0 78000x30462] (256x256) JPEG/RGB Q=30|AppMag = 20|MPP = 0.499|OriginalWidth = 78000"
+	if got := scaleAperioResolutionTokens(in, 1); got != in {
+		t.Fatalf("factor 1 must be identity:\n got %q", got)
+	}
+	got := scaleAperioResolutionTokens(in, 2)
+	if !strings.Contains(got, "AppMag = 10") {
+		t.Errorf("AppMag not halved: %q", got)
+	}
+	if !strings.Contains(got, "MPP = 0.998") {
+		t.Errorf("MPP not doubled: %q", got)
+	}
+	if !strings.Contains(got, "78000x30462") || !strings.Contains(got, "OriginalWidth = 78000") {
+		t.Errorf("pixel dims must be untouched: %q", got)
+	}
+}
+
+func TestScaleAperioResolutionTokens_NoMPP(t *testing.T) {
+	in := "27836x25633 [46492,3599 27836x25633] (256x256) JPEG/RGB Q=30|AppMag = 20|StripeWidth = 2040"
+	got := scaleAperioResolutionTokens(in, 2)
+	if !strings.Contains(got, "AppMag = 10") {
+		t.Errorf("AppMag not halved: %q", got)
+	}
+}
