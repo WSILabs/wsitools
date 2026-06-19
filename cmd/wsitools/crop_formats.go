@@ -188,7 +188,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 	mppX, mppY, mag = scaleMPPMag(mppX, mppY, mag, p.factor)
 	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.outW, p.outH)
 
-	ttw, tth := thumbDims(p.outW, p.outH, thumbLongSide)
+	ttw, tth := thumbDims(p.l0W, p.l0H, thumbLongSide)
 	var omeAssocs []OMEAssoc
 	if !p.noAssociated {
 		for _, a := range p.src.AssociatedImages() {
