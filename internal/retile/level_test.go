@@ -64,6 +64,35 @@ func TestLevelBuilderCascade(t *testing.T) {
 	}
 }
 
+func TestLevelBuilderIntermediateSkipsEmitButReduces(t *testing.T) {
+	// L2 (512, emit) → L1 (256, INTERMEDIATE) → L0 (128, emit); tile 256, overlap 0.
+	// The middle level must enqueue ZERO encodeJobs but still feed the coarsest.
+	jobs := make(chan encodeJob, 32)
+	ctx := context.Background()
+	coarsest := &levelBuilder{spec: LevelSpec{Index: 0, Width: 128, Height: 128, Cols: 1, Rows: 1, TileW: 256, TileH: 256}, jobs: jobs, ctx: ctx}
+	mid := &levelBuilder{spec: LevelSpec{Index: -1, Width: 256, Height: 256, Cols: 1, Rows: 1, TileW: 256, TileH: 256, Intermediate: true}, child: coarsest, jobs: jobs, ctx: ctx}
+	top := &levelBuilder{spec: LevelSpec{Index: 1, Width: 512, Height: 512, Cols: 2, Rows: 2, TileW: 256, TileH: 256}, child: mid, jobs: jobs, ctx: ctx}
+
+	top.feed(makeRGB(512, 256, 1))
+	top.feed(makeRGB(512, 256, 2))
+	top.flush()
+	close(jobs)
+
+	counts := map[int]int{}
+	for j := range jobs {
+		counts[j.level]++
+	}
+	if counts[1] != 4 {
+		t.Errorf("top (emit) tiles = %d, want 4", counts[1])
+	}
+	if counts[-1] != 0 {
+		t.Errorf("intermediate level emitted %d tiles, want 0", counts[-1])
+	}
+	if counts[0] != 1 {
+		t.Errorf("coarsest (emit, fed through the intermediate) tiles = %d, want 1 (chain must still run)", counts[0])
+	}
+}
+
 func TestLevelBuilderEmitRowRespectsContext(t *testing.T) {
 	jobs := make(chan encodeJob) // zero-buffer: unconditional send blocks forever
 	ctx, cancel := context.WithCancel(context.Background())

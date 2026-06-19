@@ -10,6 +10,11 @@ type LevelSpec struct {
 	Cols, Rows    int // tile grid
 	TileW, TileH  int
 	Overlap       int // 0 for TIFF-family/cog-wsi; 1 for DZI
+	// Intermediate marks a level the descent computes ONLY to feed the box-
+	// reduction chain (a non-source octave in a select-octave transcode). Its
+	// strips are box-reduced to the child, but it never encodes/emits tiles.
+	// Zero-value false = emit (all M1/M2/M3 callers).
+	Intermediate bool
 }
 
 // edgeTileDims returns the content dimensions of tile (col,row) for a w×h image
@@ -63,7 +68,7 @@ func (lb *levelBuilder) feed(strip *RGBImage) {
 	lb.prev = lb.cur
 	lb.cur = lb.next
 	lb.next = strip
-	if lb.cur != nil {
+	if lb.cur != nil && !lb.spec.Intermediate {
 		lb.emitRow(lb.rowIndex)
 		lb.rowIndex++
 	}
@@ -120,7 +125,7 @@ func (lb *levelBuilder) flush() {
 	lb.prev = lb.cur
 	lb.cur = lb.next
 	lb.next = nil
-	if lb.cur != nil && lb.rowIndex < lb.spec.Rows {
+	if lb.cur != nil && lb.rowIndex < lb.spec.Rows && !lb.spec.Intermediate {
 		lb.emitRow(lb.rowIndex)
 		lb.rowIndex++
 	}
