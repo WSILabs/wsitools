@@ -135,10 +135,8 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--codec png is only valid with --to dzi|szi (not %q)", cvTo)
 	}
 
-	rectSet := cmd.Flags().Changed("rect") || cmd.Flags().Changed("x") ||
-		cmd.Flags().Changed("y") || cmd.Flags().Changed("w") || cmd.Flags().Changed("h")
-	if rectSet {
-		if err := validateRectCombo(rectSet, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
+	if rectFlagsSet(cmd) && cvTo != "dzi" && cvTo != "szi" {
+		if err := validateRectCombo(true, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
 			return err
 		}
 		f, err := opentile.OpenFile(input)
@@ -221,9 +219,6 @@ func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) er
 	}
 	if codec != "" {
 		return fmt.Errorf("--rect with --codec is not yet supported")
-	}
-	if to == "dzi" || to == "szi" {
-		return fmt.Errorf("--rect with --to %s is not yet supported", to)
 	}
 	return nil
 }
