@@ -25,9 +25,10 @@ type writeJob struct {
 }
 
 // encoderWorker pulls encodeJobs, encodes via enc, and pushes writeJobs. The
-// tile's RGB buffer is released back to the pool after encoding. Exits cleanly
-// when jobs is closed or ctx is cancelled.
-func encoderWorker(ctx context.Context, jobs <-chan encodeJob, out chan<- writeJob, enc TileEncoder) {
+// tile's RGB buffer is released back to the pool after encoding. On an encode
+// error it reports via onErr (which records the first error and cancels the run)
+// and exits. Exits cleanly when jobs is closed or ctx is cancelled.
+func encoderWorker(ctx context.Context, jobs <-chan encodeJob, out chan<- writeJob, enc TileEncoder, onErr func(error)) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -39,6 +40,7 @@ func encoderWorker(ctx context.Context, jobs <-chan encodeJob, out chan<- writeJ
 			body, err := enc.EncodeTile(job.img.Pix, job.img.W, job.img.H)
 			releaseRGB(job.img)
 			if err != nil {
+				onErr(err)
 				return
 			}
 			select {

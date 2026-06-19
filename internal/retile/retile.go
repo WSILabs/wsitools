@@ -39,6 +39,17 @@ func Run(ctx context.Context, spec Spec) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var encMu sync.Mutex
+	var encErr error
+	onEncErr := func(e error) {
+		encMu.Lock()
+		if encErr == nil {
+			encErr = e
+		}
+		encMu.Unlock()
+		cancel()
+	}
+
 	encodeJobs := make(chan encodeJob, 2*workers)
 	writeJobs := make(chan writeJob, 2*workers)
 
@@ -58,7 +69,7 @@ func Run(ctx context.Context, spec Spec) error {
 		encWG.Add(1)
 		go func() {
 			defer encWG.Done()
-			encoderWorker(ctx, encodeJobs, writeJobs, spec.Encoder)
+			encoderWorker(ctx, encodeJobs, writeJobs, spec.Encoder, onEncErr)
 		}()
 	}
 
@@ -103,6 +114,12 @@ func Run(ctx context.Context, spec Spec) error {
 
 	if srcErr != nil {
 		return srcErr
+	}
+	encMu.Lock()
+	ee := encErr
+	encMu.Unlock()
+	if ee != nil {
+		return ee
 	}
 	return sinkErr
 }
