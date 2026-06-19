@@ -113,7 +113,7 @@ func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, c
 		cfg.TileSize, cfg.TileSize, cfg.Overlap,
 		2 /*octave*/, dziOctaveCount(cfg.Width, cfg.Height),
 	)
-	enc, err := newDZIStandaloneEncoder(cfg.Format, parseDZIQuality(cvQuality))
+	enc, err := newDZIStandaloneEncoder(cfg.Format, cfg.TileSize, parseDZIQuality(cvQuality))
 	if err != nil {
 		return err
 	}
@@ -165,11 +165,11 @@ type dziStandaloneEncoder struct {
 	jpeg   *jpeg.Encoder // nil for png
 }
 
-func newDZIStandaloneEncoder(format string, quality int) (*dziStandaloneEncoder, error) {
+func newDZIStandaloneEncoder(format string, tileSize, quality int) (*dziStandaloneEncoder, error) {
 	switch format {
 	case "jpeg":
 		enc, err := jpeg.New(
-			codec.LevelGeometry{},
+			codec.LevelGeometry{TileWidth: tileSize, TileHeight: tileSize},
 			codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}},
 		)
 		if err != nil {

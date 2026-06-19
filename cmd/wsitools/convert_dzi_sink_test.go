@@ -37,7 +37,7 @@ func TestDZIWriterSinkMapsEngineLevelToDZINumber(t *testing.T) {
 }
 
 func TestDZIStandaloneEncoderJPEGIsSelfContained(t *testing.T) {
-	enc, err := newDZIStandaloneEncoder("jpeg", 85)
+	enc, err := newDZIStandaloneEncoder("jpeg", 256, 85)
 	if err != nil {
 		t.Fatalf("new encoder: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestDZIStandaloneEncoderJPEGIsSelfContained(t *testing.T) {
 }
 
 func TestDZIStandaloneEncoderPNG(t *testing.T) {
-	enc, err := newDZIStandaloneEncoder("png", 0)
+	enc, err := newDZIStandaloneEncoder("png", 8, 0)
 	if err != nil {
 		t.Fatalf("new encoder: %v", err)
 	}
