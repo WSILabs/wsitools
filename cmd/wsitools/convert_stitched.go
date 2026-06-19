@@ -175,6 +175,16 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 	return writeAssociatedImages(src, w, container, omeSynthetic, plan)
 }
 
+// losslessReporter is the optional interface a codec.Encoder implements when it
+// can produce byte-exact output. encoderIsLossless returns false for encoders
+// that don't implement it (always-lossy codecs).
+type losslessReporter interface{ IsLossless() bool }
+
+func encoderIsLossless(enc codec.Encoder) bool {
+	lr, ok := enc.(losslessReporter)
+	return ok && lr.IsLossless()
+}
+
 // convertTranscodeTIFF re-encodes a non-overlapping source to a new codec while
 // preserving its pyramid structure (select-octave): the engine decodes L0 once,
 // box-derives the octave chain, and encodes ONLY the octaves matching a source

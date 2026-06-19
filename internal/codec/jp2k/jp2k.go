@@ -61,6 +61,9 @@ func (*Encoder) LevelHeader() []byte        { return nil }
 func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEG2000 }
 func (*Encoder) Close() error               { return nil }
 
+// IsLossless reports whether this encoder produces byte-exact (reversible 5/3) output.
+func (e *Encoder) IsLossless() bool { return e.reversible }
+
 // EncodeTile encodes an RGB888 tile as a raw J2K codestream via OpenJPEG.
 func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {
 	if len(rgb) < w*h*3 {

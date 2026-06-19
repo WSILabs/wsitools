@@ -344,6 +344,16 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	}
 
 	omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
+
+	// Lossless transcode must preserve every source level byte-exactly, which the
+	// engine's ScaledStrips read cannot guarantee — route it to the per-level
+	// path. Probe the encoder for its lossless mode (codec-owned signal).
+	losslessTranscode := false
+	if probe, perr := fac.NewEncoder(codec.LevelGeometry{TileWidth: 256, TileHeight: 256, PixelFormat: codec.PixelFormatRGB8}, codec.Quality{Knobs: knobs}); perr == nil {
+		losslessTranscode = encoderIsLossless(probe)
+		_ = probe.Close()
+	}
+
 	if sourceIsOverlapping(src) {
 		// Overlapping/stitched source: the retile engine recomposites L0 and
 		// derives the pyramid; convertStitchedTIFF emits associated images itself.
@@ -351,7 +361,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			w.Abort()
 			return err
 		}
-	} else if levels, ok := transcodeOctaveLevels(srcLevelDimsFromSlide(slide)); ok {
+	} else if levels, ok := transcodeOctaveLevels(srcLevelDimsFromSlide(slide)); ok && !losslessTranscode {
 		// Same-geometry transcode: route through the engine, preserving the
 		// source pyramid structure (select-octave). Emits associated itself.
 		if err := convertTranscodeTIFF(cmd.Context(), slide, src, w, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic, workers, fac, knobs, levels); err != nil {
