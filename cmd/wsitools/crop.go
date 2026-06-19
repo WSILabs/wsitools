@@ -207,10 +207,11 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return err
 	}
 
-	// SVS guard: keep SVS conformant (jpeg/jpeg2000 tiles only). An explicit
-	// --codec targeting SVS with any other codec is rejected; use --to tiff.
-	if target == "svs" && codecName != "" && codecName != "jpeg" && codecName != "jpeg2000" {
-		return fmt.Errorf("SVS supports jpeg/jpeg2000 tiles; use --to tiff for --codec %s", codecName)
+	// SVS guard: SVS emitters are jpeg-only (Aperio format constraint). Reject any
+	// explicit non-jpeg --codec for SVS so the user gets a clear error instead of
+	// silent fallback. (SVS+jpeg2000 is a documented follow-up, not yet wired.)
+	if target == "svs" && codecName != "" && codecName != "jpeg" {
+		return fmt.Errorf("SVS crop keeps jpeg tiles; use --to tiff to write %s tiles", codecName)
 	}
 
 	if target == "svs" {
