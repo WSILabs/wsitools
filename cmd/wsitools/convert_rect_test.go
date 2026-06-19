@@ -10,9 +10,7 @@ func TestConvertRectComboGuards(t *testing.T) {
 		name, codec, to, wantSub string
 		rectSet                  bool
 		factor, targetMag        int
-	}{
-		{"rect+codec", "avif", "tiff", "--rect with --codec", true, 1, 0},
-	}
+	}{}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := validateRectCombo(c.rectSet, c.factor, c.targetMag, c.codec, c.to)
@@ -41,5 +39,11 @@ func TestConvertRectComboAllowed(t *testing.T) {
 	}
 	if err := validateRectCombo(true, 2, 0, "", "dzi"); err != nil {
 		t.Fatalf("rect+factor+dzi is now allowed, got %v", err)
+	}
+	if err := validateRectCombo(true, 1, 0, "avif", "tiff"); err != nil {
+		t.Fatalf("rect+codec is now allowed, got %v", err)
+	}
+	if err := validateRectCombo(true, 2, 0, "jpeg2000", "tiff"); err != nil {
+		t.Fatalf("rect+factor+codec is now allowed, got %v", err)
 	}
 }
