@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"image"
+	"strconv"
 
 	"github.com/wsilabs/opentile-go/decoder"
+	"github.com/wsilabs/wsitools/internal/codec"
+	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/retile"
 	"github.com/wsilabs/wsitools/internal/source"
 )
@@ -105,6 +108,68 @@ func (l *spoolLevel) DecodedTile(x, y int) (*decoder.Image, error) {
 	return nil, fmt.Errorf("spoolLevel.DecodedTile: not supported (verbatim-frame source)")
 }
 
+// dicomFrameEncoder implements retile.TileEncoder, producing SELF-CONTAINED
+// frames (DICOM has no TIFF tag-347 shared-tables mechanism). JPEG uses
+// EncodeStandalone; J2K-family codecs (jpeg2000/htj2k) already return a complete
+// codestream from EncodeTile.
+type dicomFrameEncoder struct {
+	jpeg  *jpegcodec.Encoder // non-nil for jpeg
+	codec codec.Encoder      // non-nil for j2k-family
+}
+
+// newDicomFrameEncoder builds the frame encoder + reports the source.Compression
+// the spoolSource should advertise (so dicomwriter picks the transfer syntax).
+func newDicomFrameEncoder(codecName string, quality int) (*dicomFrameEncoder, source.Compression, error) {
+	switch codecName {
+	case "", "jpeg":
+		je, err := jpegcodec.New(codec.LevelGeometry{}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+		if err != nil {
+			return nil, 0, fmt.Errorf("jpeg.New: %w", err)
+		}
+		return &dicomFrameEncoder{jpeg: je}, source.CompressionJPEG, nil
+	case "jpeg2000":
+		return newJ2KFrameEncoder("jpeg2000", quality)
+	case "htj2k":
+		return newJ2KFrameEncoder("htj2k", quality)
+	default:
+		return nil, 0, fmt.Errorf("--codec %q not supported for DICOM (jpeg, jpeg2000, htj2k)", codecName)
+	}
+}
+
+func newJ2KFrameEncoder(codecName string, quality int) (*dicomFrameEncoder, source.Compression, error) {
+	fac, err := codec.Lookup(codecName)
+	if err != nil {
+		return nil, 0, err
+	}
+	ce, err := fac.NewEncoder(codec.LevelGeometry{PixelFormat: codec.PixelFormatRGB8}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+	if err != nil {
+		return nil, 0, err
+	}
+	comp := source.CompressionJPEG2000
+	if codecName == "htj2k" {
+		comp = source.CompressionHTJ2K
+	}
+	return &dicomFrameEncoder{codec: ce}, comp, nil
+}
+
+func (e *dicomFrameEncoder) EncodeTile(rgb []byte, w, h int) ([]byte, error) {
+	if e.jpeg != nil {
+		return e.jpeg.EncodeStandalone(rgb, w, h)
+	}
+	return e.codec.EncodeTile(rgb, w, h, nil) // J2K-family: already a complete codestream
+}
+
+func (e *dicomFrameEncoder) Close() error {
+	if e.jpeg != nil {
+		return e.jpeg.Close()
+	}
+	if e.codec != nil {
+		return e.codec.Close()
+	}
+	return nil
+}
+
 // Compile-time interface assertions: a missing or mismatched method fails the build.
 var _ source.Source = (*spoolSource)(nil)
 var _ source.Level = (*spoolLevel)(nil)
+var _ retile.TileEncoder = (*dicomFrameEncoder)(nil)

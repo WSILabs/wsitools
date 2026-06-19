@@ -3,11 +3,46 @@ package main
 import (
 	"bytes"
 	"image"
+	stdjpeg "image/jpeg"
 	"testing"
 
 	"github.com/wsilabs/wsitools/internal/retile"
 	"github.com/wsilabs/wsitools/internal/source"
 )
+
+func TestDicomFrameEncoderStandaloneJPEG(t *testing.T) {
+	enc, comp, err := newDicomFrameEncoder("jpeg", 80)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer enc.Close()
+	if comp != source.CompressionJPEG {
+		t.Errorf("comp = %v, want JPEG", comp)
+	}
+	rgb := make([]byte, 64*64*3)
+	for i := range rgb {
+		rgb[i] = 128
+	}
+	frame, err := enc.EncodeTile(rgb, 64, 64)
+	if err != nil {
+		t.Fatalf("EncodeTile: %v", err)
+	}
+	// DICOM frames MUST be self-contained: stdlib JPEG decode succeeds (tables present).
+	if _, err := stdjpeg.Decode(bytes.NewReader(frame)); err != nil {
+		t.Errorf("DICOM JPEG frame not self-contained: %v", err)
+	}
+}
+
+func TestDicomFrameEncoderReportsJP2KCompression(t *testing.T) {
+	enc, comp, err := newDicomFrameEncoder("jpeg2000", 80)
+	if err != nil {
+		t.Skipf("jpeg2000 codec unavailable: %v", err) // cgo/openjpeg may be absent
+	}
+	defer enc.Close()
+	if comp != source.CompressionJPEG2000 {
+		t.Errorf("comp = %v, want JPEG2000", comp)
+	}
+}
 
 func TestSpoolSinkAndSourceRoundTrip(t *testing.T) {
 	dir := t.TempDir()
