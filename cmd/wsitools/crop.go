@@ -84,19 +84,6 @@ func init() {
 	rootCmd.AddCommand(cropCmd)
 }
 
-// cropPyramidLevels returns the number of pyramid levels (L0 included) to emit
-// for an L0 of l0W×l0H, box-halving while both dimensions stay >= tileSize.
-func cropPyramidLevels(l0W, l0H, tileSize int) int {
-	n := 1
-	w, h := l0W, l0H
-	for w/2 >= tileSize && h/2 >= tileSize {
-		w /= 2
-		h /= 2
-		n++
-	}
-	return n
-}
-
 // snapRectToTiles snaps a requested L0 rect to the tile grid for a lossless
 // crop: origin DOWN to the enclosing tile boundary, far edge UP (clamped to the
 // image), producing the tile-aligned bounding box of the request. Returns the
@@ -211,19 +198,26 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 			fmt.Printf("lossless: snapped crop to %d,%d %dx%d (tile-aligned)\n", ex, ey, ew, eh)
 		}
 	}
-	rasterBytes := int64(ew) * int64(eh) * 3
-	if rasterBytes < 0 {
-		return fmt.Errorf("cropped L0 raster size overflows int64")
+	// The raster L0 is only needed by paths that consume it: the lossless rebuild
+	// (lower levels + thumbnail) and the DICOM emitter (derivedsource + thumbnail).
+	// The lossy engine targets (tiff/ome-tiff/cog-wsi) stream from the source and
+	// never touch p.l0, so skip materialization there.
+	var outL0 []byte
+	if lossless || target == "dicom" {
+		rasterBytes := int64(ew) * int64(eh) * 3
+		if rasterBytes < 0 {
+			return fmt.Errorf("cropped L0 raster size overflows int64")
+		}
+		outL0 = make([]byte, rasterBytes)
+		if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, ex, ey, ew, eh); err != nil {
+			return fmt.Errorf("materialize cropped L0: %w", err)
+		}
 	}
-	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, ex, ey, ew, eh); err != nil {
-		return fmt.Errorf("materialize cropped L0: %w", err)
-	}
-	nLevels := cropPyramidLevels(ew, eh, outputTileSize)
+	nLevels := flooredLevelCount(ew, eh, outputTileSize)
 
 	p := cropEmitParams{
 		ctx: ctx, src: src, srcL0: srcL0, input: input, output: output,
-		l0: outL0, l0W: ew, l0H: eh, nLevels: nLevels, quality: q, workers: workers,
+		l0: outL0, l0W: ew, l0H: eh, ex: ex, ey: ey, nLevels: nLevels, quality: q, workers: workers,
 		order: order, bigtiffFlag: bigtiffFlag, noAssociated: noAssociated,
 		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
 		start: start,
@@ -323,15 +317,6 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		}
 	}()
 
-	rasterBytes := int64(ew) * int64(eh) * 3
-	if rasterBytes < 0 {
-		return fmt.Errorf("cropped L0 raster size overflows int64")
-	}
-	outL0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, ex, ey, ew, eh); err != nil {
-		return fmt.Errorf("materialize cropped L0: %w", err)
-	}
-
 	var label, macro opentile.AssociatedImage
 	if !noAssociated {
 		for _, a := range src.AssociatedImages() {
@@ -344,9 +329,18 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		}
 	}
 
-	nLevels := cropPyramidLevels(ew, eh, outputTileSize)
+	nLevels := flooredLevelCount(ew, eh, outputTileSize)
 	if lossless {
 		// Strategy B (lossless): copy L0 tiles verbatim, rebuild lower levels.
+		// Needs the decoded crop raster for the thumbnail + once-halved lowers.
+		rasterBytes := int64(ew) * int64(eh) * 3
+		if rasterBytes < 0 {
+			return fmt.Errorf("cropped L0 raster size overflows int64")
+		}
+		outL0 := make([]byte, rasterBytes)
+		if err := downscale.MaterializeCroppedL0(ctx, srcL0, outL0, ex, ey, ew, eh); err != nil {
+			return fmt.Errorf("materialize cropped L0: %w", err)
+		}
 		// L0: verbatim source-tile-block copy (byte-identical full-res data).
 		if err := writeLosslessL0(wtr, srcL0, stx0, sty0, outTilesX, outTilesY, ew, eh); err != nil {
 			return fmt.Errorf("write lossless L0: %w", err)
@@ -368,15 +362,20 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 			}
 		}
 	} else {
-		// Strategy A: re-encode every level from the decoded raster; thumbnail
-		// interleaved after L0 via the post-L0 hook.
+		// Strategy A: re-encode every level via the streaming engine (no L0
+		// raster in RAM); thumbnail interleaved after L0 via the post-L0 hook.
+		rect := opentile.Region{Origin: opentile.Point{X: ex, Y: ey}, Size: opentile.Size{W: ew, H: eh}}
 		var postL0Hook func() error
 		if !noAssociated {
 			postL0Hook = func() error {
-				return regenCropThumbnail(wtr, outL0, ew, eh, quality)
+				jpegBytes, tw, th, terr := streamCropThumbnail(src, rect, ew, eh, quality)
+				if terr != nil {
+					return terr
+				}
+				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
 			}
 		}
-		if err := buildPyramidFromRaster(ctx, wtr, outL0, ew, eh, nLevels, quality, workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: ew, H: eh}, quality, workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}

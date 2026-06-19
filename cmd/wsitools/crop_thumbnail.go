@@ -179,6 +179,14 @@ func regenCropThumbnail(w *streamwriter.Writer, l0 []byte, l0W, l0H, quality int
 	if err != nil {
 		return err
 	}
+	return addCropThumbnailStripped(w, jpegBytes, tw, th)
+}
+
+// addCropThumbnailStripped writes a pre-encoded baseline-JPEG crop thumbnail as a
+// single-strip associated IFD (type "thumbnail", NewSubfileType=0). Shared by the
+// raster-based regenCropThumbnail and the streaming engine crop path (which feeds
+// streamCropThumbnail's bytes here directly).
+func addCropThumbnailStripped(w *streamwriter.Writer, jpegBytes []byte, tw, th int) error {
 	return w.AddStripped(streamwriter.StrippedSpec{
 		Width:           uint32(tw),
 		Height:          uint32(th),
