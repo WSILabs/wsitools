@@ -67,7 +67,7 @@ effective snapped rect when the input is not already tile-aligned.`,
 		}
 		workers := resolveWorkers(cropWorkers, cmd.Flags().Changed("workers"), cropJobs, cmd.Flags().Changed("jobs"))
 		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
-			cropQuality, workers, 1, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", time.Now())
+			cropQuality, workers, 1, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", "", "", time.Now())
 	},
 }
 
@@ -132,7 +132,9 @@ func validateCropBounds(x, y, w, h, l0W, l0H int) error {
 // runCrop takes all options as explicit parameters (no global-flag reads),
 // mirroring downsampleToSVS, so it stays testable and reusable. The cobra RunE
 // closure resolves the flag globals and passes them in.
-func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers, factor int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, target string, start time.Time) error {
+// codecName selects the tile encoder (empty ⇒ jpeg); qualityStr is the raw
+// --quality value (empty ⇒ use quality int as fallback).
+func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers, factor int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, target, codecName, qualityStr string, start time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -190,16 +192,34 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return fmt.Errorf("--tile-order: %w", err)
 	}
 
+	// Resolve codec: empty codecName → jpeg at fallbackQ. qualityStr overrides
+	// the integer quality knob when set.
+	qFallback := quality
+	if qFallback == 0 {
+		qFallback = 90
+	}
+	qualityStrForResolve := qualityStr
+	if qualityStrForResolve == "" && quality != 0 {
+		qualityStrForResolve = strconv.Itoa(quality)
+	}
+	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, qualityStrForResolve, qFallback)
+	if err != nil {
+		return err
+	}
+
+	// SVS guard: keep SVS conformant (jpeg/jpeg2000 tiles only). An explicit
+	// --codec targeting SVS with any other codec is rejected; use --to tiff.
+	if target == "svs" && codecName != "" && codecName != "jpeg" && codecName != "jpeg2000" {
+		return fmt.Errorf("SVS supports jpeg/jpeg2000 tiles; use --to tiff for --codec %s", codecName)
+	}
+
 	if target == "svs" {
 		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, factor, order, bigtiffFlag, noAssociated, lossless, start)
 	}
 
 	// Non-SVS sources carry no Aperio ImageDescription to mine for a source Q
 	// (unlike the SVS path, which defaults to the source quality); use 90.
-	q := quality
-	if q == 0 {
-		q = 90
-	}
+	q := qFallback
 	if q < 1 || q > 100 {
 		return fmt.Errorf("--quality must be in [1,100], got %d", q)
 	}
@@ -241,6 +261,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		factor: factor, outW: outW, outH: outH,
 		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
 		start: start,
+		fac:   fac, knobs: knobs, codecName: resolvedCodec,
 	}
 	switch target {
 	case "tiff":

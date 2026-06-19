@@ -154,7 +154,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		}
 		// convert --rect is always lossy in Phase 1 (--lossless stays a crop flag).
 		return runCrop(cmd.Context(), input, cvOutput, rx, ry, rw, rh,
-			qualityIntForConvert(), cvWorkers, factor, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
+			qualityIntForConvert(), cvWorkers, factor, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, cvCodec, cvQuality, start)
 	}
 
 	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't
