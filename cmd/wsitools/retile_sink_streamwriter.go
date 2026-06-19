@@ -22,7 +22,6 @@ type streamwriterSink struct {
 func newStreamwriterSink(handles []*streamwriter.LevelHandle) *streamwriterSink {
 	s := &streamwriterSink{handles: handles}
 	for _, h := range handles {
-		h := h
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()

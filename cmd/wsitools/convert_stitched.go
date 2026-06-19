@@ -67,7 +67,7 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 	}
 
 	sink := newCogwsiSink(handles, levels)
-	if err := retile.Run(ctx, retile.Spec{
+	runErr := retile.Run(ctx, retile.Spec{
 		Slide:     slide,
 		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
 		OutL0:     outL0,
@@ -76,11 +76,15 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 		Encoder:   &codecTileEncoder{enc: enc},
 		Sink:      sink,
 		Workers:   workers,
-	}); err != nil {
-		return err
+	})
+	// finish() must run unconditionally to drain/join the sink even when Run
+	// errored mid-stream; otherwise the streamwriter drain goroutines leak.
+	// Prefer the Run error if both fail.
+	if ferr := sink.finish(); ferr != nil && runErr == nil {
+		runErr = ferr
 	}
-	if err := sink.finish(); err != nil {
-		return err
+	if runErr != nil {
+		return runErr
 	}
 	return writeCOGWSIAssociated(w, src, plan)
 }
@@ -149,7 +153,7 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 	}
 
 	sink := newStreamwriterSink(handles)
-	if err := retile.Run(ctx, retile.Spec{
+	runErr := retile.Run(ctx, retile.Spec{
 		Slide:     slide,
 		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
 		OutL0:     outL0,
@@ -158,11 +162,15 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 		Encoder:   &codecTileEncoder{enc: enc},
 		Sink:      sink,
 		Workers:   workers,
-	}); err != nil {
-		return err
+	})
+	// finish() must run unconditionally to drain/join the per-level drain
+	// goroutines even when Run errored mid-stream; otherwise they leak (each is
+	// blocked in NextReady until CloseInput). Prefer the Run error if both fail.
+	if ferr := sink.finish(); ferr != nil && runErr == nil {
+		runErr = ferr
 	}
-	if err := sink.finish(); err != nil {
-		return err
+	if runErr != nil {
+		return runErr
 	}
 	return writeAssociatedImages(src, w, container, omeSynthetic, plan)
 }

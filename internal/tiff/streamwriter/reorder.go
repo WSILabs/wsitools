@@ -78,6 +78,12 @@ func (b *reorderBuffer) CloseInput() {
 // NextReady returns the next-in-strategy-order tile, blocking until it
 // arrives. Returns (_, _, false, nil) when all tiles have been emitted.
 // Returns (_, _, false, err) on Abort.
+//
+// After CloseInput, NextReady emits the contiguous-in-order tiles that are
+// already buffered, then terminates with ok=false even if not all `total`
+// tiles arrived (a partial/aborted producer). Without this, a gap at the head
+// index after close would block the drain forever — leaking the Sink-side
+// drain goroutine on an upstream error.
 func (b *reorderBuffer) NextReady() (idx uint32, compressed []byte, ok bool, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -95,6 +101,11 @@ func (b *reorderBuffer) NextReady() (idx uint32, compressed []byte, ok bool, err
 			b.emitted++
 			b.cond.Broadcast()
 			return idx, bytes, true, nil
+		}
+		if b.closed {
+			// No more Submits will arrive and the head index is missing:
+			// the producer ended early (error). Drain stops here.
+			return 0, nil, false, nil
 		}
 		b.cond.Wait()
 	}
