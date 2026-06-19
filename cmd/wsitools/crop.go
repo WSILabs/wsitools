@@ -27,6 +27,7 @@ var (
 	cropOutput    string
 	cropQuality   int
 	cropWorkers   int
+	cropJobs      int
 	cropTileOrder string
 	cropBigTIFF   string
 	cropForce     bool
@@ -62,8 +63,9 @@ effective snapped rect when the input is not already tile-aligned.`,
 		if err != nil {
 			return err
 		}
+		workers := resolveWorkers(cropWorkers, cmd.Flags().Changed("workers"), cropJobs, cmd.Flags().Changed("jobs"))
 		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
-			cropQuality, cropWorkers, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, time.Now())
+			cropQuality, workers, 1, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", time.Now())
 	},
 }
 
@@ -76,6 +78,7 @@ func init() {
 	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output path, same container as source (required)")
 	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: source Q for SVS, else 90)")
 	cropCmd.Flags().IntVar(&cropWorkers, "workers", 0, "Encode workers (default: NumCPU)")
+	cropCmd.Flags().IntVar(&cropJobs, "jobs", 0, "alias of --workers")
 	cropCmd.Flags().StringVar(&cropTileOrder, "tile-order", "row-major", "Tile order: row-major|hilbert|morton")
 	cropCmd.Flags().StringVar(&cropBigTIFF, "bigtiff", "auto", "BigTIFF mode: auto|on|off")
 	cropCmd.Flags().BoolVarP(&cropForce, "force", "f", false, "Overwrite existing output")
@@ -127,7 +130,7 @@ func validateCropBounds(x, y, w, h, l0W, l0H int) error {
 // runCrop takes all options as explicit parameters (no global-flag reads),
 // mirroring downsampleToSVS, so it stays testable and reusable. The cobra RunE
 // closure resolves the flag globals and passes them in.
-func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, start time.Time) error {
+func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers, factor int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, target string, start time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -160,9 +163,19 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	}
 	defer src.Close()
 
-	target, ok := downsampleTargetForFormat(string(src.Format()))
+	srcTarget, ok := downsampleTargetForFormat(string(src.Format()))
 	if !ok {
 		return fmt.Errorf("crop: unsupported source format %q (supported: svs, ome-tiff, tiff, cog-wsi, dicom)", src.Format())
+	}
+	if target == "" {
+		target = srcTarget
+	}
+
+	if factor < 1 {
+		factor = 1
+	}
+	if factor != 1 && lossless {
+		return fmt.Errorf("--lossless cannot be combined with downsampling")
 	}
 
 	srcL0 := src.Levels()[0]
@@ -176,7 +189,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	}
 
 	if target == "svs" {
-		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, order, bigtiffFlag, noAssociated, lossless, start)
+		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, factor, order, bigtiffFlag, noAssociated, lossless, start)
 	}
 
 	// Non-SVS sources carry no Aperio ImageDescription to mine for a source Q
@@ -213,12 +226,17 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 			return fmt.Errorf("materialize cropped L0: %w", err)
 		}
 	}
-	nLevels := flooredLevelCount(ew, eh, outputTileSize)
+	outW, outH := outDimsForFactor(ew, eh, factor)
+	if outW <= 0 || outH <= 0 {
+		return fmt.Errorf("--factor %d too large for crop extent %dx%d", factor, ew, eh)
+	}
+	nLevels := flooredLevelCount(outW, outH, outputTileSize)
 
 	p := cropEmitParams{
 		ctx: ctx, src: src, srcL0: srcL0, input: input, output: output,
 		l0: outL0, l0W: ew, l0H: eh, ex: ex, ey: ey, nLevels: nLevels, quality: q, workers: workers,
-		order: order, bigtiffFlag: bigtiffFlag, noAssociated: noAssociated,
+		order: order, bigtiffFlag: bigtiffFlag, noAssociated: noAssociated, force: force,
+		factor: factor, outW: outW, outH: outH,
 		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
 		start: start,
 	}
@@ -239,7 +257,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 // cropEmitSVS is the SVS-specific crop emitter. It receives an already-opened
 // source slide and all resolved options. The front-end (runCrop) owns: OpenFile,
 // format guard, validateCropBounds, lossless guard, and tileorder.ByName.
-func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string, x, y, w, h, quality, workers int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated, lossless bool, start time.Time) error {
+func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string, x, y, w, h, quality, workers, factor int, order tileorder.OrderStrategy, bigtiffFlag string, noAssociated, lossless bool, start time.Time) error {
 	srcL0 := src.Levels()[0]
 	baseW, baseH := srcL0.Size.W, srcL0.Size.H
 
@@ -274,6 +292,10 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		}
 	}
 	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, ex, ey, ew, eh, outputTileSize, outputTileSize, quality)
+	outW, outH := outDimsForFactor(ew, eh, factor)
+	cropDesc = scaleAperioResolutionTokens(cropDesc, factor)
+	outMPP := desc.MPP * float64(factor)
+	outMag := desc.AppMag / float64(factor)
 
 	var bigtiffMode tiff.BigTIFFMode
 	switch bigtiffFlag {
@@ -302,9 +324,9 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		FormatName:       "svs",
 		AcceptedOrders:   acceptedOrdersForFormat("svs"),
 		DefaultOrder:     order,
-		MPPX:             desc.MPP,
-		MPPY:             desc.MPP,
-		Magnification:    desc.AppMag,
+		MPPX:             outMPP,
+		MPPY:             outMPP,
+		Magnification:    outMag,
 		ICCProfile:       src.ICCProfile(),
 	})
 	if err != nil {
@@ -329,7 +351,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 		}
 	}
 
-	nLevels := flooredLevelCount(ew, eh, outputTileSize)
+	nLevels := flooredLevelCount(outW, outH, outputTileSize)
 	if lossless {
 		// Strategy B (lossless): copy L0 tiles verbatim, rebuild lower levels.
 		// Needs the decoded crop raster for the thumbnail + once-halved lowers.
@@ -375,7 +397,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: ew, H: eh}, quality, workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: outW, H: outH}, quality, workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}

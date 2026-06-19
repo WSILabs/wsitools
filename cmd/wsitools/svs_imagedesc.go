@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -116,6 +117,36 @@ func (d *AperioDescription) Encode() string {
 
 func formatAperioFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// aperioResTokenRE matches an Aperio "AppMag = <n>" or "MPP = <n>" resolution
+// token. The key is anchored to a left boundary (start, '|', ';', or space) so
+// it never matches inside another key. The numeric value is captured for scaling.
+var aperioResTokenRE = regexp.MustCompile(`(^|[|;\s])(AppMag|MPP)(\s*=\s*)([0-9.]+)`)
+
+// scaleAperioResolutionTokens scales every AppMag (÷factor) and MPP (×factor)
+// value in an Aperio description so a downsampled crop reports the correct
+// magnification/resolution. Pixel-dimension tokens (geometry "WxH",
+// OriginalWidth/Height) are left untouched. factor <= 1 is the identity.
+func scaleAperioResolutionTokens(desc string, factor int) string {
+	if factor <= 1 {
+		return desc
+	}
+	f := float64(factor)
+	return aperioResTokenRE.ReplaceAllStringFunc(desc, func(m string) string {
+		sub := aperioResTokenRE.FindStringSubmatch(m)
+		v, err := strconv.ParseFloat(sub[4], 64)
+		if err != nil {
+			return m
+		}
+		switch sub[2] {
+		case "AppMag":
+			v = v / f
+		case "MPP":
+			v = v * f
+		}
+		return sub[1] + sub[2] + sub[3] + formatAperioFloat(v)
+	})
 }
 
 // Quality extracts the JPEG quality (the "Q=<n>" token) from the geometry line,

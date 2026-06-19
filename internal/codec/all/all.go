@@ -10,4 +10,5 @@ package all
 
 import (
 	_ "github.com/wsilabs/wsitools/internal/codec/jpeg"
+	_ "github.com/wsilabs/wsitools/internal/codec/png"
 )

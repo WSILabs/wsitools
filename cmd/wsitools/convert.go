@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	opentile "github.com/wsilabs/opentile-go"
 
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
@@ -20,6 +23,7 @@ var (
 	cvCodec        string
 	cvQuality      string
 	cvWorkers      int
+	cvJobs         int
 
 	cvDZITileSize int
 	cvDZIOverlap  int
@@ -27,10 +31,16 @@ var (
 
 	cvFactor    int
 	cvTargetMag int
+
+	cvRect  string
+	cvRectX int
+	cvRectY int
+	cvRectW int
+	cvRectH int
 )
 
 var convertCmd = &cobra.Command{
-	Use:   "convert --to <target> -o <output> [flags] <input>",
+	Use:   "convert [--to <target>] -o <output> [flags] <input>",
 	Short: "Convert a WSI to a new container losslessly (tile-copy)",
 	Long: `Convert losslessly copies compressed tile bytes from a source WSI
 into a new container without decoding or re-encoding. In v0.6 the only
@@ -70,16 +80,22 @@ func init() {
 		"Tile emission order within each level (row-major|hilbert|morton). "+
 			"Format-restricted: SVS accepts row-major only; COG-WSI / TIFF / OME-TIFF "+
 			"accept all three.")
-	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpeg2000|jpegxl|avif|webp|htj2k); absent = tile-copy when eligible")
+	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpeg2000|jpegxl|avif|webp|htj2k; jpeg|png for dzi|szi); absent = tile-copy when eligible")
 	convertCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs accepted)")
 	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
+	convertCmd.Flags().IntVar(&cvJobs, "jobs", 0, "alias of --workers")
 	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi (1 = no scaling; one of {2,4,8,16})")
 	convertCmd.Flags().IntVar(&cvTargetMag, "target-mag", 0, "alternative to --factor: derive factor from source AppMag")
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
+	convertCmd.Flags().StringVar(&cvRect, "rect", "", "crop rectangle X,Y,W,H (level-0 coords); crops before container change")
+	convertCmd.Flags().IntVar(&cvRectX, "x", 0, "crop X (level-0 coords; with --y/--w/--h)")
+	convertCmd.Flags().IntVar(&cvRectY, "y", 0, "crop Y (level-0 coords)")
+	convertCmd.Flags().IntVar(&cvRectW, "w", 0, "crop width (level-0 pixels)")
+	convertCmd.Flags().IntVar(&cvRectH, "h", 0, "crop height (level-0 pixels)")
+	_ = convertCmd.Flags().MarkDeprecated("dzi-format", "use --codec jpeg|png")
 	_ = convertCmd.MarkFlagRequired("output")
-	_ = convertCmd.MarkFlagRequired("to")
 	rootCmd.AddCommand(convertCmd)
 }
 
@@ -87,6 +103,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	input := args[0]
 	start := time.Now()
+	cvWorkers = resolveWorkers(cvWorkers, cmd.Flags().Changed("workers"), cvJobs, cmd.Flags().Changed("jobs"))
 
 	if cvFactor != 1 || cvTargetMag != 0 {
 		if cvFactor != 1 && !isValidFactor(cvFactor) {
@@ -94,11 +111,56 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if (cvTo == "dzi" || cvTo == "szi") && cvCodec != "" {
-		return fmt.Errorf("--codec is not valid with --to %s (use --dzi-format)", cvTo)
+	// Infer --to from the source format when the flag is absent.
+	if cvTo == "" {
+		f, err := opentile.OpenFile(input)
+		if err != nil {
+			return fmt.Errorf("open source: %w", err)
+		}
+		srcFormat := string(f.Format())
+		_ = f.Close()
+		resolved, err := resolveConvertTarget(cvTo, srcFormat)
+		if err != nil {
+			return err
+		}
+		cvTo = resolved
 	}
-	if (cvTo == "dzi" || cvTo == "szi") && cvDZIFormat != "jpeg" && cvDZIFormat != "png" {
-		return fmt.Errorf("--dzi-format must be jpeg or png, got %q", cvDZIFormat)
+
+	codecSet := cmd.Flags().Changed("codec")
+	if cvTo == "dzi" || cvTo == "szi" {
+		// DZI/SZI: --codec (or the deprecated --dzi-format) selects the tile
+		// format; validated to jpeg|png by the resolver in runConvertDZI/SZI.
+		if _, err := resolveDZIFormat(cvCodec, codecSet, cvDZIFormat); err != nil {
+			return err
+		}
+	} else if cvCodec == "png" {
+		// PNG is a Deep Zoom tile format only; it is not a readable WSI-container
+		// tile codec (opentile does not read PNG-compressed TIFF tiles).
+		return fmt.Errorf("--codec png is only valid with --to dzi|szi (not %q)", cvTo)
+	}
+
+	rectSet := cmd.Flags().Changed("rect") || cmd.Flags().Changed("x") ||
+		cmd.Flags().Changed("y") || cmd.Flags().Changed("w") || cmd.Flags().Changed("h")
+	if rectSet {
+		if err := validateRectCombo(rectSet, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
+			return err
+		}
+		f, err := opentile.OpenFile(input)
+		if err != nil {
+			return fmt.Errorf("open source: %w", err)
+		}
+		factor, ferr := resolveFactor(source.FromSlide(f, input), input, cvFactor, cvTargetMag)
+		_ = f.Close()
+		if ferr != nil {
+			return ferr
+		}
+		rx, ry, rw, rh, err := resolveRectValues(cmd, cvRect, cvRectX, cvRectY, cvRectW, cvRectH)
+		if err != nil {
+			return err
+		}
+		// convert --rect is always lossy in Phase 1 (--lossless stays a crop flag).
+		return runCrop(cmd.Context(), input, cvOutput, rx, ry, rw, rh,
+			qualityIntForConvert(), cvWorkers, factor, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
 	}
 
 	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't
@@ -127,7 +189,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	case "bif":
 		return runConvertBIF(cmd, input, start)
 	case "":
-		return fmt.Errorf("--to is required")
+		return fmt.Errorf("internal: --to unresolved")
 	default:
 		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif)", cvTo)
 	}
@@ -143,6 +205,35 @@ func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 		return cogwsiwriter.BigTIFFOff, nil
 	}
 	return 0, fmt.Errorf("--bigtiff %q: want auto|on|off", v)
+}
+
+// validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3b.
+// Slice 3b adds --factor/--target-mag to the rect path for all TIFF-family containers.
+// dzi/szi rect remain deferred.
+func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) error {
+	if !rectSet {
+		return nil
+	}
+	if codec != "" {
+		return fmt.Errorf("--rect with --codec is not yet supported")
+	}
+	if to == "dzi" || to == "szi" {
+		return fmt.Errorf("--rect with --to %s is not yet supported", to)
+	}
+	return nil
+}
+
+// qualityIntForConvert maps convert's string --quality to runCrop's int quality.
+// Empty/unparseable → 0 (runCrop applies its source-Q-for-SVS-else-90 default).
+// A bare integer (e.g. "85") is honored.
+func qualityIntForConvert() int {
+	if cvQuality == "" {
+		return 0
+	}
+	if q, err := strconv.Atoi(strings.TrimSpace(cvQuality)); err == nil {
+		return q
+	}
+	return 0
 }
 
 // compressionTagFor maps source.Compression to a TIFF Compression tag value.
