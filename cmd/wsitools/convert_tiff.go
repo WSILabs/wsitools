@@ -51,6 +51,17 @@ func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) e
 	srcCodec := l0.Compression()
 	tiled := nativelyTiled(src.Format())
 
+	// Overlapping/stitched source (Ventana BIF) cannot be tile-copied; it must be
+	// recomposited via the retile engine. Force the re-encode path (default codec
+	// jpeg) and skip tile-copy eligibility.
+	if sourceIsOverlapping(src) {
+		codecName := cvCodec
+		if codecName == "" {
+			codecName = "jpeg"
+		}
+		return runConvertTIFFReencode(cmd, input, target, codecName, cvQuality, cvWorkers, start)
+	}
+
 	if tileCopyEligible(target, cvCodec, srcCodec, tiled) {
 		return runConvertTIFFTileCopy(cmd, src, input, target, start)
 	}
@@ -236,7 +247,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 		return fmt.Errorf("--codec %q: %w", codecName, err)
 	}
 
-	src, err := source.Open(input)
+	src, slide, err := source.OpenWithSlide(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {
 			return fmt.Errorf("source format unsupported at v0.2.0: %w", err)
@@ -333,15 +344,24 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	}
 
 	omeSynthetic := resolvedContainer == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
-	if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic); err != nil {
-		w.Abort()
-		return err
-	}
-
-	if !cvNoAssociated {
-		if err := writeAssociatedImages(src, w, resolvedContainer, omeSynthetic, omeEditPlan{}); err != nil {
+	if sourceIsOverlapping(src) {
+		// Overlapping/stitched source: the retile engine recomposites L0 and
+		// derives the pyramid; convertStitchedTIFF emits associated images itself.
+		if err := convertStitchedTIFF(cmd.Context(), slide, src, w, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic, workers, fac, knobs); err != nil {
 			w.Abort()
 			return err
+		}
+	} else {
+		if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic); err != nil {
+			w.Abort()
+			return err
+		}
+
+		if !cvNoAssociated {
+			if err := writeAssociatedImages(src, w, resolvedContainer, omeSynthetic, omeEditPlan{}); err != nil {
+				w.Abort()
+				return err
+			}
 		}
 	}
 
