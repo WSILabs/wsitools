@@ -7,7 +7,7 @@ import "fmt"
 // wins; otherwise --dzi-format (default "jpeg") applies. The result must be a
 // Deep Zoom tile format (jpeg or png) — browser deep-zoom viewers render nothing
 // else.
-func resolveDZIFormat(codec string, codecSet bool, dziFormat string, dziFormatSet bool) (string, error) {
+func resolveDZIFormat(codec string, codecSet bool, dziFormat string) (string, error) {
 	format := dziFormat
 	if format == "" {
 		format = "jpeg"

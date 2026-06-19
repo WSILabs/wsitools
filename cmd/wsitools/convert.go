@@ -96,11 +96,10 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	}
 
 	codecSet := cmd.Flags().Changed("codec")
-	dziFormatSet := cmd.Flags().Changed("dzi-format")
 	if cvTo == "dzi" || cvTo == "szi" {
 		// DZI/SZI: --codec (or the deprecated --dzi-format) selects the tile
 		// format; validated to jpeg|png by the resolver in runConvertDZI/SZI.
-		if _, err := resolveDZIFormat(cvCodec, codecSet, cvDZIFormat, dziFormatSet); err != nil {
+		if _, err := resolveDZIFormat(cvCodec, codecSet, cvDZIFormat); err != nil {
 			return err
 		}
 	} else if cvCodec == "png" {

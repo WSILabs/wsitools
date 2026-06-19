@@ -62,7 +62,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 		return err
 	}
 
-	dziFormat, err := resolveDZIFormat(cvCodec, cmd.Flags().Changed("codec"), cvDZIFormat, cmd.Flags().Changed("dzi-format"))
+	dziFormat, err := resolveDZIFormat(cvCodec, cmd.Flags().Changed("codec"), cvDZIFormat)
 	if err != nil {
 		return err
 	}
