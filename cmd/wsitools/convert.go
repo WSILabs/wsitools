@@ -145,13 +145,22 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		if err := validateRectCombo(rectSet, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
 			return err
 		}
+		f, err := opentile.OpenFile(input)
+		if err != nil {
+			return fmt.Errorf("open source: %w", err)
+		}
+		factor, ferr := resolveFactor(source.FromSlide(f, input), input, cvFactor, cvTargetMag)
+		_ = f.Close()
+		if ferr != nil {
+			return ferr
+		}
 		rx, ry, rw, rh, err := resolveRectValues(cmd, cvRect, cvRectX, cvRectY, cvRectW, cvRectH)
 		if err != nil {
 			return err
 		}
 		// convert --rect is always lossy in Phase 1 (--lossless stays a crop flag).
 		return runCrop(cmd.Context(), input, cvOutput, rx, ry, rw, rh,
-			qualityIntForConvert(), cvWorkers, 1, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
+			qualityIntForConvert(), cvWorkers, factor, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
 	}
 
 	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't
@@ -198,21 +207,21 @@ func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 	return 0, fmt.Errorf("--bigtiff %q: want auto|on|off", v)
 }
 
-// validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3a.
-// Slice 3a ships crop+container-change at factor 1, codec jpeg, into
-// svs/tiff/ome-tiff/cog-wsi/dicom. factor, codec, and dzi/szi come in later slices.
+// validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3b.
+// Slice 3b adds --factor/--target-mag to the rect path for non-SVS containers.
+// SVS crop+downsample and dzi/szi rect remain deferred.
 func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) error {
 	if !rectSet {
 		return nil
-	}
-	if factor != 1 || targetMag != 0 {
-		return fmt.Errorf("--rect with --factor/--target-mag is not yet supported; for now crop then downsample separately")
 	}
 	if codec != "" {
 		return fmt.Errorf("--rect with --codec is not yet supported")
 	}
 	if to == "dzi" || to == "szi" {
 		return fmt.Errorf("--rect with --to %s is not yet supported", to)
+	}
+	if (factor != 1 || targetMag != 0) && to == "svs" {
+		return fmt.Errorf("crop+downsample to SVS is not yet supported; use --to tiff|ome-tiff|cog-wsi|dicom")
 	}
 	return nil
 }
