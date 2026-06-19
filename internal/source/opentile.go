@@ -141,7 +141,8 @@ func (l *opentileLevel) TileSize() image.Point {
 func (l *opentileLevel) Grid() image.Point {
 	return image.Point{X: l.lvl.Grid.W, Y: l.lvl.Grid.H}
 }
-func (l *opentileLevel) TileMaxSize() int { return l.lvl.TileMaxSize() }
+func (l *opentileLevel) Overlapping() bool { return l.lvl.Overlapping }
+func (l *opentileLevel) TileMaxSize() int  { return l.lvl.TileMaxSize() }
 
 func (l *opentileLevel) TileInto(x, y int, dst []byte) (int, error) {
 	return l.lvl.TileInto(x, y, dst)

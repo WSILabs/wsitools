@@ -46,6 +46,11 @@ type Level interface {
 	Size() image.Point     // image dimensions in pixels
 	TileSize() image.Point // tile dimensions; preserved verbatim on output
 	Grid() image.Point     // tilesX × tilesY
+	// Overlapping reports whether this level's stored tiles overlap (a stitched
+	// BIF level): Grid then does NOT tile Size, and per-tile accessors return the
+	// raw overlapping tiles — consumers must read via the region API
+	// (ScaledStrips) and must not verbatim tile-copy. opentile-go #71 / v0.48.0.
+	Overlapping() bool
 	Compression() Compression
 
 	// TileMaxSize returns an upper bound on any tile's compressed-byte

@@ -56,6 +56,9 @@ func (l *rasterLevel) Grid() image.Point {
 	}
 }
 
+// Overlapping: a derived raster pyramid is freshly re-tiled, never overlapping.
+func (l *rasterLevel) Overlapping() bool { return false }
+
 // encodeAll JPEG-encodes every tile of this level into l.frames using a worker
 // pool. Each tile index is written by exactly one worker (distinct slice
 // elements), so no per-element locking is needed; l.encErr is mutex-guarded.
@@ -182,6 +185,7 @@ var _ source.Level = (*passthroughLevel)(nil)
 func (l *passthroughLevel) Index() int                      { return l.index }
 func (l *passthroughLevel) Size() image.Point               { return l.size }
 func (l *passthroughLevel) Grid() image.Point               { return l.grid }
+func (l *passthroughLevel) Overlapping() bool               { return l.src.Overlapping() }
 func (l *passthroughLevel) TileSize() image.Point           { return l.src.TileSize() }
 func (l *passthroughLevel) Compression() source.Compression { return l.src.Compression() }
 func (l *passthroughLevel) TileMaxSize() int                { return l.src.TileMaxSize() }

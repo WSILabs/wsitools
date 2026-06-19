@@ -24,6 +24,7 @@ func (l *solidLevel) Index() int                      { return 0 }
 func (l *solidLevel) Size() image.Point               { return l.tile }
 func (l *solidLevel) TileSize() image.Point           { return l.tile }
 func (l *solidLevel) Grid() image.Point               { return image.Point{X: 1, Y: 1} }
+func (l *solidLevel) Overlapping() bool               { return false }
 func (l *solidLevel) Compression() source.Compression { return source.CompressionNone }
 func (l *solidLevel) TileMaxSize() int                { return l.tile.X * l.tile.Y * 3 }
 func (l *solidLevel) TileInto(x, y int, dst []byte) (int, error) {
