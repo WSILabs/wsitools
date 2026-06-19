@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,8 +17,12 @@ import (
 	"github.com/spf13/cobra"
 
 	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/opentile-go/resample"
 
+	"github.com/wsilabs/wsitools/internal/codec"
+	"github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/dzi"
+	"github.com/wsilabs/wsitools/internal/retile"
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
@@ -95,12 +103,122 @@ type dziTileSink interface {
 	WriteTile(level, col, row int, body []byte) error
 }
 
-// emitDZIPyramid drives the v0.17 pyramid-descent pipeline. srcW/srcH are the
-// source L0 dimensions; cfg.Width/Height are the (possibly --factor-reduced)
-// output dimensions — the descent scales the source region down to them.
-// See runDescent in convert_dzi_descent.go.
+// emitDZIPyramid drives the streaming retile engine to fill the DZI/SZI tile
+// tree. srcW/srcH are the source L0 dimensions; cfg.Width/Height are the
+// (possibly --factor-reduced) output dimensions. The engine scales the source
+// region to the output and descends the octave pyramid.
 func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, cfg dzi.Config, srcW, srcH int) error {
-	return runDescent(ctx, slide, w, cfg, srcW, srcH, cvWorkers, parseDZIQuality(cvQuality))
+	levels := retile.ComputeLevels(
+		opentile.Size{W: cfg.Width, H: cfg.Height},
+		cfg.TileSize, cfg.TileSize, cfg.Overlap,
+		2 /*octave*/, dziOctaveCount(cfg.Width, cfg.Height),
+	)
+	enc, err := newDZIStandaloneEncoder(cfg.Format, cfg.TileSize, parseDZIQuality(cvQuality))
+	if err != nil {
+		return err
+	}
+	defer enc.Close()
+
+	// Nearest at identity scale (no --factor) — matches the profiled fast path;
+	// Box (area-averaging) when the top read is a real downscale.
+	kernel := resample.Nearest
+	if srcW != cfg.Width || srcH != cfg.Height {
+		kernel = resample.Box
+	}
+
+	return retile.Run(ctx, retile.Spec{
+		Slide:     slide,
+		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: srcW, H: srcH}},
+		OutL0:     opentile.Size{W: cfg.Width, H: cfg.Height},
+		Levels:    levels,
+		Kernel:    kernel,
+		Encoder:   enc,
+		Sink:      newDZIWriterSink(w, len(levels)),
+		Workers:   cvWorkers,
+	})
+}
+
+// dziOctaveCount returns the number of DZI levels (native down to 1×1).
+func dziOctaveCount(w, h int) int { return dzi.MaxLevel(w, h) + 1 }
+
+// dziWriterSink adapts a dziTileSink (dzi.Writer/szi.Writer) to retile.TileSink.
+// The engine numbers levels finest-first (k=0); DZI numbers them coarsest-first
+// (level 0 = 1×1, level MaxLevel = native). With nLevels engine levels, engine k
+// maps to DZI level (nLevels-1) - k.
+type dziWriterSink struct {
+	w       dziTileSink
+	nLevels int
+}
+
+func newDZIWriterSink(w dziTileSink, nLevels int) *dziWriterSink {
+	return &dziWriterSink{w: w, nLevels: nLevels}
+}
+
+func (s *dziWriterSink) WriteTile(level, col, row int, encoded []byte) error {
+	return s.w.WriteTile(s.nLevels-1-level, col, row, encoded)
+}
+
+// dziStandaloneEncoder produces self-contained tiles: JPEG via libjpeg-turbo
+// (EncodeStandalone) or stdlib PNG. Implements retile.TileEncoder.
+type dziStandaloneEncoder struct {
+	format string
+	jpeg   *jpeg.Encoder // nil for png
+}
+
+func newDZIStandaloneEncoder(format string, tileSize, quality int) (*dziStandaloneEncoder, error) {
+	switch format {
+	case "jpeg":
+		enc, err := jpeg.New(
+			codec.LevelGeometry{TileWidth: tileSize, TileHeight: tileSize},
+			codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("jpeg.New: %w", err)
+		}
+		return &dziStandaloneEncoder{format: "jpeg", jpeg: enc}, nil
+	case "png":
+		return &dziStandaloneEncoder{format: "png"}, nil
+	default:
+		return nil, fmt.Errorf("unsupported dzi format %q", format)
+	}
+}
+
+func (e *dziStandaloneEncoder) EncodeTile(rgb []byte, w, h int) ([]byte, error) {
+	switch e.format {
+	case "jpeg":
+		return e.jpeg.EncodeStandalone(rgb, w, h)
+	case "png":
+		var b bytes.Buffer
+		if err := png.Encode(&b, &rgbBytesAsImage{pix: rgb, stride: w * 3, w: w, h: h}); err != nil {
+			return nil, err
+		}
+		return b.Bytes(), nil
+	default:
+		return nil, fmt.Errorf("unsupported dzi format %q", e.format)
+	}
+}
+
+func (e *dziStandaloneEncoder) Close() error {
+	if e.jpeg != nil {
+		return e.jpeg.Close()
+	}
+	return nil
+}
+
+// rgbBytesAsImage wraps a raw RGB byte buffer as image.Image for stdlib PNG.
+// Reports NRGBA with alpha hard-coded to 255 (opaque), matching the prior PNG
+// wrapper so PNG output is logically identical.
+type rgbBytesAsImage struct {
+	pix    []byte
+	stride int
+	w, h   int
+}
+
+func (r *rgbBytesAsImage) ColorModel() color.Model { return color.NRGBAModel }
+func (r *rgbBytesAsImage) Bounds() image.Rectangle { return image.Rect(0, 0, r.w, r.h) }
+func (r *rgbBytesAsImage) At(x, y int) color.Color {
+	i := y*r.stride + x*3
+	return color.NRGBA{R: r.pix[i+0], G: r.pix[i+1], B: r.pix[i+2], A: 0xFF}
 }
 
 // resolveFactor resolves the effective downsample factor from --factor /
