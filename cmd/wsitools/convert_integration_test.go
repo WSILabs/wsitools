@@ -79,6 +79,17 @@ func runConvertBitExactTest(t *testing.T, formatSubdir string) {
 
 	for _, input := range inputs {
 		t.Run(filepath.Base(input), func(t *testing.T) {
+			// Overlapping/stitched sources (most BIFs) now convert via the retile
+			// engine (re-encode), which is NOT bit-exact — skip the bit-equality
+			// check; engine correctness is covered by the M2 integration steps.
+			if probe, perr := source.Open(input); perr == nil {
+				overlap := sourceIsOverlapping(probe)
+				probe.Close()
+				if overlap {
+					t.Skipf("overlapping source: re-encoded via engine, not bit-exact")
+				}
+			}
+
 			out := filepath.Join(t.TempDir(), "out.tiff")
 			rootCmd.SetArgs([]string{"convert", "--to", "cog-wsi", "-o", out, input})
 			t.Cleanup(func() { rootCmd.SetArgs(nil) })
