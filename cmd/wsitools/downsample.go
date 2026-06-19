@@ -224,32 +224,36 @@ func countTilesForLevel(w, h int) int {
 
 // buildPyramid materialises the output L0 raster from the source L0 (with
 // 1/factor fast-scale decode), then iteratively encodes + writes each output
-// pyramid level (256x256 tiled JPEG). L1+ rasters are computed in-memory
-// from the previous level via 2x2 area-average.
+// pyramid level. L1+ rasters are computed in-memory from the previous level
+// via 2x2 area-average.
 //
 // postL0Hook, if non-nil, is called after writing L0 and before writing L1.
 // The caller uses this to inject the thumbnail IFD between L0 and L1 to match
 // Aperio's quirky IFD ordering convention.
-func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writer, factor, quality, workers int, postL0Hook func() error) error {
+//
+// fac+knobs select the tile encoder; pass jpegcodec.Factory{}+{"q":strconv.Itoa(quality)}
+// for the default JPEG path.
+func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writer, factor int, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
 	srcL0 := src.Levels()[0]
 	srcSize := opentile.Size{W: srcL0.Size.W, H: srcL0.Size.H}
 	outL0 := opentile.Size{W: srcSize.W / factor, H: srcSize.H / factor}
 	if outL0.W <= 0 || outL0.H <= 0 {
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
-	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, quality, workers, postL0Hook)
+	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, fac, knobs, workers, postL0Hook)
 }
 
-// buildEnginePyramid builds a streamwriter jpeg pyramid by streaming srcRegion
-// through the retile engine to outL0 (octave-floored levels). postL0Hook runs
-// after L0's AddLevel, before L1 (the thumbnail-IFD interleave). Shared by
-// downsample (full-L0 region, outL0=L0/factor) and crop (rect region, identity).
-func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, quality, workers int, postL0Hook func() error) error {
+// buildEnginePyramid builds a streamwriter pyramid by streaming srcRegion
+// through the retile engine to outL0 (octave-floored levels). The codec is
+// selected by fac+knobs; Compression is derived from enc.TIFFCompressionTag().
+// postL0Hook runs after L0's AddLevel, before L1 (the thumbnail-IFD interleave).
+// Shared by downsample (full-L0 region, outL0=L0/factor) and crop (rect region, identity).
+func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
 	levels := octaveLevelSpecsFor(outL0, outputTileSize)
 
-	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
+	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
-	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)
 	}
@@ -262,7 +266,7 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 			ImageHeight:     uint32(levels[i].Height),
 			TileWidth:       outputTileSize,
 			TileHeight:      outputTileSize,
-			Compression:     tiff.CompressionJPEG,
+			Compression:     enc.TIFFCompressionTag(),
 			Photometric:     2,
 			SamplesPerPixel: 3,
 			BitsPerSample:   []uint16{8, 8, 8},

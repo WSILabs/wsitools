@@ -89,11 +89,7 @@ func init() {
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
-	convertCmd.Flags().StringVar(&cvRect, "rect", "", "crop rectangle X,Y,W,H (level-0 coords); crops before container change")
-	convertCmd.Flags().IntVar(&cvRectX, "x", 0, "crop X (level-0 coords; with --y/--w/--h)")
-	convertCmd.Flags().IntVar(&cvRectY, "y", 0, "crop Y (level-0 coords)")
-	convertCmd.Flags().IntVar(&cvRectW, "w", 0, "crop width (level-0 pixels)")
-	convertCmd.Flags().IntVar(&cvRectH, "h", 0, "crop height (level-0 pixels)")
+	registerRectFlags(convertCmd)
 	_ = convertCmd.Flags().MarkDeprecated("dzi-format", "use --codec jpeg|png")
 	_ = convertCmd.MarkFlagRequired("output")
 	rootCmd.AddCommand(convertCmd)
@@ -139,10 +135,8 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--codec png is only valid with --to dzi|szi (not %q)", cvTo)
 	}
 
-	rectSet := cmd.Flags().Changed("rect") || cmd.Flags().Changed("x") ||
-		cmd.Flags().Changed("y") || cmd.Flags().Changed("w") || cmd.Flags().Changed("h")
-	if rectSet {
-		if err := validateRectCombo(rectSet, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
+	if rectFlagsSet(cmd) && cvTo != "dzi" && cvTo != "szi" {
+		if err := validateRectCombo(true, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
 			return err
 		}
 		f, err := opentile.OpenFile(input)
@@ -160,7 +154,7 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		}
 		// convert --rect is always lossy in Phase 1 (--lossless stays a crop flag).
 		return runCrop(cmd.Context(), input, cvOutput, rx, ry, rw, rh,
-			qualityIntForConvert(), cvWorkers, factor, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, start)
+			qualityIntForConvert(), cvWorkers, factor, cvTileOrder, cvBigTIFFFlag, cvForce, cvNoAssociated, false, cvTo, cvCodec, cvQuality, start)
 	}
 
 	// Refuse overlapping/stitched sources (BIF) → per-tile targets, which can't
@@ -207,18 +201,24 @@ func parseBigTIFFFlag(v string) (cogwsiwriter.BigTIFFMode, error) {
 	return 0, fmt.Errorf("--bigtiff %q: want auto|on|off", v)
 }
 
-// validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3b.
-// Slice 3b adds --factor/--target-mag to the rect path for all TIFF-family containers.
-// dzi/szi rect remain deferred.
+// registerRectFlags binds --rect/--x/--y/--w/--h on cmd to the cv* rect globals.
+func registerRectFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&cvRect, "rect", "", "crop rectangle X,Y,W,H (level-0 coords); crops before container change")
+	cmd.Flags().IntVar(&cvRectX, "x", 0, "crop X (level-0 coords; with --y/--w/--h)")
+	cmd.Flags().IntVar(&cvRectY, "y", 0, "crop Y (level-0 coords)")
+	cmd.Flags().IntVar(&cvRectW, "w", 0, "crop width (level-0 pixels)")
+	cmd.Flags().IntVar(&cvRectH, "h", 0, "crop height (level-0 pixels)")
+}
+
+// validateRectCombo gates --rect combinations for the crop-emitter targets
+// (svs/tiff/ome-tiff/cog-wsi/dicom). --rect composes with --factor/--target-mag
+// AND --codec for the crop-emitter targets: one decode/rebuild handles crop +
+// downsample + transcode + container change. SVS restricts codec to jpeg
+// (guarded in runCrop); dzi/szi handle --rect directly in runConvertDZI/SZI
+// and are not routed through here.
 func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) error {
 	if !rectSet {
 		return nil
-	}
-	if codec != "" {
-		return fmt.Errorf("--rect with --codec is not yet supported")
-	}
-	if to == "dzi" || to == "szi" {
-		return fmt.Errorf("--rect with --to %s is not yet supported", to)
 	}
 	return nil
 }

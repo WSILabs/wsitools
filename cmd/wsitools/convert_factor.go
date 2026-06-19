@@ -78,15 +78,20 @@ func dispatchDownsampleByTarget(
 	force, noAssociated bool,
 	codecName string,
 ) error {
+	// SVS emitters are jpeg-only (Aperio format constraint). Reject any explicit
+	// non-jpeg --codec early so the user gets a clear error instead of silent fallback.
+	if target == "svs" && codecName != "" && codecName != "jpeg" {
+		return fmt.Errorf("SVS emitters are jpeg-only; use --to tiff to write %s tiles", codecName)
+	}
 	switch target {
 	case "svs":
 		return downsampleToSVS(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
 	case "tiff":
-		return downsampleToTIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+		return downsampleToTIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	case "cog-wsi":
-		return downsampleToCOGWSI(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+		return downsampleToCOGWSI(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	case "ome-tiff":
-		return downsampleToOMETIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+		return downsampleToOMETIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	case "dicom":
 		return downsampleToDICOM(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	default:
@@ -313,7 +318,7 @@ func downsampleToSVS(
 		return writeOneAssociated(w, thumbnail)
 	}
 
-	if err := buildPyramid(ctx, src, w, factor, quality, workers, postL0Hook); err != nil {
+	if err := buildPyramid(ctx, src, w, factor, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(quality)}, workers, postL0Hook); err != nil {
 		return fmt.Errorf("build pyramid: %w", err)
 	}
 
@@ -345,6 +350,7 @@ func downsampleToSVS(
 // It mirrors downsampleToSVS but uses FormatName="tiff" and emits scaled
 // MPPX/MPPY/Magnification from the parsed Aperio ImageDescription (no Aperio
 // ImageDescription mutation — plain TIFF output carries no Aperio metadata).
+// codecName selects the tile encoder (empty ⇒ jpeg).
 func downsampleToTIFF(
 	ctx context.Context,
 	input, output string,
@@ -354,6 +360,7 @@ func downsampleToTIFF(
 	force bool,
 	bigtiffFlag string,
 	noAssociated bool,
+	codecName string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -447,11 +454,18 @@ func downsampleToTIFF(
 		return fmt.Errorf("--tile-order: %w", err)
 	}
 
+	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
+	// raw --quality string (knobs) from the convert command; use quality as fallback.
+	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, cvQuality, quality)
+	if err != nil {
+		return fmt.Errorf("--codec: %w", err)
+	}
+
 	// Build a wsi-tools provenance ImageDescription so the generictiff reader
 	// can recover Magnification and MPP on re-open (opentile-go's generictiff
 	// format reads both fields from the "wsi-tools/<v> … mag=…x mpp=…" string).
-	imageDesc := fmt.Sprintf("wsi-tools/%s transcode source=%s codec=jpeg mpp=%v mag=%vx",
-		Version, src.Format(), mppX, mag)
+	imageDesc := fmt.Sprintf("wsi-tools/%s transcode source=%s codec=%s mpp=%v mag=%vx",
+		Version, src.Format(), resolvedCodec, mppX, mag)
 
 	w, err := streamwriter.Create(output, streamwriter.Options{
 		BigTIFF:          bigtiffMode,
@@ -483,7 +497,7 @@ func downsampleToTIFF(
 
 	// For plain TIFF output there is no SVS-shaped IFD ordering requirement;
 	// pass no postL0Hook and write associated images at the end.
-	if err := buildPyramid(ctx, src, w, factor, quality, workers, nil); err != nil {
+	if err := buildPyramid(ctx, src, w, factor, fac, knobs, workers, nil); err != nil {
 		return fmt.Errorf("build pyramid: %w", err)
 	}
 
@@ -510,6 +524,7 @@ func downsampleToTIFF(
 
 // downsampleToCOGWSI is the reduce-then-rebuild body for convert --to cog-wsi --factor N.
 // It routes the reduced L0 + pyramid through the cogwsiwriter with scaled metadata.
+// codecName selects the tile encoder (empty ⇒ jpeg).
 func downsampleToCOGWSI(
 	ctx context.Context,
 	input, output string,
@@ -519,6 +534,7 @@ func downsampleToCOGWSI(
 	force bool,
 	bigtiffFlag string,
 	noAssociated bool,
+	codecName string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -591,6 +607,13 @@ func downsampleToCOGWSI(
 	mppY := srcMPPY * float64(factor)
 	mag := srcMag / float64(factor)
 
+	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
+	// raw --quality string (knobs) from the convert command; use quality as fallback.
+	cogFac, cogKnobs, _, err := resolveTransformCodec(codecName, cvQuality, quality)
+	if err != nil {
+		return fmt.Errorf("--codec: %w", err)
+	}
+
 	bigTIFFMode, err := parseBigTIFFFlag(bigtiffFlag)
 	if err != nil {
 		// bigtiffFlag may be "auto" (from default) — parseBigTIFFFlag handles that.
@@ -636,7 +659,7 @@ func downsampleToCOGWSI(
 		ctx = context.Background()
 	}
 
-	if err := buildPyramidCOGWSI(ctx, src, w, factor, quality, workers); err != nil {
+	if err := buildPyramidCOGWSI(ctx, src, w, factor, cogFac, cogKnobs, workers); err != nil {
 		aborted = true
 		return fmt.Errorf("build pyramid: %w", err)
 	}
@@ -677,6 +700,7 @@ func downsampleToCOGWSI(
 // (SubResolutionPyramid=true, SampleFormat=1). Associated images are filtered to
 // recognized OME types (label/macro/thumbnail) so the OME-XML Image list stays
 // consistent with the written IFDs.
+// codecName selects the tile encoder (empty ⇒ jpeg).
 func downsampleToOMETIFF(
 	ctx context.Context,
 	input, output string,
@@ -686,6 +710,7 @@ func downsampleToOMETIFF(
 	force bool,
 	bigtiffFlag string,
 	noAssociated bool,
+	codecName string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -792,6 +817,13 @@ func downsampleToOMETIFF(
 		}
 	}
 
+	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
+	// raw --quality string (knobs) from the convert command; use quality as fallback.
+	omeFac, omeKnobs, _, err := resolveTransformCodec(codecName, cvQuality, quality)
+	if err != nil {
+		return fmt.Errorf("--codec: %w", err)
+	}
+
 	// Build OME-XML with reduced L0 dimensions, scaled MPP, and scaled
 	// magnification so opentile-go's OME reader populates md.Magnification.
 	omeXML := SyntheticOMEDescriptionWithMag(
@@ -833,7 +865,7 @@ func downsampleToOMETIFF(
 
 	// Build pyramid using the shared reduce-then-rebuild path (no postL0Hook
 	// needed for OME-TIFF; associated images follow after all pyramid levels).
-	if err := buildPyramid(ctx, src, w, factor, quality, workers, nil); err != nil {
+	if err := buildPyramid(ctx, src, w, factor, omeFac, omeKnobs, workers, nil); err != nil {
 		return fmt.Errorf("build pyramid: %w", err)
 	}
 
@@ -958,26 +990,30 @@ func downsampleToDICOM(ctx context.Context, input, output string, factor, target
 // cogwsiwriter.Writer via the retile engine. It mirrors buildPyramid (which
 // targets streamwriter.Writer) but has no postL0Hook (COG-WSI layout has no
 // SVS-style interleaved thumbnail IFD).
-func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwriter.Writer, factor, quality, workers int) error {
+//
+// fac+knobs select the tile encoder; pass jpegcodec.Factory{}+{"q":strconv.Itoa(quality)}
+// for the default JPEG path.
+func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwriter.Writer, factor int, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
 	srcL0 := src.Levels()[0]
 	srcSize := opentile.Size{W: srcL0.Size.W, H: srcL0.Size.H}
 	outL0 := opentile.Size{W: srcSize.W / factor, H: srcSize.H / factor}
 	if outL0.W <= 0 || outL0.H <= 0 {
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
-	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, quality, workers)
+	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, fac, knobs, workers)
 }
 
 // buildEnginePyramidCOGWSI streams srcRegion through the retile engine into a
-// cogwsiwriter.Writer at outL0 (octave-floored levels). It mirrors
+// cogwsiwriter.Writer at outL0 (octave-floored levels). The codec is selected
+// by fac+knobs; Compression is derived from enc.TIFFCompressionTag(). It mirrors
 // buildEnginePyramid but targets COG-WSI (no postL0Hook; no SVS thumbnail IFD).
 // Shared by downsample (full-L0 region) and crop (rect region, identity).
-func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, quality, workers int) error {
+func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
 	levels := octaveLevelSpecsFor(outL0, outputTileSize)
 
-	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
+	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
-	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)
 	}

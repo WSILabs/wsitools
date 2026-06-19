@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
 	opentile "github.com/wsilabs/opentile-go"
 	_ "github.com/wsilabs/opentile-go/formats/all"
+	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/downscale"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
@@ -65,7 +67,7 @@ effective snapped rect when the input is not already tile-aligned.`,
 		}
 		workers := resolveWorkers(cropWorkers, cmd.Flags().Changed("workers"), cropJobs, cmd.Flags().Changed("jobs"))
 		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
-			cropQuality, workers, 1, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", time.Now())
+			cropQuality, workers, 1, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", "", "", time.Now())
 	},
 }
 
@@ -130,7 +132,9 @@ func validateCropBounds(x, y, w, h, l0W, l0H int) error {
 // runCrop takes all options as explicit parameters (no global-flag reads),
 // mirroring downsampleToSVS, so it stays testable and reusable. The cobra RunE
 // closure resolves the flag globals and passes them in.
-func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers, factor int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, target string, start time.Time) error {
+// codecName selects the tile encoder (empty ⇒ jpeg); qualityStr is the raw
+// --quality value (empty ⇒ use quality int as fallback).
+func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, workers, factor int, tileOrderName, bigtiffFlag string, force, noAssociated, lossless bool, target, codecName, qualityStr string, start time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -188,16 +192,35 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return fmt.Errorf("--tile-order: %w", err)
 	}
 
+	// Resolve codec: empty codecName → jpeg at fallbackQ. qualityStr overrides
+	// the integer quality knob when set.
+	qFallback := quality
+	if qFallback == 0 {
+		qFallback = 90
+	}
+	qualityStrForResolve := qualityStr
+	if qualityStrForResolve == "" && quality != 0 {
+		qualityStrForResolve = strconv.Itoa(quality)
+	}
+	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, qualityStrForResolve, qFallback)
+	if err != nil {
+		return err
+	}
+
+	// SVS guard: SVS emitters are jpeg-only (Aperio format constraint). Reject any
+	// explicit non-jpeg --codec for SVS so the user gets a clear error instead of
+	// silent fallback. (SVS+jpeg2000 is a documented follow-up, not yet wired.)
+	if target == "svs" && codecName != "" && codecName != "jpeg" {
+		return fmt.Errorf("SVS crop keeps jpeg tiles; use --to tiff to write %s tiles", codecName)
+	}
+
 	if target == "svs" {
 		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, factor, order, bigtiffFlag, noAssociated, lossless, start)
 	}
 
 	// Non-SVS sources carry no Aperio ImageDescription to mine for a source Q
 	// (unlike the SVS path, which defaults to the source quality); use 90.
-	q := quality
-	if q == 0 {
-		q = 90
-	}
+	q := qFallback
 	if q < 1 || q > 100 {
 		return fmt.Errorf("--quality must be in [1,100], got %d", q)
 	}
@@ -239,6 +262,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		factor: factor, outW: outW, outH: outH,
 		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
 		start: start,
+		fac:   fac, knobs: knobs, codecName: resolvedCodec,
 	}
 	switch target {
 	case "tiff":
@@ -397,7 +421,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: outW, H: outH}, quality, workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: outW, H: outH}, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(quality)}, workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,6 +175,44 @@ func TestConvertFactorSVSFromNonSVS(t *testing.T) {
 	// 20x source / factor 2 → 10x.
 	if !strings.Contains(string(info), "Magnification: 10x") {
 		t.Errorf("expected Magnification 10x (source 20x / factor 2), got:\n%s", info)
+	}
+}
+
+// TestDownsampleSVSRejectsNonJpegCodec verifies that dispatchDownsampleByTarget
+// returns a clear error (not a silent jpeg fallback) when --codec names a non-jpeg
+// codec for an SVS target. The guard runs before any file I/O, so no fixture needed.
+func TestDownsampleSVSRejectsNonJpegCodec(t *testing.T) {
+	for _, codec := range []string{"avif", "webp", "jpegxl", "htj2k", "jpeg2000"} {
+		err := dispatchDownsampleByTarget(
+			context.Background(),
+			"svs", "nonexistent.svs", "out.svs",
+			2, 0, 90, 1, "row-major", "auto",
+			false, false,
+			codec,
+		)
+		if err == nil {
+			t.Errorf("codec=%s: expected SVS guard error, got nil", codec)
+			continue
+		}
+		if !strings.Contains(err.Error(), "use --to tiff") {
+			t.Errorf("codec=%s: expected 'use --to tiff' in error, got: %v", codec, err)
+		}
+	}
+}
+
+// TestDownsampleSVSAllowsJpeg verifies that --codec jpeg for SVS is not rejected
+// by the guard (it proceeds to file I/O, which fails on nonexistent input).
+func TestDownsampleSVSAllowsJpeg(t *testing.T) {
+	err := dispatchDownsampleByTarget(
+		context.Background(),
+		"svs", "nonexistent.svs", "out.svs",
+		2, 0, 90, 1, "row-major", "auto",
+		false, false,
+		"jpeg",
+	)
+	// Must NOT be the SVS guard error; any other error (e.g. file not found) is acceptable.
+	if err != nil && strings.Contains(err.Error(), "use --to tiff") {
+		t.Errorf("jpeg should not be rejected by the SVS guard, got: %v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/derivedsource"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
 	"github.com/wsilabs/wsitools/internal/source"
@@ -95,6 +96,9 @@ type cropEmitParams struct {
 	outTilesX    int
 	outTilesY    int
 	start        time.Time
+	fac          codec.EncoderFactory
+	knobs        map[string]string
+	codecName    string
 }
 
 func cropToTIFF(p cropEmitParams) error {
@@ -102,11 +106,11 @@ func cropToTIFF(p cropEmitParams) error {
 	mppX, mppY, mag = scaleMPPMag(mppX, mppY, mag, p.factor)
 	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.outW, p.outH)
 
-	codec := "jpeg"
+	codecLabel := p.codecName
 	if p.lossless {
-		codec = "verbatim" // L0 tiles copied byte-identical; lower levels re-encoded JPEG
+		codecLabel = "verbatim" // L0 tiles copied byte-identical; lower levels re-encoded JPEG
 	}
-	imageDesc := fmt.Sprintf("wsi-tools/%s crop source=%s codec=%s mpp=%v mag=%vx", Version, p.src.Format(), codec, mppX, mag)
+	imageDesc := fmt.Sprintf("wsi-tools/%s crop source=%s codec=%s mpp=%v mag=%vx", Version, p.src.Format(), codecLabel, mppX, mag)
 	w, err := streamwriter.Create(p.output, streamwriter.Options{
 		BigTIFF:          bigtiffMode,
 		ImageDescription: imageDesc,
@@ -154,7 +158,7 @@ func cropToTIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -254,7 +258,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -343,7 +347,7 @@ func cropToCOGWSI(p cropEmitParams) error {
 		}
 	} else {
 		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
-		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers); err != nil {
+		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers); err != nil {
 			aborted = true
 			return fmt.Errorf("build pyramid: %w", err)
 		}
@@ -469,7 +473,7 @@ func cropToDICOM(p cropEmitParams) error {
 		}
 		assoc = replaceThumbnailAssoc(assoc, jpegBytes, tw, th)
 	}
-	return runDICOMEngine(p.ctx, p.src, rect, opentile.Size{W: p.outW, H: p.outH}, "jpeg", p.quality, p.workers, src.Format(), lossyMD, assoc, dicomwriter.Options{
+	return runDICOMEngine(p.ctx, p.src, rect, opentile.Size{W: p.outW, H: p.outH}, p.codecName, p.quality, p.workers, src.Format(), lossyMD, assoc, dicomwriter.Options{
 		Associated:  !p.noAssociated,
 		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
 	}, p.output, p.force)

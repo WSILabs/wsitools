@@ -57,7 +57,11 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err != nil {
 		return err
 	}
-	outW, outH, err := reducedDims(srcW, srcH, factor)
+	srcRegion, err := resolveConvertRect(cmd, srcW, srcH)
+	if err != nil {
+		return err
+	}
+	outW, outH, err := reducedDims(srcRegion.Size.W, srcRegion.Size.H, factor)
 	if err != nil {
 		return err
 	}
@@ -74,7 +78,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err != nil {
 		return err
 	}
-	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcW, srcH); err != nil {
+	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion); err != nil {
 		return err
 	}
 	if err := writeAssociatedPNGs(src, w.WriteAssociated); err != nil {
@@ -104,10 +108,10 @@ type dziTileSink interface {
 }
 
 // emitDZIPyramid drives the streaming retile engine to fill the DZI/SZI tile
-// tree. srcW/srcH are the source L0 dimensions; cfg.Width/Height are the
-// (possibly --factor-reduced) output dimensions. The engine scales the source
-// region to the output and descends the octave pyramid.
-func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, cfg dzi.Config, srcW, srcH int) error {
+// tree. srcRegion is the source L0 region to read (full slide or a crop rect);
+// cfg.Width/Height are the (possibly --factor-reduced) output dimensions. The
+// engine scales srcRegion to the output and descends the octave pyramid.
+func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, cfg dzi.Config, srcRegion opentile.Region) error {
 	levels := retile.ComputeLevels(
 		opentile.Size{W: cfg.Width, H: cfg.Height},
 		cfg.TileSize, cfg.TileSize, cfg.Overlap,
@@ -119,16 +123,16 @@ func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, c
 	}
 	defer enc.Close()
 
-	// Nearest at identity scale (no --factor) — matches the profiled fast path;
-	// Box (area-averaging) when the top read is a real downscale.
+	// Nearest at identity scale (no --factor or --rect) — matches the profiled
+	// fast path; Box (area-averaging) when the top read is a real downscale.
 	kernel := resample.Nearest
-	if srcW != cfg.Width || srcH != cfg.Height {
+	if srcRegion.Size.W != cfg.Width || srcRegion.Size.H != cfg.Height {
 		kernel = resample.Box
 	}
 
 	return retile.Run(ctx, retile.Spec{
 		Slide:     slide,
-		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: opentile.Size{W: srcW, H: srcH}},
+		SrcRegion: srcRegion,
 		OutL0:     opentile.Size{W: cfg.Width, H: cfg.Height},
 		Levels:    levels,
 		Kernel:    kernel,
