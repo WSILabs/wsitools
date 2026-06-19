@@ -1,4 +1,4 @@
-// Package derivedsource presents a derived (reduced or cropped) pyramid as a
+// Package derivedsource presents a derived (cropped) pyramid as a
 // source.Source so it can be handed to dicomwriter.WritePyramid, which reads
 // compressed tiles verbatim via Level.TileInto. Two level kinds back the
 // pyramid: rasterLevel (holds RGB, JPEG-encodes tiles on demand) and
@@ -229,32 +229,3 @@ func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH i
 	return &derived{format: format, levels: levels, md: md, assoc: assoc}, nil
 }
 
-// FromReducedL0 builds an all-raster derived source: L0 is the supplied
-// (reduced or cropped) raster, and nLevels-1 lower levels are produced by box-
-// halving. tileSize/quality drive the JPEG encode and workers sizes each level's
-// encode pool; format/md/assoc are carried onto the source (md already
-// factor-scaled by the caller). Used by downsample, convert --factor, and the
-// re-encode crop. Returns fewer than nLevels levels if a box-halved dimension
-// reaches 0 before nLevels iterations.
-func FromReducedL0(l0 []byte, w, h, nLevels, tileSize, quality, workers int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
-	if nLevels < 1 {
-		return nil, fmt.Errorf("derivedsource: nLevels must be at least 1, got %d", nLevels)
-	}
-	levels := make([]source.Level, 0, nLevels)
-	raster, lw, lh := l0, w, h
-	for i := 0; i < nLevels; i++ {
-		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, workers: workers, index: i})
-		if i == nLevels-1 {
-			break
-		}
-		var err error
-		raster, lw, lh, err = downscale.BoxHalve(raster, lw, lh, 2)
-		if err != nil {
-			return nil, fmt.Errorf("derivedsource: halve level %d→%d: %w", i, i+1, err)
-		}
-		if lw == 0 || lh == 0 {
-			break
-		}
-	}
-	return &derived{format: format, levels: levels, md: md, assoc: assoc}, nil
-}

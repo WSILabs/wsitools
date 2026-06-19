@@ -62,6 +62,24 @@ func regenCropThumbnailAssoc(assoc []source.AssociatedImage, l0 []byte, l0W, l0H
 	return out, nil
 }
 
+// replaceThumbnailAssoc returns assoc with any thumbnail entry replaced by a
+// croppedThumbnail built from already-encoded JPEG bytes (tw×th); all other
+// associated images pass through unchanged. It mirrors regenCropThumbnailAssoc
+// but sources the bytes from streamCropThumbnail (the engine crop path) instead
+// of rendering from an in-memory L0 raster. If the source has no thumbnail, the
+// list is returned unchanged.
+func replaceThumbnailAssoc(assoc []source.AssociatedImage, jpegBytes []byte, tw, th int) []source.AssociatedImage {
+	out := make([]source.AssociatedImage, 0, len(assoc))
+	for _, a := range assoc {
+		if a.Type() == string(opentile.AssociatedThumbnail) {
+			out = append(out, &croppedThumbnail{jpegBytes: jpegBytes, w: tw, h: th})
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // thumbLongSide is the target longest-edge length for a regenerated thumbnail.
 const thumbLongSide = 1024
 

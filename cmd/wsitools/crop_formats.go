@@ -396,44 +396,55 @@ func cropToDICOM(p cropEmitParams) error {
 	assoc := src.Associated()
 	if p.noAssociated {
 		assoc = nil
-	} else {
-		// Replace the whole-slide thumbnail with one rendered from the crop L0
-		// (the snapped region for --lossless, the exact extent otherwise) so the
-		// emitted thumbnail reflects the crop, not the full slide. label/macro/
-		// overview pass through (they describe the whole physical slide).
-		var rerr error
-		assoc, rerr = regenCropThumbnailAssoc(assoc, p.l0, p.l0W, p.l0H, p.quality)
-		if rerr != nil {
-			return fmt.Errorf("regenerate crop thumbnail: %w", rerr)
-		}
 	}
 
-	var ds source.Source
-	var err error
 	if p.lossless {
+		// Replace the whole-slide thumbnail with one rendered from the crop L0
+		// (the snapped region) so the emitted thumbnail reflects the crop, not the
+		// full slide. label/macro/overview pass through (they describe the whole
+		// physical slide). The lossless path holds the cropped raster (p.l0).
+		if !p.noAssociated {
+			var rerr error
+			assoc, rerr = regenCropThumbnailAssoc(assoc, p.l0, p.l0W, p.l0H, p.quality)
+			if rerr != nil {
+				return fmt.Errorf("regenerate crop thumbnail: %w", rerr)
+			}
+		}
 		comp := src.Levels()[0].Compression()
 		if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 {
 			return fmt.Errorf("--lossless into DICOM needs JPEG or JPEG 2000 source frames; got %s", comp)
 		}
-		ds, err = derivedsource.WithLosslessL0(
+		ds, err := derivedsource.WithLosslessL0(
 			src.Levels()[0], p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H,
 			p.l0, p.nLevels, outputTileSize, p.quality, p.workers, src.Format(), md, assoc)
-	} else {
-		ds, err = derivedsource.FromReducedL0(
-			p.l0, p.l0W, p.l0H, p.nLevels, outputTileSize, p.quality, p.workers, src.Format(), md, assoc)
-	}
-	if err != nil {
-		return fmt.Errorf("build derived source: %w", err)
+		if err != nil {
+			return fmt.Errorf("build derived source: %w", err)
+		}
+		if err := emitDICOM(ds, dicomwriter.Options{
+			Associated: !p.noAssociated,
+			// Crop extracts a spatial region at full resolution: ImageType[3]=NONE,
+			// not RESAMPLED (which downsample uses to signal spatial reduction).
+			L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+		}, p.output, cropForce); err != nil {
+			return err
+		}
+		fmt.Printf("wrote %s\n", p.output)
+		return nil
 	}
 
-	if err := emitDICOM(ds, dicomwriter.Options{
-		Associated: !p.noAssociated,
-		// Crop extracts a spatial region at full resolution: ImageType[3]=NONE,
-		// not RESAMPLED (which downsample uses to signal spatial reduction).
-		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
-	}, p.output, cropForce); err != nil {
-		return err
+	// Lossy: stream the crop rect through the retile engine into a spool, then
+	// emit DICOM. No cropped raster is materialized (p.l0 is nil here).
+	rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
+	// Regenerate the crop thumbnail from a small streaming read (no p.l0 raster).
+	if !p.noAssociated {
+		jpegBytes, tw, th, terr := streamCropThumbnail(p.src, rect, p.l0W, p.l0H, p.quality)
+		if terr != nil {
+			return fmt.Errorf("regenerate crop thumbnail: %w", terr)
+		}
+		assoc = replaceThumbnailAssoc(assoc, jpegBytes, tw, th)
 	}
-	fmt.Printf("wrote %s\n", p.output)
-	return nil
+	return runDICOMEngine(p.ctx, p.src, rect, opentile.Size{W: p.l0W, H: p.l0H}, "jpeg", p.quality, p.workers, src.Format(), md, assoc, dicomwriter.Options{
+		Associated:  !p.noAssociated,
+		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"},
+	}, p.output, cropForce)
 }

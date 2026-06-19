@@ -38,9 +38,7 @@ import (
 
 	codec "github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
-	"github.com/wsilabs/wsitools/internal/derivedsource"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
-	"github.com/wsilabs/wsitools/internal/downscale"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
@@ -78,6 +76,7 @@ func dispatchDownsampleByTarget(
 	tileOrderName string,
 	bigtiffFlag string,
 	force, noAssociated bool,
+	codecName string,
 ) error {
 	switch target {
 	case "svs":
@@ -89,7 +88,7 @@ func dispatchDownsampleByTarget(
 	case "ome-tiff":
 		return downsampleToOMETIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
 	case "dicom":
-		return downsampleToDICOM(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+		return downsampleToDICOM(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	default:
 		return fmt.Errorf("--factor for --to %s not yet implemented", target)
 	}
@@ -113,6 +112,10 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 		workers = runtime.NumCPU()
 	}
 
+	cn := cvCodec
+	if cn == "" {
+		cn = "jpeg"
+	}
 	return dispatchDownsampleByTarget(
 		cmd.Context(),
 		target,
@@ -126,6 +129,7 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 		cvBigTIFFFlag,
 		cvForce,
 		cvNoAssociated,
+		cn,
 	)
 }
 
@@ -865,7 +869,7 @@ func downsampleToOMETIFF(
 // derived source.Source, and emits a DICOM-WSM pyramid directory. tileOrderName
 // and bigtiffFlag are accepted for dispatch-signature uniformity and ignored
 // (DICOM has no TIFF tile order / BigTIFF).
-func downsampleToDICOM(ctx context.Context, input, output string, factor, targetMag, quality, workers int, tileOrderName string, force bool, bigtiffFlag string, noAssociated bool) error {
+func downsampleToDICOM(ctx context.Context, input, output string, factor, targetMag, quality, workers int, tileOrderName string, force bool, bigtiffFlag string, noAssociated bool, codecName string) error {
 	_ = tileOrderName
 	_ = bigtiffFlag
 	if workers < 1 {
@@ -920,15 +924,6 @@ func downsampleToDICOM(ctx context.Context, input, output string, factor, target
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outW, outH, factor)
 	}
 
-	rasterBytes := int64(outW) * int64(outH) * 3
-	if rasterBytes < 0 {
-		return fmt.Errorf("output L0 raster size overflows int64")
-	}
-	l0 := make([]byte, rasterBytes)
-	if err := downscale.MaterializeReducedL0(ctx, srcL0, l0, outW, outH, factor); err != nil {
-		return fmt.Errorf("materialize reduced L0: %w", err)
-	}
-
 	// Scale metadata: MPP grows by factor, magnification shrinks by it.
 	if md.MPPX != 0 {
 		md.MPPX *= float64(factor)
@@ -947,11 +942,9 @@ func downsampleToDICOM(ctx context.Context, input, output string, factor, target
 	if noAssociated {
 		assoc = nil
 	}
-	ds, err := derivedsource.FromReducedL0(l0, outW, outH, len(slide.Levels()), outputTileSize, quality, workers, src.Format(), md, assoc)
-	if err != nil {
-		return fmt.Errorf("build derived source: %w", err)
-	}
-	if err := emitDICOM(ds, dicomwriter.Options{
+
+	srcRegion := opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcL0.Size}
+	if err := runDICOMEngine(ctx, slide, srcRegion, opentile.Size{W: outW, H: outH}, codecName, quality, workers, src.Format(), md, assoc, dicomwriter.Options{
 		Associated:  !noAssociated,
 		L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "RESAMPLED"},
 	}, output, force); err != nil {
