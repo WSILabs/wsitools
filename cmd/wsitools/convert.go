@@ -210,9 +210,10 @@ func registerRectFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&cvRectH, "h", 0, "crop height (level-0 pixels)")
 }
 
-// validateRectCombo rejects the --rect combinations deferred past SP3c Slice 3b.
-// Slice 3b adds --factor/--target-mag to the rect path for all TIFF-family containers.
-// dzi/szi rect remain deferred.
+// validateRectCombo gates --rect combinations for the crop-emitter targets
+// (svs/tiff/ome-tiff/cog-wsi/dicom). --rect+--factor/--target-mag is supported;
+// --codec on the transform path is not yet (Slice 3c). dzi/szi handle --rect
+// directly in runConvertDZI/SZI and are not routed through here.
 func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) error {
 	if !rectSet {
 		return nil
