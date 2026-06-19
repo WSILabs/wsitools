@@ -28,13 +28,18 @@ func transcodeOctaveLevels(src []srcLevelDims) ([]retile.LevelSpec, bool) {
 		if s.W <= 0 || l0.W <= 0 || s.TileW <= 0 || s.TileH <= 0 {
 			return nil, false
 		}
-		ratio := float64(l0.W) / float64(s.W)
-		k := int(math.Round(math.Log2(ratio)))
-		if k < 0 {
-			return nil, false
+		kW := int(math.Round(math.Log2(float64(l0.W) / float64(s.W))))
+		kH := int(math.Round(math.Log2(float64(l0.H) / float64(s.H))))
+		if kW < 0 || kW != kH {
+			return nil, false // W and H must reduce by the same octave
 		}
-		// Box-halving L0 k times must reproduce the source dims in BOTH axes.
-		if ceilHalve(l0.W, k) != s.W || ceilHalve(l0.H, k) != s.H {
+		k := kW
+		// Box-halving L0 k times must reproduce the source dims within a small
+		// tolerance (scanners floor/round differently than ceil-halving; the drift
+		// is ≤ ~1-2px even for deep pyramids). A genuine non-power-of-2 ratio
+		// misses by hundreds of px and is rejected.
+		const dimTol = 2
+		if abs(ceilHalve(l0.W, k)-s.W) > dimTol || abs(ceilHalve(l0.H, k)-s.H) > dimTol {
 			return nil, false
 		}
 		if _, dup := octaveOf[k]; dup {
@@ -77,4 +82,11 @@ func ceilHalve(v, n int) int {
 		v = (v + 1) / 2
 	}
 	return v
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

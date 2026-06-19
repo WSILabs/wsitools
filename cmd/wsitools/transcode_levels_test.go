@@ -67,3 +67,31 @@ func TestTranscodeOctaveLevels_ZeroTile(t *testing.T) {
 		t.Error("expected ok=false for zero tile size")
 	}
 }
+
+func TestTranscodeOctaveLevels_RealSVSOddHeight(t *testing.T) {
+	// Real CMU-1.svs: L0 46000×32914, L1 = floor /4 (11500×8228), L2 = floor /16
+	// (2875×2057). ceilHalve(32914,2)=8229 != source 8228 — must still be accepted
+	// via tolerance, else the engine path is never taken for real SVS.
+	src := []srcLevelDims{
+		{W: 46000, H: 32914, TileW: 256, TileH: 256},
+		{W: 11500, H: 8228, TileW: 256, TileH: 256},
+		{W: 2875, H: 2057, TileW: 256, TileH: 256},
+	}
+	levels, ok := transcodeOctaveLevels(src)
+	if !ok {
+		t.Fatal("real CMU-1 dims must be accepted (tolerance), else M4 never engages")
+	}
+	if len(levels) != 5 {
+		t.Fatalf("chain = %d, want 5 (octaves 0..4)", len(levels))
+	}
+	// Emitted at 0,2,4; output dims are box-derived (H = ceilHalve, ±1 vs source).
+	if levels[0].Intermediate || levels[2].Intermediate || levels[4].Intermediate {
+		t.Error("octaves 0,2,4 must be emitted")
+	}
+	if !levels[1].Intermediate || !levels[3].Intermediate {
+		t.Error("octaves 1,3 must be Intermediate")
+	}
+	if levels[2].Height != 8229 || levels[4].Height != 2058 {
+		t.Errorf("box-derived H = [%d,%d], want [8229,2058] (ceil-halve, not source 8228/2057)", levels[2].Height, levels[4].Height)
+	}
+}
