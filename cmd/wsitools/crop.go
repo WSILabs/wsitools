@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
 	opentile "github.com/wsilabs/opentile-go"
 	_ "github.com/wsilabs/opentile-go/formats/all"
+	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/downscale"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
@@ -397,7 +399,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: outW, H: outH}, quality, workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(ctx, src, wtr, rect, opentile.Size{W: outW, H: outH}, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(quality)}, workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}

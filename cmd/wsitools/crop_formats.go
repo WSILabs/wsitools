@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	opentile "github.com/wsilabs/opentile-go"
+	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/derivedsource"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
 	"github.com/wsilabs/wsitools/internal/source"
@@ -154,7 +156,7 @@ func cropToTIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(p.quality)}, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -254,7 +256,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(p.quality)}, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -343,7 +345,7 @@ func cropToCOGWSI(p cropEmitParams) error {
 		}
 	} else {
 		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
-		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.quality, p.workers); err != nil {
+		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(p.quality)}, p.workers); err != nil {
 			aborted = true
 			return fmt.Errorf("build pyramid: %w", err)
 		}

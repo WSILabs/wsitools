@@ -237,19 +237,20 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	if outL0.W <= 0 || outL0.H <= 0 {
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
-	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, quality, workers, postL0Hook)
+	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(quality)}, workers, postL0Hook)
 }
 
-// buildEnginePyramid builds a streamwriter jpeg pyramid by streaming srcRegion
-// through the retile engine to outL0 (octave-floored levels). postL0Hook runs
-// after L0's AddLevel, before L1 (the thumbnail-IFD interleave). Shared by
-// downsample (full-L0 region, outL0=L0/factor) and crop (rect region, identity).
-func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, quality, workers int, postL0Hook func() error) error {
+// buildEnginePyramid builds a streamwriter pyramid by streaming srcRegion
+// through the retile engine to outL0 (octave-floored levels). The codec is
+// selected by fac+knobs; Compression is derived from enc.TIFFCompressionTag().
+// postL0Hook runs after L0's AddLevel, before L1 (the thumbnail-IFD interleave).
+// Shared by downsample (full-L0 region, outL0=L0/factor) and crop (rect region, identity).
+func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
 	levels := octaveLevelSpecsFor(outL0, outputTileSize)
 
-	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
+	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
-	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)
 	}
@@ -262,7 +263,7 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 			ImageHeight:     uint32(levels[i].Height),
 			TileWidth:       outputTileSize,
 			TileHeight:      outputTileSize,
-			Compression:     tiff.CompressionJPEG,
+			Compression:     enc.TIFFCompressionTag(),
 			Photometric:     2,
 			SamplesPerPixel: 3,
 			BitsPerSample:   []uint16{8, 8, 8},
