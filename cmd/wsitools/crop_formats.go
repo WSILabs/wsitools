@@ -187,6 +187,121 @@ func cropToTIFF(p cropEmitParams) error {
 	return nil
 }
 
+// cropToSVS writes the cropped region as an Aperio SVS. It mirrors cropToTIFF
+// but substitutes the SVS-specific writer options (FormatName:"svs", Aperio
+// ImageDescription, AcceptedOrders) and the SVS positional associated-image
+// layout: thumbnail is interleaved between L0 and L1, and label/macro are
+// collected upfront and emitted positionally at the end.
+func cropToSVS(p cropEmitParams) error {
+	rawDesc, _ := source.ReadSourceImageDescription(p.input)
+	desc, derr := ParseImageDescription(rawDesc)
+	if derr != nil {
+		return fmt.Errorf("parse source ImageDescription: %w", derr)
+	}
+	baseW, baseH := p.src.Levels()[0].Size.W, p.src.Levels()[0].Size.H
+	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, p.ex, p.ey, p.l0W, p.l0H, outputTileSize, outputTileSize, p.quality, p.codecName)
+	cropDesc = scaleAperioResolutionTokens(cropDesc, p.factor)
+	outMPP := desc.MPP * float64(p.factor)
+	outMag := desc.AppMag / float64(p.factor)
+
+	// SVS bigtiff auto-detects from the crop extent (l0W×l0H), not the
+	// downsampled output dims, matching the old cropEmitSVS behaviour.
+	bigtiffMode := streamwriterBigTIFF(p.bigtiffFlag, p.l0W, p.l0H)
+
+	wtr, err := streamwriter.Create(p.output, streamwriter.Options{
+		BigTIFF:          bigtiffMode,
+		ImageDescription: cropDesc,
+		ToolsVersion:     Version,
+		SourceFormat:     string(p.src.Format()),
+		FormatName:       "svs",
+		AcceptedOrders:   acceptedOrdersForFormat("svs"),
+		DefaultOrder:     p.order,
+		MPPX:             outMPP,
+		MPPY:             outMPP,
+		Magnification:    outMag,
+		ICCProfile:       p.src.ICCProfile(),
+	})
+	if err != nil {
+		return fmt.Errorf("create writer: %w", err)
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			wtr.Abort()
+		}
+	}()
+
+	// SVS positional layout: pre-collect label and macro/overview so they can
+	// be written after the pyramid (Aperio positional convention).
+	var label, macro opentile.AssociatedImage
+	if !p.noAssociated {
+		for _, a := range p.src.AssociatedImages() {
+			switch a.Type() {
+			case "label":
+				label = a
+			case "macro", "overview":
+				macro = a
+			}
+		}
+	}
+
+	if p.lossless {
+		// L0: verbatim source-tile-block copy (byte-identical full-res data).
+		if err := writeLosslessL0(wtr, p.srcL0, p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H); err != nil {
+			return fmt.Errorf("write lossless L0: %w", err)
+		}
+		// Thumbnail between L0 and L1 (SVS positional interleave).
+		if !p.noAssociated {
+			if err := regenCropThumbnail(wtr, p.l0, p.l0W, p.l0H, p.quality); err != nil {
+				return fmt.Errorf("regenerate thumbnail: %w", err)
+			}
+		}
+		// Lower levels: rebuild from the once-halved raster (re-encode).
+		if p.nLevels > 1 {
+			l1, l1W, l1H, err := halveRaster(p.l0, p.l0W, p.l0H)
+			if err != nil {
+				return fmt.Errorf("halve L0→L1: %w", err)
+			}
+			if err := buildPyramidFromRaster(p.ctx, wtr, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+				return fmt.Errorf("build pyramid: %w", err)
+			}
+		}
+	} else {
+		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
+		var postL0Hook func() error
+		if !p.noAssociated {
+			postL0Hook = func() error {
+				jpegBytes, tw, th, terr := streamCropThumbnail(p.src, rect, p.l0W, p.l0H, p.quality)
+				if terr != nil {
+					return terr
+				}
+				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
+			}
+		}
+		if err := buildEnginePyramid(p.ctx, p.src, wtr, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
+			return fmt.Errorf("build pyramid: %w", err)
+		}
+	}
+
+	if label != nil {
+		if err := writeOneAssociated(wtr, label); err != nil {
+			return fmt.Errorf("write associated label: %w", err)
+		}
+	}
+	if macro != nil {
+		if err := writeOneAssociated(wtr, macro); err != nil {
+			return fmt.Errorf("write associated macro/overview: %w", err)
+		}
+	}
+
+	if err := wtr.Close(); err != nil {
+		return fmt.Errorf("close writer: %w", err)
+	}
+	closed = true
+	reportWrote(p.output, p.start)
+	return nil
+}
+
 func cropToOMETIFF(p cropEmitParams) error {
 	mppX, mppY, mag := cropSourceScale(p.input, p.src)
 	mppX, mppY, mag = scaleMPPMag(mppX, mppY, mag, p.factor)
