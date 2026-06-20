@@ -241,7 +241,7 @@ func validateRectCombo(rectSet bool, factor, targetMag int, codec, to string) er
 }
 
 // qualityIntForConvert maps convert's string --quality to runCrop's int quality.
-// Empty/unparseable → 0 (runCrop applies the codec default, 90).
+// Empty/unparseable → 0 (runCrop applies the per-codec default, 85 for jpeg).
 // A bare integer (e.g. "85") is honored.
 func qualityIntForConvert() int {
 	if cvQuality == "" {

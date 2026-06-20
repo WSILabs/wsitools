@@ -188,7 +188,7 @@ func TestDownsampleSVSRejectsNonJpegCodec(t *testing.T) {
 			"svs", "nonexistent.svs", "out.svs",
 			2, 0, 90, 1, "row-major", "auto",
 			false, false,
-			codec,
+			codec, "",
 		)
 		if err == nil {
 			t.Errorf("codec=%s: expected SVS guard error, got nil", codec)
@@ -209,7 +209,7 @@ func TestDownsampleSVSAllowsJpegCodecs(t *testing.T) {
 			"svs", "nonexistent.svs", "out.svs",
 			2, 0, 90, 1, "row-major", "auto",
 			false, false,
-			codec,
+			codec, "",
 		)
 		// Must NOT be the SVS guard error; any other error (e.g. file not found) is acceptable.
 		if err != nil && strings.Contains(err.Error(), "use --to tiff") {

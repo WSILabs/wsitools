@@ -74,7 +74,7 @@ func init() {
 	cropCmd.Flags().IntVar(&cropW, "w", 0, "Crop width (level-0 pixels)")
 	cropCmd.Flags().IntVar(&cropH, "h", 0, "Crop height (level-0 pixels)")
 	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output path, same container as source (required)")
-	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: 90)")
+	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: per-codec, 85 for jpeg)")
 	cropCmd.Flags().IntVar(&cropWorkers, "workers", 0, "Encode workers (default: NumCPU)")
 	cropCmd.Flags().IntVar(&cropJobs, "jobs", 0, "alias of --workers")
 	cropCmd.Flags().StringVar(&cropTileOrder, "tile-order", "row-major", "Tile order: row-major|hilbert|morton")

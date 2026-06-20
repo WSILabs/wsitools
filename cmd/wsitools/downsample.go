@@ -103,7 +103,7 @@ func init() {
 	downsampleCmd.Flags().StringVarP(&dsOutput, "output", "o", "", "output file path (required)")
 	downsampleCmd.Flags().IntVar(&dsFactor, "factor", 2, "downsample factor (must be a power of 2 in {2,4,8,16})")
 	downsampleCmd.Flags().IntVar(&dsTargetMag, "target-mag", 0, "alternative to --factor: derive factor from source AppMag")
-	downsampleCmd.Flags().IntVar(&dsQuality, "quality", 90, "JPEG quality 1..100")
+	downsampleCmd.Flags().IntVar(&dsQuality, "quality", 85, "JPEG quality 1..100")
 	downsampleCmd.Flags().IntVar(&dsJobs, "jobs", runtime.NumCPU(), "worker goroutines")
 	downsampleCmd.Flags().IntVar(&dsWorkers, "workers", 0, "alias of --jobs")
 	downsampleCmd.Flags().BoolVarP(&dsForce, "force", "f", false, "overwrite output if it exists")
@@ -162,6 +162,11 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		dsForce,
 		false, // noAssociated: downsample always passes through associated images
 		"jpeg",
+		// qualityStr: downsample is jpeg-only, so bridge the int flag (default 85,
+		// the jpeg codec default) directly to the encoder's knob resolution. This is
+		// what makes `downsample --quality N` reach the encoder (the emitters resolve
+		// the codec from this string, not from the convert-global cvQuality).
+		strconv.Itoa(dsQuality),
 	); err != nil {
 		return err
 	}
