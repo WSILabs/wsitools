@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,8 @@ var (
 	cvRectY int
 	cvRectW int
 	cvRectH int
+
+	cvAllowNonconformant bool
 )
 
 var convertCmd = &cobra.Command{
@@ -92,6 +95,7 @@ func init() {
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
+	convertCmd.Flags().BoolVar(&cvAllowNonconformant, "allow-nonconformant", false, "write a valid-but-non-readable output (e.g. non-jpeg OME-TIFF) with a warning")
 	registerRectFlags(convertCmd)
 	_ = convertCmd.Flags().MarkDeprecated("dzi-format", "use --codec jpeg|png")
 	_ = convertCmd.MarkFlagRequired("output")
@@ -136,10 +140,16 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		if _, err := resolveDZIFormat(cvCodec, codecSet, cvDZIFormat); err != nil {
 			return err
 		}
-	} else if cvCodec == "png" {
-		// PNG is a Deep Zoom tile format only; it is not a readable WSI-container
-		// tile codec (opentile does not read PNG-compressed TIFF tiles).
-		return fmt.Errorf("--codec png is only valid with --to dzi|szi (not %q)", cvTo)
+	}
+
+	if cvCodec != "" {
+		warn, verr := validateCodec(cvTo, cvCodec, cvAllowNonconformant)
+		if verr != nil {
+			return verr
+		}
+		if warn != "" {
+			fmt.Fprintln(os.Stderr, "warning:", warn)
+		}
 	}
 
 	if rectFlagsSet(cmd) && cvTo != "dzi" && cvTo != "szi" {
