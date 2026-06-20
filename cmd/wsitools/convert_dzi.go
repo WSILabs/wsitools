@@ -96,7 +96,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err != nil {
 		return err
 	}
-	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion); err != nil {
+	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion, cvLossless, &l0); err != nil {
 		return err
 	}
 	if err := writeAssociatedPNGs(src, w.WriteAssociated); err != nil {
@@ -129,7 +129,10 @@ type dziTileSink interface {
 // tree. srcRegion is the source L0 region to read (full slide or a crop rect);
 // cfg.Width/Height are the (possibly --factor-reduced) output dimensions. The
 // engine scales srcRegion to the output and descends the octave pyramid.
-func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, cfg dzi.Config, srcRegion opentile.Region) error {
+// When lossless is true, a losslessDZISink wraps the writer sink so that interior
+// base tiles are copied verbatim from srcL0 instead of being re-encoded; edge base
+// tiles and all lower levels continue to use the engine's encoded output.
+func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, cfg dzi.Config, srcRegion opentile.Region, lossless bool, srcL0 losslessTileReader) error {
 	levels := retile.ComputeLevels(
 		opentile.Size{W: cfg.Width, H: cfg.Height},
 		cfg.TileSize, cfg.TileSize, cfg.Overlap,
@@ -148,6 +151,17 @@ func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, c
 		kernel = resample.Box
 	}
 
+	var sink retile.TileSink = newDZIWriterSink(w, len(levels))
+	if lossless {
+		sink = &losslessDZISink{
+			inner:    sink,
+			src:      srcL0,
+			baseW:    cfg.Width,
+			baseH:    cfg.Height,
+			tileSize: cfg.TileSize,
+		}
+	}
+
 	return retile.Run(ctx, retile.Spec{
 		Slide:     slide,
 		SrcRegion: srcRegion,
@@ -155,7 +169,7 @@ func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, c
 		Levels:    levels,
 		Kernel:    kernel,
 		Encoder:   enc,
-		Sink:      newDZIWriterSink(w, len(levels)),
+		Sink:      sink,
 		Workers:   cvWorkers,
 	})
 }
@@ -178,6 +192,40 @@ func newDZIWriterSink(w dziTileSink, nLevels int) *dziWriterSink {
 
 func (s *dziWriterSink) WriteTile(level, col, row int, encoded []byte) error {
 	return s.w.WriteTile(s.nLevels-1-level, col, row, encoded)
+}
+
+// losslessTileReader is the subset of opentile's *Level the lossless sink needs.
+type losslessTileReader interface {
+	TileMaxSize() int
+	TileInto(tx, ty int, dst []byte) (int, error)
+}
+
+// losslessDZISink wraps a TileSink. For the engine's finest level (level 0 = DZI
+// base = native) it substitutes the verbatim source tile for INTERIOR tiles (a
+// complete standalone JPEG from src.TileInto), giving byte-identical interior base
+// tiles with no re-encode. Edge base tiles and all lower levels pass the engine's
+// encoded bytes through unchanged.
+type losslessDZISink struct {
+	inner    retile.TileSink
+	src      losslessTileReader
+	baseW    int
+	baseH    int
+	tileSize int
+}
+
+func (s *losslessDZISink) WriteTile(level, col, row int, encoded []byte) error {
+	if level == 0 {
+		tw, th := dzi.EdgeTileDims(s.baseW, s.baseH, s.tileSize, col, row)
+		if tw == s.tileSize && th == s.tileSize { // interior
+			buf := make([]byte, s.src.TileMaxSize())
+			n, err := s.src.TileInto(col, row, buf)
+			if err != nil {
+				return fmt.Errorf("lossless: read source tile (%d,%d): %w", col, row, err)
+			}
+			return s.inner.WriteTile(level, col, row, buf[:n])
+		}
+	}
+	return s.inner.WriteTile(level, col, row, encoded)
 }
 
 // dziStandaloneEncoder produces self-contained tiles: JPEG via libjpeg-turbo

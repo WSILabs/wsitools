@@ -95,7 +95,7 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 		Name: name, Width: outW, Height: outH,
 		Format: dziFormat, TileSize: tileSize, Overlap: overlap,
 	}
-	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion); err != nil {
+	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion, cvLossless, &l0); err != nil {
 		return err
 	}
 	if err := w.WriteScanProperties(src.Metadata()); err != nil {
