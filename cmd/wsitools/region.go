@@ -65,7 +65,7 @@ func runRegion(cmd *cobra.Command, args []string) error {
 
 	// Early-fail validation (cheap; no file I/O).
 	if !strings.HasSuffix(strings.ToLower(regionOutput), ".png") {
-		return fmt.Errorf("--output: only PNG output is supported in v0.13 (got %q)", regionOutput)
+		return fmt.Errorf("--output: only PNG output is supported (got %q)", regionOutput)
 	}
 	if _, err := os.Stat(regionOutput); err == nil && !regionForce {
 		return fmt.Errorf("output exists; pass --force to overwrite (%q)", regionOutput)

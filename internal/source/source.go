@@ -178,7 +178,6 @@ var (
 	ErrUnsupportedFormat = errors.New("source: format unsupported")
 
 	// ErrUnsupportedSourceCompression is returned when a tile uses a
-	// compression we can't decode (e.g., Iris-proprietary, or AVIF source
-	// before v0.2.1).
-	ErrUnsupportedSourceCompression = errors.New("source: source compression not decodable at v0.2.0")
+	// compression we can't decode (e.g., Iris-proprietary).
+	ErrUnsupportedSourceCompression = errors.New("source: source compression not decodable")
 )

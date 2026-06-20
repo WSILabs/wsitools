@@ -1,24 +1,20 @@
 // Package main: the downsample subcommand wires opentile-go (read), our
-// JPEG/JP2K decoders, the resample primitives, the JPEG codec, and the
-// streamwriter (write) into a single command that produces a power-of-2-
-// downsampled SVS.
+// codecs, and the streamwriter (write) into a single command that produces a
+// power-of-2-downsampled, format-preserving pyramid.
 //
-// v0.1 architecture (intentionally simple, tightening in v0.2):
+// Architecture: downsample streams the source L0 region through the shared
+// retile engine (buildPyramid -> buildEnginePyramid) to a reduced output L0
+// (outL0 = L0/factor), emitting octave-floored levels. The engine reads via
+// opentile's ScaledStrips and encodes tile-by-tile through a worker pool, so
+// memory is bounded (working strips + the tile-encode pool) rather than holding
+// the full L0 raster in RAM. Associated images (label, macro, thumbnail/
+// overview) are copied byte-faithfully via opentile-go's AssociatedSourceOf
+// (verbatim source strips + Predictor/JPEGTables), falling back to decode+
+// re-encode when no faithful source form is available.
 //
-//   - The output L0 is fully materialised in memory as a packed RGB888 buffer.
-//     Source L0 tiles are decoded at libjpeg-turbo's fast-scale 1/factor (or
-//     full-decoded + Area2x2 for JP2K sources) and pasted into the buffer.
-//   - Output L1+ is computed by repeated 2x2 area-average over the previous
-//     level's in-memory raster.
-//   - For each output level, the raster is re-tiled into 256x256 chunks and
-//     encoded via the JPEG codec, written to the output via streamwriter.
-//   - Associated images (label, macro, thumbnail/overview) are copied
-//     byte-faithfully via opentile-go's AssociatedSourceOf (verbatim source
-//     strips + Predictor/JPEGTables), falling back to decode+re-encode when no
-//     faithful source form is available.
-//
-// Memory: a 40x slide L0 (50K x 30K) needs ~4.5 GB; a 100K x 60K source needs
-// ~18 GB. v0.1 accepts this; v0.2 streams the L0 raster in row strips.
+// dispatchDownsampleByTarget routes to the per-format emitter (downsampleToSVS/
+// TIFF/OMETIFF/COGWSI/DICOM); the SVS/TIFF family share buildEnginePyramid with
+// crop and convert --factor.
 package main
 
 import (
