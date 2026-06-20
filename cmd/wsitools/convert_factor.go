@@ -28,7 +28,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +68,10 @@ func downsampleTargetForFormat(format string) (string, bool) {
 // dispatchDownsampleByTarget is the shared dispatch used by both runConvertFactor
 // (convert --to X --factor N) and runDownsample (format-preserving reduce).
 // All parameters are explicit — no global flag variables are read here.
+// qualityStr is the raw --quality string used to resolve the tile encoder's
+// codec knobs (empty ⇒ per-codec default). It is threaded explicitly rather than
+// read from the convert-global cvQuality so that the format-preserving downsample
+// command (which has its own int --quality flag) reaches the encoder correctly.
 func dispatchDownsampleByTarget(
 	ctx context.Context,
 	target, input, output string,
@@ -77,6 +80,7 @@ func dispatchDownsampleByTarget(
 	bigtiffFlag string,
 	force, noAssociated bool,
 	codecName string,
+	qualityStr string,
 ) error {
 	// SVS emitters support jpeg and jpeg2000 only. Reject any other explicit
 	// --codec early so the user gets a clear error instead of silent fallback.
@@ -85,13 +89,13 @@ func dispatchDownsampleByTarget(
 	}
 	switch target {
 	case "svs":
-		return downsampleToSVS(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
+		return downsampleToSVS(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName, qualityStr)
 	case "tiff":
-		return downsampleToTIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
+		return downsampleToTIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName, qualityStr)
 	case "cog-wsi":
-		return downsampleToCOGWSI(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
+		return downsampleToCOGWSI(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName, qualityStr)
 	case "ome-tiff":
-		return downsampleToOMETIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
+		return downsampleToOMETIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName, qualityStr)
 	case "dicom":
 		return downsampleToDICOM(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	default:
@@ -103,11 +107,21 @@ func dispatchDownsampleByTarget(
 // set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi, ome-tiff.
 func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time) error {
 	// Parse common flags shared by all targets.
-	knobs, qerr := parseQualityKnobs(cvQuality)
-	if qerr != nil {
-		return qerr
+	var knobs map[string]string
+	if cvQuality == "" {
+		cn := cvCodec
+		if cn == "" {
+			cn = "jpeg"
+		}
+		knobs = codecDefaultKnobs(cn)
+	} else {
+		var qerr error
+		knobs, qerr = parseQualityKnobs(cvQuality)
+		if qerr != nil {
+			return qerr
+		}
 	}
-	quality, _ := strconv.Atoi(knobs["q"]) // parseQualityKnobs range-checks q
+	quality := qFromKnobs(knobs)
 	workers := cvWorkers
 	if workers == 0 {
 		workers = runtime.NumCPU()
@@ -131,6 +145,7 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 		cvForce,
 		cvNoAssociated,
 		cn,
+		cvQuality,
 	)
 }
 
@@ -148,6 +163,7 @@ func downsampleToSVS(
 	bigtiffFlag string,
 	noAssociated bool,
 	codecName string,
+	qualityStr string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -169,9 +185,9 @@ func downsampleToSVS(
 		return fmt.Errorf("input and output paths are the same")
 	}
 
-	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
-	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	fac, knobs, resolvedCodec, rerr := resolveTransformCodec(codecName, cvQuality, quality)
+	// Resolve codec: empty codecName → jpeg. qualityStr carries the raw --quality
+	// string (knobs); when empty, resolveTransformCodec seeds the per-codec default.
+	fac, knobs, resolvedCodec, rerr := resolveTransformCodec(codecName, qualityStr)
 	if rerr != nil {
 		return rerr
 	}
@@ -368,6 +384,7 @@ func downsampleToTIFF(
 	bigtiffFlag string,
 	noAssociated bool,
 	codecName string,
+	qualityStr string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -461,9 +478,9 @@ func downsampleToTIFF(
 		return fmt.Errorf("--tile-order: %w", err)
 	}
 
-	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
-	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, cvQuality, quality)
+	// Resolve codec: empty codecName → jpeg. qualityStr carries the raw --quality
+	// string (knobs); when empty, resolveTransformCodec seeds the per-codec default.
+	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, qualityStr)
 	if err != nil {
 		return fmt.Errorf("--codec: %w", err)
 	}
@@ -542,6 +559,7 @@ func downsampleToCOGWSI(
 	bigtiffFlag string,
 	noAssociated bool,
 	codecName string,
+	qualityStr string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -614,9 +632,9 @@ func downsampleToCOGWSI(
 	mppY := srcMPPY * float64(factor)
 	mag := srcMag / float64(factor)
 
-	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
-	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	cogFac, cogKnobs, _, err := resolveTransformCodec(codecName, cvQuality, quality)
+	// Resolve codec: empty codecName → jpeg. qualityStr carries the raw --quality
+	// string (knobs); when empty, resolveTransformCodec seeds the per-codec default.
+	cogFac, cogKnobs, _, err := resolveTransformCodec(codecName, qualityStr)
 	if err != nil {
 		return fmt.Errorf("--codec: %w", err)
 	}
@@ -718,6 +736,7 @@ func downsampleToOMETIFF(
 	bigtiffFlag string,
 	noAssociated bool,
 	codecName string,
+	qualityStr string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -824,9 +843,9 @@ func downsampleToOMETIFF(
 		}
 	}
 
-	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
-	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	omeFac, omeKnobs, _, err := resolveTransformCodec(codecName, cvQuality, quality)
+	// Resolve codec: empty codecName → jpeg. qualityStr carries the raw --quality
+	// string (knobs); when empty, resolveTransformCodec seeds the per-codec default.
+	omeFac, omeKnobs, _, err := resolveTransformCodec(codecName, qualityStr)
 	if err != nil {
 		return fmt.Errorf("--codec: %w", err)
 	}

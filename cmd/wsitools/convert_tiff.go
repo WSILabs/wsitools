@@ -434,11 +434,11 @@ func resolveBigTIFFMode(mode string, src source.Source) tiff.BigTIFFMode {
 
 // parseQualityKnobs parses the --quality value into codec knobs. It accepts a
 // bare integer (the "q" knob) or comma-separated key=value pairs (e.g.
-// "q=90,reversible=true" for jpeg2000 lossless). The "q" knob defaults to 90
+// "q=85,reversible=true" for jpeg2000 lossless). The "q" knob defaults to 85
 // (codec standard default) and is range-checked 1..100; codec-specific knobs
 // pass through to the encoder.
 func parseQualityKnobs(quality string) (map[string]string, error) {
-	knobs := map[string]string{"q": "90"}
+	knobs := map[string]string{"q": "85"}
 	if quality != "" {
 		if strings.Contains(quality, "=") {
 			for _, kv := range strings.Split(quality, ",") {

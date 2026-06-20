@@ -128,7 +128,10 @@ func TestICCByteIdenticalAcrossPaths(t *testing.T) {
 		args []string
 		out  string
 	}{
-		{"svs", []string{"convert", "--to", "svs", "--codec", "jpegxl"}, "o.svs"},
+		// jpegxl forces a re-encode (vs tile-copy) to exercise the streamwriter
+		// ICC path; a jpegxl SVS is intentionally non-conformant, so the
+		// validateCodec gate requires --allow-nonconformant.
+		{"svs", []string{"convert", "--to", "svs", "--codec", "jpegxl", "--allow-nonconformant"}, "o.svs"},
 		{"cog-wsi", []string{"convert", "--to", "cog-wsi"}, "o.cog.tiff"},
 		{"downsample", []string{"downsample", "--factor", "2"}, "o.ds.svs"},
 	}

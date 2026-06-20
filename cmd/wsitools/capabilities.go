@@ -50,7 +50,7 @@ func containerCapabilities(container string) containerCaps {
 	case "bif":
 		return containerCaps{
 			conformant: []string{"jpeg"},
-			redirect:   "BIF is written by verbatim tile-copy only",
+			redirect:   "BIF is a JPEG container, written by verbatim tile-copy",
 		}
 	default:
 		return containerCaps{}

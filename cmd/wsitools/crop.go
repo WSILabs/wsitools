@@ -74,7 +74,7 @@ func init() {
 	cropCmd.Flags().IntVar(&cropW, "w", 0, "Crop width (level-0 pixels)")
 	cropCmd.Flags().IntVar(&cropH, "h", 0, "Crop height (level-0 pixels)")
 	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output path, same container as source (required)")
-	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: 90)")
+	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: per-codec, 85 for jpeg)")
 	cropCmd.Flags().IntVar(&cropWorkers, "workers", 0, "Encode workers (default: NumCPU)")
 	cropCmd.Flags().IntVar(&cropJobs, "jobs", 0, "alias of --workers")
 	cropCmd.Flags().StringVar(&cropTileOrder, "tile-order", "row-major", "Tile order: row-major|hilbert|morton")
@@ -188,17 +188,16 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return fmt.Errorf("--tile-order: %w", err)
 	}
 
-	// Resolve codec: empty codecName → jpeg at fallbackQ. qualityStr overrides
-	// the integer quality knob when set.
-	qFallback := quality
-	if qFallback == 0 {
-		qFallback = 90
-	}
+	// Resolve codec: empty codecName → jpeg. qualityStr is the raw --quality
+	// string; when absent, resolveTransformCodec seeds knobs from the per-codec
+	// default (q=85 for q-scale codecs). When the caller passes a non-zero int
+	// quality (legacy crop command path), encode it as a string so it overrides
+	// the per-codec default.
 	qualityStrForResolve := qualityStr
 	if qualityStrForResolve == "" && quality != 0 {
 		qualityStrForResolve = strconv.Itoa(quality)
 	}
-	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, qualityStrForResolve, qFallback)
+	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, qualityStrForResolve)
 	if err != nil {
 		return err
 	}
@@ -210,8 +209,9 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return fmt.Errorf("SVS crop/downsample supports jpeg or jpeg2000; use --to tiff for %s", codecName)
 	}
 
-	// Re-encode quality defaults to 90 (the codec standard) when --quality is absent.
-	q := qFallback
+	// Re-encode quality: derive from resolved knobs (85 by default, or the
+	// value set by --quality / the legacy int quality param).
+	q := qFromKnobs(knobs)
 	if q < 1 || q > 100 {
 		return fmt.Errorf("--quality must be in [1,100], got %d", q)
 	}
