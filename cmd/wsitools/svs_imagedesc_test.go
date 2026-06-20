@@ -55,8 +55,19 @@ func TestAperioDescription_Quality(t *testing.T) {
 	}
 }
 
+func TestAperioCodecDescriptor(t *testing.T) {
+	if aperioCodecDescriptor("jpeg") != "JPEG/RGB" || aperioCodecDescriptor("jpeg2000") != "J2K/YUV16" {
+		t.Fatal("descriptor mapping wrong")
+	}
+	d := &AperioDescription{GeometryLine: "1000x1000 (256x256) JPEG/RGB Q=90"}
+	setAperioCodecDescriptor(d, "jpeg2000")
+	if !strings.Contains(d.GeometryLine, "J2K/YUV16") || strings.Contains(d.GeometryLine, "JPEG/RGB") {
+		t.Fatalf("not rewritten: %q", d.GeometryLine)
+	}
+}
+
 func TestBuildCropImageDescription(t *testing.T) {
-	got := BuildCropImageDescription(cropTestOrigDesc, 78000, 30462, 46492, 3599, 27836, 25633, 256, 256, 30)
+	got := BuildCropImageDescription(cropTestOrigDesc, 78000, 30462, 46492, 3599, 27836, 25633, 256, 256, 30, "jpeg")
 
 	wantGeo := "78000x30462 [46492,3599 27836x25633] (256x256) JPEG/RGB Q=30;"
 	if !strings.Contains(got, wantGeo) {

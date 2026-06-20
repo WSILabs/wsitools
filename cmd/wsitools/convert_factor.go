@@ -78,14 +78,14 @@ func dispatchDownsampleByTarget(
 	force, noAssociated bool,
 	codecName string,
 ) error {
-	// SVS emitters are jpeg-only (Aperio format constraint). Reject any explicit
-	// non-jpeg --codec early so the user gets a clear error instead of silent fallback.
-	if target == "svs" && codecName != "" && codecName != "jpeg" {
-		return fmt.Errorf("SVS emitters are jpeg-only; use --to tiff to write %s tiles", codecName)
+	// SVS emitters support jpeg and jpeg2000 only. Reject any other explicit
+	// --codec early so the user gets a clear error instead of silent fallback.
+	if target == "svs" && codecName != "" && codecName != "jpeg" && codecName != "jpeg2000" {
+		return fmt.Errorf("SVS crop/downsample supports jpeg or jpeg2000; use --to tiff for %s", codecName)
 	}
 	switch target {
 	case "svs":
-		return downsampleToSVS(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated)
+		return downsampleToSVS(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	case "tiff":
 		return downsampleToTIFF(ctx, input, output, factor, targetMag, quality, workers, tileOrderName, force, bigtiffFlag, noAssociated, codecName)
 	case "cog-wsi":
@@ -103,15 +103,11 @@ func dispatchDownsampleByTarget(
 // set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi, ome-tiff.
 func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time) error {
 	// Parse common flags shared by all targets.
-	quality := 90
-	if cvQuality != "" {
-		if _, err := fmt.Sscanf(cvQuality, "%d", &quality); err != nil {
-			return fmt.Errorf("--quality %q: must be an integer 1..100", cvQuality)
-		}
+	knobs, qerr := parseQualityKnobs(cvQuality)
+	if qerr != nil {
+		return qerr
 	}
-	if quality < 1 || quality > 100 {
-		return fmt.Errorf("--quality must be 1..100")
-	}
+	quality, _ := strconv.Atoi(knobs["q"]) // parseQualityKnobs range-checks q
 	workers := cvWorkers
 	if workers == 0 {
 		workers = runtime.NumCPU()
@@ -141,6 +137,7 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 // downsampleToSVS is the shared reduce-then-rebuild body used by both
 // runConvertFactor (convert --to svs --factor N) and (eventually) runDownsample.
 // All parameters are explicit — no global flag variables are read here.
+// codecName selects the tile encoder (empty ⇒ jpeg); jpeg2000 is also supported.
 func downsampleToSVS(
 	ctx context.Context,
 	input, output string,
@@ -150,6 +147,7 @@ func downsampleToSVS(
 	force bool,
 	bigtiffFlag string,
 	noAssociated bool,
+	codecName string,
 ) error {
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1, 100], got %d", quality)
@@ -169,6 +167,13 @@ func downsampleToSVS(
 	absOut, _ := filepath.Abs(output)
 	if absIn == absOut {
 		return fmt.Errorf("input and output paths are the same")
+	}
+
+	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
+	// raw --quality string (knobs) from the convert command; use quality as fallback.
+	fac, knobs, resolvedCodec, rerr := resolveTransformCodec(codecName, cvQuality, quality)
+	if rerr != nil {
+		return rerr
 	}
 
 	src, err := opentile.OpenFile(input)
@@ -233,6 +238,7 @@ func downsampleToSVS(
 	var imageDesc string
 	if svsSource {
 		desc.MutateForDownsample(factor, uint32(outW), uint32(outH))
+		setAperioCodecDescriptor(desc, resolvedCodec)
 		imageDesc = desc.Encode()
 	} else {
 		md := src.Metadata()
@@ -243,6 +249,7 @@ func downsampleToSVS(
 			quality,
 			outMPP, outMag,
 			srcSoft,
+			resolvedCodec,
 		).Encode()
 	}
 
@@ -318,7 +325,7 @@ func downsampleToSVS(
 		return writeOneAssociated(w, thumbnail)
 	}
 
-	if err := buildPyramid(ctx, src, w, factor, jpegcodec.Factory{}, map[string]string{"q": strconv.Itoa(quality)}, workers, postL0Hook); err != nil {
+	if err := buildPyramid(ctx, src, w, factor, fac, knobs, workers, postL0Hook); err != nil {
 		return fmt.Errorf("build pyramid: %w", err)
 	}
 

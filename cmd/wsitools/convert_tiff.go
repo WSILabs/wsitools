@@ -153,6 +153,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 				0, // Q unknown on tile-copy
 				md.MPP, md.Magnification,
 				srcSoft,
+				"jpeg",
 			).Encode()
 		}
 	case "ome-tiff":
@@ -312,6 +313,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 				qualityInt,
 				md.MPP, md.Magnification,
 				srcSoft,
+				"jpeg",
 			).Encode()
 		}
 	case "ome-tiff":
@@ -432,10 +434,11 @@ func resolveBigTIFFMode(mode string, src source.Source) tiff.BigTIFFMode {
 
 // parseQualityKnobs parses the --quality value into codec knobs. It accepts a
 // bare integer (the "q" knob) or comma-separated key=value pairs (e.g.
-// "q=85,reversible=true" for jpeg2000 lossless). The "q" knob defaults to 85 and
-// is range-checked 1..100; codec-specific knobs pass through to the encoder.
+// "q=90,reversible=true" for jpeg2000 lossless). The "q" knob defaults to 90
+// (codec standard default) and is range-checked 1..100; codec-specific knobs
+// pass through to the encoder.
 func parseQualityKnobs(quality string) (map[string]string, error) {
-	knobs := map[string]string{"q": "85"}
+	knobs := map[string]string{"q": "90"}
 	if quality != "" {
 		if strings.Contains(quality, "=") {
 			for _, kv := range strings.Split(quality, ",") {
