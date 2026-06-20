@@ -9,42 +9,65 @@
 
 Make the SVS path fully codec-uniform and the `--quality` default consistent:
 
-1. **SVS crop/downsample emitter codecs** — `convert --to svs --rect|--factor
-   --codec jpeg2000` writes a conformant J2K SVS (today the SVS crop/downsample
-   emitters are jpeg-only; the SVS *transcode* path already does jpeg2000).
+1. **Unify SVS into the shared crop/downsample path** — remove the bespoke
+   positional `cropEmitSVS` special case (fold it into `cropToSVS(p
+   cropEmitParams)`), so SVS gains codec support like every other container.
+   `convert --to svs --rect|--factor --codec jpeg2000` then writes a conformant
+   J2K SVS (today the SVS crop/downsample emitters are jpeg-only).
 2. **`--quality` default unification** — every pixel re-encode (crop, downsample,
    transcode) defaults to the **target codec's standard default** (jpeg 90), never
    the source quality; verbatim/lossless paths preserve the source exactly.
 3. **reversible knob through `--factor`** — `convert --factor --codec jpeg2000
    --quality reversible=true` (lossless-J2K downsample) instead of erroring.
 
-## 1. SVS crop/downsample emitter codecs (jpeg + jpeg2000)
+## 1. Unify SVS into the shared crop/downsample path (and gain jpeg2000)
 
-Aperio encodes the codec in the ImageDescription geometry line:
-`… (256x256) JPEG/RGB Q=70 …` (jpeg) vs `… (256x256) J2K/YUV16 Q=70 …` (jpeg2000)
-— measured on `JP2K-33003-1.svs`.
+An **SVS *is* a generic TIFF** — same tiles, pyramid, writer, associated images —
+that differs only in its **ImageDescription** (the Aperio header + geometry line
++ provenance chain) and detection. Yet the crop path special-cases it:
+`cropTo{TIFF,OMETIFF,COGWSI,DICOM}` share the `cropEmitParams` dispatch, but
+`cropEmitSVS` is a separate **positional-args** function that `runCrop` calls via an
+early `if target == "svs"` **bypass** — it predates the `cropEmitParams` refactor
+and was never folded in. That's why it didn't get the 3c codec/quality plumbing for
+free. Fixing #1 by threading codec into the bespoke emitter would *entrench* the
+special case; instead we **remove it**.
 
-- **Thread the codec into the SVS emitters.** `cropEmitSVS` (`crop.go`) and
-  `downsampleToSVS` (`convert_factor.go`) gain the resolved codec (`fac`, `knobs`,
-  `codecName`) and pass it to `buildEnginePyramid` (already codec-configurable
-  since 3c) instead of the hardcoded jpeg factory.
-- **Codestream descriptor.** A helper `aperioCodecDescriptor(codec) → "JPEG/RGB" |
-  "J2K/YUV16"` feeds the Aperio description builders:
-  - `BuildCropImageDescription` (crop) takes the codec → uses the descriptor (it
-    hardcodes `JPEG/RGB` at `svs_imagedesc.go:161`).
-  - `SyntheticAperioDescription` (non-SVS→SVS) takes the codec (hardcodes
-    `JPEG/RGB` at `:180`).
-  - SVS-source downsample uses `MutateForDownsample` on the *source* desc, which
-    keeps the source's descriptor — correct for **same-codec** downsample; when the
-    downsample **changes** the codec (jpeg→jpeg2000), the descriptor must be
-    rewritten to `J2K/YUV16` (a small `setAperioCodecDescriptor(desc, codec)` on the
-    geometry line).
-- **Guard.** The SVS jpeg-only guards (`crop.go:214`, `convert_factor.go:84`) widen
-  from `{jpeg}` to **`{jpeg, jpeg2000}`** — the conformant + emitter-capable SVS
-  set. Non-conformant SVS codecs (avif/webp/htj2k/jpegxl) still error with the
-  redirect (use `--to tiff`, or the SVS transcode path via `--allow-nonconformant`).
-  Source the set from `containerCapabilities("svs").conformant` (Phase-2 table) so
-  there's one source of truth.
+- **Fold `cropEmitSVS` → `cropToSVS(p cropEmitParams)`** — a peer of `cropToTIFF` /
+  `cropToOMETIFF` in the dispatch switch (the transcode path already proves the
+  TIFF family unifies; this brings the crop path in line). It uses `p.fac`/`p.knobs`
+  (codec, for free), `p.stx0`/`p.sty0`/… (runCrop's snap — dropping `cropEmitSVS`'s
+  **duplicate** internal snap), `p.outW`/`p.outH`, etc., exactly like its peers. The
+  *only* SVS-specific code is **building the Aperio ImageDescription** (rawDesc →
+  `BuildCropImageDescription` + `scaleAperioResolutionTokens` + MPP-from-Aperio-desc).
+- `runCrop`: delete the `if target == "svs" { cropEmitSVS(...) }` bypass; let svs
+  flow into the `cropEmitParams` construction and `switch target { … case "svs":
+  cropToSVS(p) }`. **Delete `cropEmitSVS`.**
+- **Downsample side:** `downsampleToSVS` is already a per-format peer of
+  `downsampleToTIFF` (which takes `codecName`); it just needs the same codec
+  threading (no special-case to remove there) — add `codecName`, resolve `fac`/
+  `knobs` via `resolveTransformCodec`, pass to `buildPyramid`.
+
+**Codestream descriptor (the only genuinely SVS-specific new code).** Aperio
+encodes the codec in the geometry line: `… (256x256) JPEG/RGB Q=70 …` (jpeg) vs
+`… (256x256) J2K/YUV16 Q=70 …` (jpeg2000) — measured on `JP2K-33003-1.svs`. (opentile
+decodes via the TIFF Compression tag, so this is fidelity, not readability.) A
+helper `aperioCodecDescriptor(codec) → "JPEG/RGB" | "J2K/YUV16"` feeds:
+- `BuildCropImageDescription` (takes the codec; hardcodes `JPEG/RGB` at
+  `svs_imagedesc.go:161`).
+- `SyntheticAperioDescription` (non-SVS→SVS downsample; hardcodes `JPEG/RGB` at
+  `:180`).
+- SVS-source downsample: after `MutateForDownsample` (keeps the source descriptor —
+  correct for same-codec), `setAperioCodecDescriptor(&desc, codec)` rewrites the
+  token when the codec changes (jpeg→jpeg2000).
+
+**Guard.** The SVS guards (`crop.go:214`, `convert_factor.go:84`) widen `{jpeg}` →
+**`{jpeg, jpeg2000}`** (the conformant + emitter-capable set, sourced from
+`containerCapabilities("svs").conformant`). Non-conformant SVS codecs (avif/etc.)
+still error with the redirect (transcode-only).
+
+**Outcome:** SVS is no longer a special case — it's a `cropEmitParams` peer like
+every other container, codec/quality fall out automatically, and the duplicate snap
++ positional bypass are gone.
 
 ## 2. `--quality` default rule: re-encode ⇒ codec standard default
 
@@ -106,7 +129,8 @@ is the up-front `Sscanf`. After it's removed, the lossless-J2K downsample works.
 | Unit | Responsibility | Source |
 |---|---|---|
 | `aperioCodecDescriptor` / `setAperioCodecDescriptor` | jpeg→`JPEG/RGB`, jpeg2000→`J2K/YUV16`; set the descriptor on a geometry line | `svs_imagedesc.go` |
-| `cropEmitSVS` / `downsampleToSVS` | accept the codec; pass `fac`/`knobs` to the engine; emit the codec-correct Aperio desc; widen guard to jpeg\|jpeg2000; default quality = codec default (NOT source-Q) | `crop.go`, `convert_factor.go` |
+| `cropToSVS(p cropEmitParams)` (replaces `cropEmitSVS`) | a `cropEmitParams` peer in the crop switch; Aperio desc is the only SVS-specific part; `p.fac`/`p.knobs` give codec for free; drops the duplicate snap + positional bypass | `crop.go`, `crop_formats.go` |
+| `downsampleToSVS` | thread `codecName` (parity with `downsampleToTIFF`); codec-correct Aperio desc | `convert_factor.go` |
 | `parseQualityKnobs` default | 85 → 90 (the standard re-encode default) | `convert_tiff.go` |
 | `runConvertFactor` quality parse | `parseQualityKnobs` instead of `Sscanf`; int default 90 | `convert_factor.go` |
 
