@@ -30,3 +30,35 @@ func TestResolveTransformCodec(t *testing.T) {
 		t.Fatalf("jpeg2000+empty-quality must use fallbackQ=90: knobs=%v err=%v", knobs, err)
 	}
 }
+
+func TestCodecDefaultKnobs(t *testing.T) {
+	for _, c := range []string{"jpeg", "jpeg2000", "htj2k", "avif", "webp"} {
+		if got := codecDefaultKnobs(c); got["q"] != "85" {
+			t.Errorf("%s default: %v, want q=85", c, got)
+		}
+	}
+	if got := codecDefaultKnobs("jpegxl"); got["distance"] != "1.0" {
+		t.Errorf("jpegxl default: %v, want distance=1.0", got)
+	}
+	if got := codecDefaultKnobs("png"); len(got) != 0 {
+		t.Errorf("png default: %v, want empty", got)
+	}
+	if got := codecDefaultKnobs("unknown"); got["q"] != "85" {
+		t.Errorf("unknown default: %v, want q=85", got)
+	}
+}
+
+func TestQFromKnobs(t *testing.T) {
+	if qFromKnobs(map[string]string{"q": "70"}) != 70 {
+		t.Error("q=70")
+	}
+	if qFromKnobs(map[string]string{"distance": "1.0"}) != 85 {
+		t.Error("no q → 85")
+	}
+	if qFromKnobs(map[string]string{}) != 85 {
+		t.Error("empty → 85")
+	}
+	if qFromKnobs(map[string]string{"q": "999"}) != 85 {
+		t.Error("out-of-range q → 85")
+	}
+}
