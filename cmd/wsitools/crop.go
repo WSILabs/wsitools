@@ -78,7 +78,7 @@ func init() {
 	cropCmd.Flags().IntVar(&cropW, "w", 0, "Crop width (level-0 pixels)")
 	cropCmd.Flags().IntVar(&cropH, "h", 0, "Crop height (level-0 pixels)")
 	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output path, same container as source (required)")
-	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: source Q for SVS, else 90)")
+	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: 90)")
 	cropCmd.Flags().IntVar(&cropWorkers, "workers", 0, "Encode workers (default: NumCPU)")
 	cropCmd.Flags().IntVar(&cropJobs, "jobs", 0, "alias of --workers")
 	cropCmd.Flags().StringVar(&cropTileOrder, "tile-order", "row-major", "Tile order: row-major|hilbert|morton")
@@ -218,8 +218,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		return cropEmitSVS(ctx, src, input, output, x, y, w, h, quality, workers, factor, order, bigtiffFlag, noAssociated, lossless, start)
 	}
 
-	// Non-SVS sources carry no Aperio ImageDescription to mine for a source Q
-	// (unlike the SVS path, which defaults to the source quality); use 90.
+	// Re-encode quality defaults to 90 (the codec standard) when --quality is absent.
 	q := qFallback
 	if q < 1 || q > 100 {
 		return fmt.Errorf("--quality must be in [1,100], got %d", q)

@@ -19,7 +19,7 @@ func TestResolveTransformCodec(t *testing.T) {
 		t.Fatal("expected error for unknown codec")
 	}
 	// Regression: an explicit codecName="jpeg" with an EMPTY --quality must still
-	// use fallbackQ (90), not the parseQualityKnobs default (85). The downsample
+	// use fallbackQ (90), not the parseQualityKnobs default (90). The downsample
 	// dispatch defaults codecName to "jpeg", so this is the byte-identity path.
 	_, knobs, name, err = resolveTransformCodec("jpeg", "", 90)
 	if err != nil || name != "jpeg" || knobs["q"] != "90" {
