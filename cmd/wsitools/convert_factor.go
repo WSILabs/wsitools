@@ -28,7 +28,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -103,11 +102,21 @@ func dispatchDownsampleByTarget(
 // set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi, ome-tiff.
 func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time) error {
 	// Parse common flags shared by all targets.
-	knobs, qerr := parseQualityKnobs(cvQuality)
-	if qerr != nil {
-		return qerr
+	var knobs map[string]string
+	if cvQuality == "" {
+		cn := cvCodec
+		if cn == "" {
+			cn = "jpeg"
+		}
+		knobs = codecDefaultKnobs(cn)
+	} else {
+		var qerr error
+		knobs, qerr = parseQualityKnobs(cvQuality)
+		if qerr != nil {
+			return qerr
+		}
 	}
-	quality, _ := strconv.Atoi(knobs["q"]) // parseQualityKnobs range-checks q
+	quality := qFromKnobs(knobs)
 	workers := cvWorkers
 	if workers == 0 {
 		workers = runtime.NumCPU()
@@ -171,7 +180,7 @@ func downsampleToSVS(
 
 	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
 	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	fac, knobs, resolvedCodec, rerr := resolveTransformCodec(codecName, cvQuality, quality)
+	fac, knobs, resolvedCodec, rerr := resolveTransformCodec(codecName, cvQuality)
 	if rerr != nil {
 		return rerr
 	}
@@ -463,7 +472,7 @@ func downsampleToTIFF(
 
 	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
 	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, cvQuality, quality)
+	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, cvQuality)
 	if err != nil {
 		return fmt.Errorf("--codec: %w", err)
 	}
@@ -616,7 +625,7 @@ func downsampleToCOGWSI(
 
 	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
 	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	cogFac, cogKnobs, _, err := resolveTransformCodec(codecName, cvQuality, quality)
+	cogFac, cogKnobs, _, err := resolveTransformCodec(codecName, cvQuality)
 	if err != nil {
 		return fmt.Errorf("--codec: %w", err)
 	}
@@ -826,7 +835,7 @@ func downsampleToOMETIFF(
 
 	// Resolve codec: empty codecName → jpeg at quality. cvQuality carries the
 	// raw --quality string (knobs) from the convert command; use quality as fallback.
-	omeFac, omeKnobs, _, err := resolveTransformCodec(codecName, cvQuality, quality)
+	omeFac, omeKnobs, _, err := resolveTransformCodec(codecName, cvQuality)
 	if err != nil {
 		return fmt.Errorf("--codec: %w", err)
 	}

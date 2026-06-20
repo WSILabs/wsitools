@@ -38,13 +38,17 @@ func qFromKnobs(knobs map[string]string) int {
 // the crop/downsample engine path. Returns the codec name actually used (for the
 // DICOM frame encoder + ImageDescription).
 //
-// The default quality is the caller's fallbackQ (e.g. 90 for downsample / non-SVS
-// crop) — applied regardless of codec name, so an absent --quality keeps the
-// transform path's historical default. An explicit --quality string overrides it
-// (and carries any codec-specific k=v knobs). An empty or "jpeg" codecName both
+// When --quality is absent (quality == ""), knobs are seeded from
+// codecDefaultKnobs for the resolved codec name (q=85 for the q-scale codecs;
+// distance=1.0 for jpegxl). An explicit --quality string overrides the default
+// (and may carry codec-specific k=v knobs). An empty or "jpeg" codecName both
 // select the jpeg encoder.
-func resolveTransformCodec(codecName, quality string, fallbackQ int) (codec.EncoderFactory, map[string]string, string, error) {
-	knobs := map[string]string{"q": strconv.Itoa(fallbackQ)}
+func resolveTransformCodec(codecName, quality string) (codec.EncoderFactory, map[string]string, string, error) {
+	name := codecName
+	if name == "" {
+		name = "jpeg"
+	}
+	knobs := codecDefaultKnobs(name)
 	if quality != "" {
 		parsed, err := parseQualityKnobs(quality)
 		if err != nil {
@@ -52,12 +56,12 @@ func resolveTransformCodec(codecName, quality string, fallbackQ int) (codec.Enco
 		}
 		knobs = parsed
 	}
-	if codecName == "" || codecName == "jpeg" {
+	if name == "jpeg" {
 		return jpegcodec.Factory{}, knobs, "jpeg", nil
 	}
-	fac, err := codec.Lookup(codecName)
+	fac, err := codec.Lookup(name)
 	if err != nil {
 		return nil, nil, "", err
 	}
-	return fac, knobs, codecName, nil
+	return fac, knobs, name, nil
 }
