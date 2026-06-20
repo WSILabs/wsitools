@@ -103,15 +103,11 @@ func dispatchDownsampleByTarget(
 // set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi, ome-tiff.
 func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time) error {
 	// Parse common flags shared by all targets.
-	quality := 90
-	if cvQuality != "" {
-		if _, err := fmt.Sscanf(cvQuality, "%d", &quality); err != nil {
-			return fmt.Errorf("--quality %q: must be an integer 1..100", cvQuality)
-		}
+	knobs, qerr := parseQualityKnobs(cvQuality)
+	if qerr != nil {
+		return qerr
 	}
-	if quality < 1 || quality > 100 {
-		return fmt.Errorf("--quality must be 1..100")
-	}
+	quality, _ := strconv.Atoi(knobs["q"]) // parseQualityKnobs range-checks q
 	workers := cvWorkers
 	if workers == 0 {
 		workers = runtime.NumCPU()

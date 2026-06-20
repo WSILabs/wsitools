@@ -295,11 +295,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 	}
 
 	if quality == 0 {
-		if q, ok := desc.Quality(); ok {
-			quality = q
-		} else {
-			quality = 30
-		}
+		quality = 90 // re-encode uses the codec standard default, not source-Q
 	}
 	if quality < 1 || quality > 100 {
 		return fmt.Errorf("--quality must be in [1,100], got %d", quality)
