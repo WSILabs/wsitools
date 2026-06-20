@@ -37,7 +37,7 @@ func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) e
 	src, err := source.Open(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {
-			return fmt.Errorf("source format unsupported at v0.2.0: %w", err)
+			return fmt.Errorf("source format unsupported: %w", err)
 		}
 		return fmt.Errorf("open source: %w", err)
 	}
@@ -251,7 +251,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	src, slide, err := source.OpenWithSlide(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {
-			return fmt.Errorf("source format unsupported at v0.2.0: %w", err)
+			return fmt.Errorf("source format unsupported: %w", err)
 		}
 		return fmt.Errorf("open source: %w", err)
 	}

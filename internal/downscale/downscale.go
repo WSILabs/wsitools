@@ -64,7 +64,7 @@ func tightTilePix(img *otdecoder.Image) []byte {
 // BoxHalve chains Box-halving steps log2(factor) times to produce a
 // downsampled RGB buffer. Returns the downsampled bytes and its dimensions.
 // Requires factor to be a power of two and srcW/srcH to be even at every
-// step (the v0.1 caller ensures this by choosing factor ∈ {2,4,8,16} and
+// step (the caller ensures this by choosing factor ∈ {2,4,8,16} and
 // using source tile sizes that are multiples of 16).
 func BoxHalve(rgb []byte, srcW, srcH, factor int) ([]byte, int, int, error) {
 	cur := rgb

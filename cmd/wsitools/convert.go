@@ -46,31 +46,32 @@ var (
 
 var convertCmd = &cobra.Command{
 	Use:   "convert [--to <target>] -o <output> [flags] <input>",
-	Short: "Convert a WSI to a new container losslessly (tile-copy)",
-	Long: `Convert losslessly copies compressed tile bytes from a source WSI
-into a new container without decoding or re-encoding. In v0.6 the only
-supported target is COG-WSI (--to cog-wsi).
+	Short: "Convert a WSI: change container and/or transform (crop, downsample, re-encode)",
+	Long: `Convert is the unified one-pass transform. It changes the container
+(--to cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif) and/or transforms the
+pixels — crop a region (--rect), downsample (--factor/--target-mag), and
+re-encode tiles (--codec/--quality) — composing any subset in a single
+decode-rebuild pass. --to is optional: omitted, the output container is
+the source format (format-preserving transform).
 
-COG-WSI is an extension of Cloud Optimized GeoTIFF for whole-slide images:
-header-front IFDs, reverse-order tile data (lowest-resolution overview
-first), and an associated-image (label/macro/thumbnail) tail section.
+With no transform flags and no codec change, convert is a lossless
+tile-copy: compressed tile bytes are copied verbatim into the new
+container, no decode or re-encode. For natively-tiled sources (SVS,
+Philips, OME-tiled, BIF, IFE, generic-TIFF, COG-WSI, SZI, single-image
+Leica-SCN) the source's tile bytes appear verbatim in the destination.
+For striped sources (NDPI, OME-OneFrame) the file has no tile bytes;
+opentile-go synthesizes JPEG tiles deterministically from MCU-aligned
+sub-regions, so the output is reproducible byte-for-byte (the bytes are
+opentile-go's synthesized tiles, not source strip bytes).
 
-Bit-exact tile-copy promise: for natively-tiled sources (SVS, Philips,
-OME-tiled, BIF, IFE, generic-TIFF, COG-WSI, SZI, single-image Leica-SCN),
-the source's compressed tile bytes appear verbatim in the destination —
-the operation is a pure copy with no re-encoding.
-
-For striped sources (NDPI, OME-OneFrame), the source file has no tile
-bytes — only strip bytes. opentile-go synthesizes JPEG tile bytes on
-demand by extracting MCU-aligned sub-regions. The COG-WSI output is
-reproducible byte-for-byte from the same source (deterministic
-synthesis), but the bytes in the output are opentile-go's synthesized
-JPEG bytes, not the source's strip bytes.
+The focused single-axis verbs — crop, downsample, transcode — are the
+same machinery surfaced one axis at a time.
 
 Examples:
 
   wsitools convert --to cog-wsi -o slide.cog.tiff slide.svs
-  wsitools convert --to cog-wsi --no-associated -o slide.cog.tiff slide.tiff`,
+  wsitools convert --to dicom --rect 0,0,8192,8192 --factor 2 -o out slide.svs
+  wsitools convert --codec jpeg2000 -o slide.j2k.svs slide.svs`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConvert,
 }
