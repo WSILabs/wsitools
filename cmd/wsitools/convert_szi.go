@@ -66,18 +66,36 @@ func runConvertSZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err != nil {
 		return err
 	}
+	tileSize, overlap := cvDZITileSize, cvDZIOverlap
+	if cvLossless {
+		res, lerr := losslessDZIConfig(losslessDZIInputs{
+			isJPEG:          src.Levels()[0].Compression() == source.CompressionJPEG,
+			srcTileSize:     l0.TileSize.W,
+			factor:          factor,
+			rectSet:         rectFlagsSet(cmd),
+			userSetTileSize: cmd.Flags().Changed("dzi-tile-size"),
+			userSetOverlap:  cmd.Flags().Changed("dzi-overlap"),
+			reqTileSize:     cvDZITileSize,
+			reqOverlap:      cvDZIOverlap,
+		})
+		if lerr != nil {
+			return lerr
+		}
+		tileSize, overlap = res.tileSize, res.overlap
+		fmt.Printf("lossless: base tiles copied verbatim (tile-size %d, overlap 0); edges + lower levels regenerated\n", tileSize)
+	}
 	w, err := szi.NewWriter(f, szi.Config{
 		Name: name, Width: outW, Height: outH,
-		Format: dziFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
+		Format: dziFormat, TileSize: tileSize, Overlap: overlap,
 	})
 	if err != nil {
 		return err
 	}
 	cfg := dzi.Config{
 		Name: name, Width: outW, Height: outH,
-		Format: dziFormat, TileSize: cvDZITileSize, Overlap: cvDZIOverlap,
+		Format: dziFormat, TileSize: tileSize, Overlap: overlap,
 	}
-	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion); err != nil {
+	if err := emitDZIPyramid(cmd.Context(), slide, w, cfg, srcRegion, cvLossless, &l0); err != nil {
 		return err
 	}
 	if err := w.WriteScanProperties(src.Metadata()); err != nil {
