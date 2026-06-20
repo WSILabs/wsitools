@@ -153,6 +153,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 				0, // Q unknown on tile-copy
 				md.MPP, md.Magnification,
 				srcSoft,
+				"jpeg",
 			).Encode()
 		}
 	case "ome-tiff":
@@ -312,6 +313,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 				qualityInt,
 				md.MPP, md.Magnification,
 				srcSoft,
+				"jpeg",
 			).Encode()
 		}
 	case "ome-tiff":

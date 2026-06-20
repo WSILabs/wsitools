@@ -239,6 +239,7 @@ func downsampleToSVS(
 			quality,
 			outMPP, outMag,
 			srcSoft,
+			"jpeg",
 		).Encode()
 	}
 

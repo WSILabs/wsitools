@@ -310,7 +310,7 @@ func cropEmitSVS(ctx context.Context, src *opentile.Slide, input, output string,
 			fmt.Printf("lossless: snapped crop to %d,%d %dx%d (tile-aligned)\n", ex, ey, ew, eh)
 		}
 	}
-	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, ex, ey, ew, eh, outputTileSize, outputTileSize, quality)
+	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, ex, ey, ew, eh, outputTileSize, outputTileSize, quality, "jpeg")
 	outW, outH := outDimsForFactor(ew, eh, factor)
 	cropDesc = scaleAperioResolutionTokens(cropDesc, factor)
 	outMPP := desc.MPP * float64(factor)

@@ -171,11 +171,34 @@ func (d *AperioDescription) Quality() (int, bool) {
 	return q, true
 }
 
+// aperioCodecDescriptor maps an output codec to the Aperio geometry-line codestream
+// descriptor: jpeg → "JPEG/RGB", jpeg2000 → "J2K/YUV16" (per Aperio's J2K SVS, e.g.
+// JP2K-33003-1.svs). Only the conformant SVS codecs are handled.
+func aperioCodecDescriptor(codec string) string {
+	if codec == "jpeg2000" {
+		return "J2K/YUV16"
+	}
+	return "JPEG/RGB"
+}
+
+// setAperioCodecDescriptor rewrites the codestream descriptor token on a parsed
+// Aperio description's geometry line (after MutateForDownsample, when the output
+// codec differs from the source's).
+func setAperioCodecDescriptor(d *AperioDescription, codec string) {
+	want := aperioCodecDescriptor(codec)
+	for _, old := range []string{"JPEG/RGB", "J2K/YUV16"} {
+		if strings.Contains(d.GeometryLine, old) {
+			d.GeometryLine = strings.Replace(d.GeometryLine, old, want, 1)
+			return
+		}
+	}
+}
+
 // BuildCropImageDescription constructs the ImageDescription (tag 270) for a
 // crop, following Aperio ImageScope's recipe (docs/aperio-svs-crop-analysis.md):
 //
 //	Aperio Image Library v<wsitools-version>
-//	<baseW>x<baseH> [x,y cropWxcropH] (tileWxtileH) JPEG/RGB Q=q;<SOURCE-DESC-VERBATIM>|OriginalWidth = baseW|OriginalHeight = baseH
+//	<baseW>x<baseH> [x,y cropWxcropH] (tileWxtileH) <codec> Q=q;<SOURCE-DESC-VERBATIM>|OriginalWidth = baseW|OriginalHeight = baseH
 //
 // The new header line keeps the literal "Aperio Image Library v" prefix so
 // opentile-go's SVS detector (matchSVS: HasPrefix "Aperio") recognizes the
@@ -183,13 +206,13 @@ func (d *AperioDescription) Quality() (int, bool) {
 // (the provenance chain), so MPP/AppMag/ImageID/Left/Top and all scanner fields
 // are preserved unchanged. A fresh OriginalWidth/OriginalHeight pair (the
 // pre-crop base dims) is appended at the end.
-func BuildCropImageDescription(srcDesc string, baseW, baseH, x, y, cropW, cropH, tileW, tileH, quality int) string {
+func BuildCropImageDescription(srcDesc string, baseW, baseH, x, y, cropW, cropH, tileW, tileH, quality int, codec string) string {
 	chain := strings.ReplaceAll(srcDesc, "\r\n", "\n")
 	var b strings.Builder
 	b.WriteString("Aperio Image Library v")
 	b.WriteString(Version)
 	b.WriteString("\r\n")
-	fmt.Fprintf(&b, "%dx%d [%d,%d %dx%d] (%dx%d) JPEG/RGB Q=%d;", baseW, baseH, x, y, cropW, cropH, tileW, tileH, quality)
+	fmt.Fprintf(&b, "%dx%d [%d,%d %dx%d] (%dx%d) %s Q=%d;", baseW, baseH, x, y, cropW, cropH, tileW, tileH, aperioCodecDescriptor(codec), quality)
 	b.WriteString(chain)
 	fmt.Fprintf(&b, "|OriginalWidth = %d|OriginalHeight = %d", baseW, baseH)
 	return b.String()
@@ -203,12 +226,12 @@ func BuildCropImageDescription(srcDesc string, baseW, baseH, x, y, cropW, cropH,
 //
 // MPP / AppMag are emitted only when src.Metadata() provides them
 // (non-zero); a missing key is preferable to a fake value.
-func SyntheticAperioDescription(l0W, l0H, tileW, tileH uint32, quality int, mpp, appMag float64, srcSoftware string) *AperioDescription {
+func SyntheticAperioDescription(l0W, l0H, tileW, tileH uint32, quality int, mpp, appMag float64, srcSoftware string, codec string) *AperioDescription {
 	soft := "Aperio Image, wsitools/" + Version
 	if srcSoftware != "" {
 		soft += " (from " + srcSoftware + ")"
 	}
-	geom := fmt.Sprintf("%dx%d (%dx%d) JPEG/RGB Q=%d", l0W, l0H, tileW, tileH, quality)
+	geom := fmt.Sprintf("%dx%d (%dx%d) %s Q=%d", l0W, l0H, tileW, tileH, aperioCodecDescriptor(codec), quality)
 	d := &AperioDescription{
 		SoftwareLine: soft,
 		GeometryLine: geom,
