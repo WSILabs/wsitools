@@ -36,6 +36,7 @@ func init() {
 	transcodeCmd.Flags().BoolVar(&cvNoAssociated, "no-associated", false, "skip label/macro/thumbnail/overview")
 	transcodeCmd.Flags().StringVar(&cvTileOrder, "tile-order", "row-major", "tile emission order (row-major|hilbert|morton)")
 	transcodeCmd.Flags().StringVar(&cvBigTIFFFlag, "bigtiff", "auto", "auto|on|off")
+	transcodeCmd.Flags().BoolVar(&cvAllowNonconformant, "allow-nonconformant", false, "write a valid-but-non-readable output with a warning")
 	_ = transcodeCmd.MarkFlagRequired("codec")
 	_ = transcodeCmd.MarkFlagRequired("output")
 	rootCmd.AddCommand(transcodeCmd)
