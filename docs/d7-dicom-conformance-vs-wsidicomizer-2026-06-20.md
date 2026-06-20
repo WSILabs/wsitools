@@ -50,22 +50,20 @@ VOLUME's top-level tag set differs from the reference by exactly **one** tag
 
 ## Findings (what dciodvfy does not catch)
 
-### 1. PyramidUID — completeness gap (the substantive one)
+### 1. PyramidUID — completeness gap → **FIXED**
 
 wsidicomizer stamps every VOLUME (pyramid) level of a multi-level slide with a
-**shared `PyramidUID` (0020,0027)** — the DICOM Pyramid IOD's explicit
+**shared `PyramidUID` (0008,0019)** — the DICOM Pyramid IOD's explicit
 level-grouping mechanism — and leaves it off the associated images. wsitools
-emits **no PyramidUID** on any instance.
+originally emitted **no PyramidUID** (grouping levels via shared
+SeriesInstanceUID + FrameOfReferenceUID — valid, but no explicit linkage).
 
-Both implementations still group the levels correctly via **shared
-SeriesInstanceUID + shared FrameOfReferenceUID**, which is valid and was
-wsitools' deliberate choice (the DICOM-writer design explicitly went
-"multi-instance Series, shared UIDs, no Pyramid UID"). So there is no
-*correctness* defect — a conforming reader resolves the pyramid either way — but
-PyramidUID is the modern, explicit linkage the ecosystem reference provides, and
-adding it would tighten ecosystem alignment (newer pyramid-aware viewers prefer
-it). **Candidate follow-up:** synthesize one PyramidUID per pyramid, stamp it on
-all VOLUME instances (associated images excluded).
+**Resolved** (`feat/dicom-pyramiduid`): wsitools now generates one PyramidUID
+per pyramid (`newSharedUIDs`) and stamps it on every VOLUME instance, leaving it
+off the associated images — matching the reference's scoping exactly. Verified:
+all 3 VOLUME levels of `239551` share the identical UID, associated images carry
+none; dciodvfy 0 errors. The PixelSpacing item below was left unchanged (it is
+not a defect — see below).
 
 ### 2. PixelSpacing at downsampled levels — anisotropy divergence
 

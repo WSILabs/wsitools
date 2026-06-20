@@ -40,16 +40,20 @@ func associatedSupported(c source.Compression) bool {
 // gets its own SOPInstanceUID.
 type sharedUIDs struct {
 	Study, Series, FrameOfReference, DimensionOrg string
+	// Pyramid is shared by every VOLUME instance in the pyramid (the Pyramid IOD
+	// linkage); associated images do not carry it.
+	Pyramid string
 }
 
 // newSharedUIDs generates a fresh set of series-level UIDs (one per Study /
-// Series / FrameOfReference / DimensionOrganization).
+// Series / FrameOfReference / DimensionOrganization / Pyramid).
 func newSharedUIDs() sharedUIDs {
 	return sharedUIDs{
 		Study:            NewUID(),
 		Series:           NewUID(),
 		FrameOfReference: NewUID(),
 		DimensionOrg:     NewUID(),
+		Pyramid:          NewUID(),
 	}
 }
 
@@ -305,6 +309,7 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs,
 		Series:           shared.Series,
 		FrameOfReference: shared.FrameOfReference,
 		DimensionOrg:     shared.DimensionOrg,
+		Pyramid:          shared.Pyramid, // VOLUME instances share the PyramidUID
 	}
 	ds, err := assembleWSMDataset(src, uids, spec)
 	if err != nil {

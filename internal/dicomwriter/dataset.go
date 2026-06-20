@@ -50,6 +50,10 @@ const (
 // via NewUID() so the writer stays deterministic-input / no-hidden-state.
 type UIDSet struct {
 	SOP, Study, Series, FrameOfReference, DimensionOrg string
+	// Pyramid is the shared PyramidUID linking the VOLUME instances of one
+	// pyramid (DICOM Pyramid IOD). Empty on associated images, which are not
+	// pyramid levels and must not carry it.
+	Pyramid string
 }
 
 // ImageDescriptor carries the codec/colorspace attributes derived from a tile's
@@ -178,6 +182,9 @@ func assembleWSMDataset(src source.Source, uids UIDSet, spec instanceSpec) (dico
 		mk(tag.ImageType, spec.ImageType),
 		mk(tag.SOPClassUID, []string{wsmSOPClassUID}),
 		mk(tag.SOPInstanceUID, []string{uids.SOP}),
+		// PyramidUID (0008,0019): shared across the pyramid's VOLUME instances;
+		// filtered out below when empty (associated images carry none).
+		mk(tag.PyramidUID, []string{uids.Pyramid}),
 		// Dates/times (tag-ordered: StudyDate 0020, ContentDate 0023,
 		// AcquisitionDateTime 002A, StudyTime 0030, ContentTime 0033).
 		mk(tag.StudyDate, []string{contentDA}),
@@ -306,7 +313,8 @@ func assembleWSMDataset(src source.Source, uids UIDSet, spec instanceSpec) (dico
 	// image contains the label (SpecimenLabelInImage == "YES").
 	mono := spec.SamplesPerPixel == 1
 	hasLabel := spec.SpecimenLabelInImage == "YES"
-	if !spec.Lossy || mono || !hasLabel {
+	noPyramid := uids.Pyramid == ""
+	if !spec.Lossy || mono || !hasLabel || noPyramid {
 		kept := elems[:0]
 		for _, e := range elems {
 			if !spec.Lossy && (e.Tag == tag.LossyImageCompressionRatio || e.Tag == tag.LossyImageCompressionMethod) {
@@ -316,6 +324,9 @@ func assembleWSMDataset(src source.Source, uids UIDSet, spec instanceSpec) (dico
 				continue
 			}
 			if !hasLabel && (e.Tag == tag.LabelText || e.Tag == tag.BarcodeValue) {
+				continue
+			}
+			if noPyramid && e.Tag == tag.PyramidUID {
 				continue
 			}
 			kept = append(kept, e)
