@@ -41,34 +41,59 @@ For a (container, codec) pair, the gate classifies into one tier:
    or the emitter is codec-limited. → **hard error, no override**, with a redirect
    to a container that can.
 
-## Capability table (initial — VERIFIED in the plan via round-trip)
+## Capability table (VERIFIED by round-trip on CMU-1-Small-Region)
 
 `containerCapabilities(container) → {conformant []codec, nonconformant []codec}`
-(everything else ⇒ unsupported). Initial values below; **the plan's first task
-round-trips each (container, codec) through the opentile reader and corrects any
-entry** (e.g. if avif-in-generic-TIFF does not read back, it moves to
-nonconformant).
+(everything else ⇒ unsupported). The values below are the **measured** result of
+writing each (container, codec) and re-reading via `hash --mode pixel` (decodes
+every tile = readable):
 
-| Container | conformant (initial) | nonconformant (initial) | unsupported ⇒ redirect |
+| Container | conformant (verified) | nonconformant (verified) | unsupported ⇒ redirect |
 |---|---|---|---|
-| tiff (generic) | jpeg, jpeg2000, htj2k, avif, webp, jpegxl | — | — |
-| svs | jpeg | jpeg2000?, htj2k/avif/webp/jpegxl (writer is **jpeg-only**) | → "wsitools writes SVS tiles as jpeg; use --to tiff" |
-| ome-tiff | jpeg | jpeg2000, htj2k, avif, webp, jpegxl (valid OME bytes; our reader reads JPEG OME-TIFF only) | — |
+| tiff (generic) | jpeg, jpeg2000, htj2k, avif, webp | **jpegxl** (writes, no read-back) | — |
+| svs | jpeg, **jpeg2000** | htj2k, avif, webp, jpegxl | — |
+| ome-tiff | jpeg, **jpeg2000** | htj2k, avif, webp, jpegxl | — |
 | cog-wsi | jpeg, jpeg2000, htj2k, avif, webp, jpegxl | — | — |
 | dicom | jpeg, jpeg2000, htj2k | — | avif, webp, jpegxl → "no DICOM transfer syntax; use jpeg/jpeg2000/htj2k" |
 | dzi, szi | jpeg, png | — | everything else → "Deep Zoom tiles are jpeg or png" |
 | bif | jpeg (verbatim copy only) | — | re-encode to bif unsupported |
 
-Notes:
-- **SVS** is `unsupported` for non-jpeg in this phase because `cropEmitSVS` /
-  `downsampleToSVS` are jpeg-only emitters (the redirect message points at
-  `--to tiff`). Making the SVS emitter codec-configurable (so jpeg2000-SVS is
-  conformant and avif-SVS is nonconformant) is **deferred** — see Boundaries.
-- **OME-TIFF non-jpeg** is the primary **nonconformant** case and the real use for
-  `--allow-nonconformant`: today (post-3c) `convert --to ome-tiff --codec avif`
-  writes silently; Phase 2 makes it **error by default** ("our reader reads JPEG
-  OME-TIFF only; pass --allow-nonconformant to write it anyway"), and write+warn
-  under the flag. (Behavior change, called out.)
+Surprises the round-trip caught (why verification mattered): **jpegxl-in-generic-
+TIFF does NOT read back** (nonconformant, not conformant as the 2026-06-14 sketch
+assumed); **jpeg2000-in-OME-TIFF DOES** (conformant); **jpeg2000-SVS is conformant**
+(a valid J2K Aperio file — SVS is NOT jpeg-only).
+
+### Path-dependence (important model correction)
+
+Codec support is **path-dependent** for SVS and DICOM:
+- **SVS** — the *transcode* path (`convert --to svs --codec X`, no `--rect`/`--factor`)
+  is codec-capable: it writes conformant jpeg2000-SVS and nonconformant
+  avif/webp/htj2k/jpegxl. But the *crop/downsample* SVS emitter (`cropEmitSVS`/
+  `downsampleToSVS`) is **jpeg-only**.
+- **DICOM** — the *transform* path (`--factor`/`--rect`) writes jpeg/jpeg2000/htj2k;
+  the *verbatim* path (`convert --to dicom` no transform) preserves the source
+  codec (effectively jpeg-only — can't switch codec without re-encoding).
+
+The **gate (table) classifies codec×container CONFORMANCE** (the best-achievable
+tier). The **path-specific emitter limits stay as their own checks** — they are a
+narrower "this transform path can't produce codec X for container Y" constraint,
+not a conformance question:
+- `cropEmitSVS`/`downsampleToSVS` keep their jpeg-only guard (`crop.go:214`,
+  `convert_factor.go:84`) — so `convert --to svs --rect … --codec jpeg2000` still
+  errors with "SVS crop keeps jpeg tiles" (the deferred SVS-crop-emitter codec work).
+- the verbatim-DICOM jpeg-only constraint stays in its path.
+
+So the gate **consolidates the conformance rules** (`convert.go:142` png→dzi/szi;
+`dzi_format.go:22` dzi jpeg/png; the codec×container tiers; the DICOM
+no-transfer-syntax set) and **adds the nonconformant tier + `--allow-nonconformant`**;
+the two path-specific emitter limits remain where they are.
+
+**OME-TIFF non-jpeg (htj2k/avif/webp/jpegxl)** and the new nonconformant entries
+(svs/tiff/ome non-readable codecs) are the real use for `--allow-nonconformant`:
+today (post-3c) `convert --to ome-tiff --codec avif` writes **silently**; Phase 2
+makes it **error by default** ("valid bytes, but this tool's reader can't open them
+as ome-tiff; pass --allow-nonconformant"), and write+warn under the flag.
+(Behavior change, called out.)
 
 ## `validateCodec`
 
@@ -138,7 +163,8 @@ wsitools consumes it. (No upstream dependency in this phase — just the seam.)
 **In Phase 2:** the capability table, `validateCodec`, `--allow-nonconformant`,
 consolidation of the 5 checks, OME-non-jpeg gating, help text, the opentile seam.
 
-**Deferred:** making the SVS emitter codec-configurable (jpeg2000-SVS conformant /
-avif-SVS nonconformant) — SVS stays jpeg-only here; the `validate(spec)` unification
-of the lossless/contradiction checks; an actual opentile-go capability API
-(file/consume when it exists).
+**Deferred:** making the SVS **crop/downsample** emitter codec-configurable (so
+`convert --to svs --rect/--factor --codec jpeg2000` works — the SVS *transcode*
+path already does jpeg2000); the verbatim-DICOM codec constraint; the
+`validate(spec)` unification of the lossless/contradiction checks; an actual
+opentile-go capability API (file/consume when it exists).
