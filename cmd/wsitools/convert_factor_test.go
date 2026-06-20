@@ -179,10 +179,10 @@ func TestConvertFactorSVSFromNonSVS(t *testing.T) {
 }
 
 // TestDownsampleSVSRejectsNonJpegCodec verifies that dispatchDownsampleByTarget
-// returns a clear error (not a silent jpeg fallback) when --codec names a non-jpeg
-// codec for an SVS target. The guard runs before any file I/O, so no fixture needed.
+// returns a clear error (not a silent fallback) when --codec names a codec not
+// supported by the SVS target. The guard runs before any file I/O, so no fixture needed.
 func TestDownsampleSVSRejectsNonJpegCodec(t *testing.T) {
-	for _, codec := range []string{"avif", "webp", "jpegxl", "htj2k", "jpeg2000"} {
+	for _, codec := range []string{"avif", "webp", "jpegxl", "htj2k"} {
 		err := dispatchDownsampleByTarget(
 			context.Background(),
 			"svs", "nonexistent.svs", "out.svs",
@@ -200,19 +200,21 @@ func TestDownsampleSVSRejectsNonJpegCodec(t *testing.T) {
 	}
 }
 
-// TestDownsampleSVSAllowsJpeg verifies that --codec jpeg for SVS is not rejected
-// by the guard (it proceeds to file I/O, which fails on nonexistent input).
-func TestDownsampleSVSAllowsJpeg(t *testing.T) {
-	err := dispatchDownsampleByTarget(
-		context.Background(),
-		"svs", "nonexistent.svs", "out.svs",
-		2, 0, 90, 1, "row-major", "auto",
-		false, false,
-		"jpeg",
-	)
-	// Must NOT be the SVS guard error; any other error (e.g. file not found) is acceptable.
-	if err != nil && strings.Contains(err.Error(), "use --to tiff") {
-		t.Errorf("jpeg should not be rejected by the SVS guard, got: %v", err)
+// TestDownsampleSVSAllowsJpegCodecs verifies that --codec jpeg and --codec jpeg2000
+// are not rejected by the SVS guard (they proceed to file I/O, which fails on nonexistent input).
+func TestDownsampleSVSAllowsJpegCodecs(t *testing.T) {
+	for _, codec := range []string{"jpeg", "jpeg2000"} {
+		err := dispatchDownsampleByTarget(
+			context.Background(),
+			"svs", "nonexistent.svs", "out.svs",
+			2, 0, 90, 1, "row-major", "auto",
+			false, false,
+			codec,
+		)
+		// Must NOT be the SVS guard error; any other error (e.g. file not found) is acceptable.
+		if err != nil && strings.Contains(err.Error(), "use --to tiff") {
+			t.Errorf("codec=%s should not be rejected by the SVS guard, got: %v", codec, err)
+		}
 	}
 }
 
