@@ -64,8 +64,22 @@ func TestDownsample_CMU1SmallRegion(t *testing.T) {
 	if string(outTlr.Format()) != "svs" {
 		t.Errorf("output format: got %q, want svs", outTlr.Format())
 	}
-	if got, want := len(outTlr.Levels()), len(srcTlr.Levels()); got != want {
-		t.Errorf("level count: got %d, want %d", got, want)
+	// downsample emits an octave pyramid from the reduced L0 (retile engine):
+	// the output level count derives from the new L0, NOT the source's level
+	// count. Verify the pyramid is octave-structured — each level is the
+	// previous level halved with ceiling rounding, ceil(n/2) == (n+1)/2 (the
+	// engine's octave math) — rather than matching the source's count.
+	outLevels := outTlr.Levels()
+	if len(outLevels) < 1 {
+		t.Fatalf("output has no levels")
+	}
+	for i := 1; i < len(outLevels); i++ {
+		pw, ph := outLevels[i-1].Size.W, outLevels[i-1].Size.H
+		wantW, wantH := (pw+1)/2, (ph+1)/2
+		w, h := outLevels[i].Size.W, outLevels[i].Size.H
+		if w != wantW || h != wantH {
+			t.Errorf("level %d not an octave of level %d: got %dx%d, want %dx%d", i, i-1, w, h, wantW, wantH)
+		}
 	}
 
 	srcL0, outL0 := srcTlr.Levels()[0], outTlr.Levels()[0]
