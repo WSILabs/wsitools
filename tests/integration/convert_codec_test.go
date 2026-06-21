@@ -17,11 +17,16 @@ import (
 var novelCodecs = []struct {
 	name string
 	want opentile.Compression
+	// allowNonconformant marks codecs the conformance gate rejects for the TIFF
+	// container (writable bytes opentile-go can't read back) — they need
+	// --allow-nonconformant. Per containerCapabilities("tiff"), jpegxl is the
+	// lone non-conformant novel codec; avif/webp/htj2k are conformant.
+	allowNonconformant bool
 }{
-	{"jpegxl", opentile.CompressionJPEGXL},
-	{"avif", opentile.CompressionAVIF},
-	{"webp", opentile.CompressionWebP},
-	{"htj2k", opentile.CompressionHTJ2K},
+	{"jpegxl", opentile.CompressionJPEGXL, true},
+	{"avif", opentile.CompressionAVIF, false},
+	{"webp", opentile.CompressionWebP, false},
+	{"htj2k", opentile.CompressionHTJ2K, false},
 }
 
 // TestConvertTIFF_NovelCodecs re-encodes CMU-1-Small-Region.svs to generic-TIFF
@@ -54,7 +59,12 @@ func TestConvertTIFF_NovelCodecs(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "out.tiff")
-			cmd := exec.Command(bin, "convert", "--to", "tiff", "--codec", c.name, "-o", out, src)
+			args := []string{"convert", "--to", "tiff", "--codec", c.name}
+			if c.allowNonconformant {
+				args = append(args, "--allow-nonconformant")
+			}
+			args = append(args, "-o", out, src)
+			cmd := exec.Command(bin, args...)
 			if b, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("convert --to tiff --codec %s: %v\n%s", c.name, err, b)
 			}
