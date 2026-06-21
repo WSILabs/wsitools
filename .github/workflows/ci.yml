@@ -175,7 +175,15 @@ jobs:
           export CGO_ENABLED=1
           go vet -tags nohtj2k ./...
 
-      # Tests deliberately deferred — running `go test -race` on Windows with
-      # cgo is brittle (msys2 Go vs Windows file-system semantics) and the
-      # full unit suite already passes on macOS. v0.2.x will add Windows tests
-      # once the cgo edges are smoothed and OpenJPH is packaged.
+      - name: go test (Windows, unit only, htj2k disabled, no -race)
+        run: |
+          export PATH=/mingw64/bin:$PATH
+          export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
+          export CGO_ENABLED=1
+          # Unit suite only — no `-tags integration`, so fixture-gated tests
+          # skip (Windows CI downloads no fixtures). No `-race`: race+cgo on
+          # msys2 Go is brittle, and the Windows job's value is platform-
+          # specific behavior (path separators, temp dirs, file-system + byte-
+          # order semantics) — race detection is already covered on macOS.
+          # htj2k stays disabled (OpenJPH is not packaged for msys2).
+          go test -tags nohtj2k -timeout 30m ./...
