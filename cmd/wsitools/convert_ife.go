@@ -75,8 +75,15 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 
 	// internal/source view over the same opentile slide — supplies associated
 	// images, ICC, and Raw metadata for the METADATA sub-blocks (engine reads
-	// pyramid tiles straight off the *opentile.Slide).
+	// pyramid tiles straight off the *opentile.Slide), and the verbatim
+	// tile-copy fast path reads raw compressed tiles off it.
 	src := source.FromSlide(slide, input)
+
+	// Verbatim fast path: a 256px-tiled JPEG/AVIF source with no transform copies
+	// tile-for-tile into the IFE (byte-identical, no decode/re-encode).
+	if ifeVerbatimEligible(src, cvCodec, cvFactor, cvTargetMag, rectFlagsSet(cmd)) {
+		return runConvertIFEVerbatim(cmd, src, slide, start)
+	}
 
 	// Resolve downsample factor (1 = no scaling) and the output L0 dims.
 	factor, ferr := resolveFactor(src, input, cvFactor, cvTargetMag)
@@ -143,12 +150,7 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 	}
 
 	// Metadata sub-blocks: ICC, associated images, free-text attributes.
-	smd := src.Metadata()
-	w.SetICCProfile(smd.ICCProfile) // nil-safe; Writer skips empty
-	if !cvNoAssociated {
-		addIFEAssociated(w, src)
-	}
-	w.SetAttributes(buildIFEAttributes(smd, src.Format()))
+	assembleIFEMetadata(w, src)
 
 	if err := w.Finalize(); err != nil {
 		return fmt.Errorf("finalize ife: %w", err)
@@ -159,6 +161,124 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 			cvOutput, len(levels), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
+}
+
+// ifeVerbatimEligible reports whether src's pyramid can be copied tile-for-tile
+// into IFE without re-encoding: no transform, no codec override, and every level
+// is 256px-tiled, non-overlapping, JPEG or AVIF.
+func ifeVerbatimEligible(src source.Source, codecOverride string, factor, targetMag int, rectSet bool) bool {
+	if factor != 1 || targetMag != 0 || rectSet || codecOverride != "" {
+		return false
+	}
+	levels := src.Levels()
+	if len(levels) == 0 {
+		return false
+	}
+	// IFE's TILE_TABLE.encoding is per-FILE, so the whole pyramid must share one
+	// codec; the encoding byte is derived from L0. Reject a (hypothetical)
+	// mixed-codec pyramid, which would write JPEG/AVIF tiles under a single header.
+	l0Codec := levels[0].Compression()
+	for _, lvl := range levels {
+		ts := lvl.TileSize()
+		if ts.X != 256 || ts.Y != 256 || lvl.Overlapping() {
+			return false
+		}
+		if lvl.Compression() != l0Codec {
+			return false
+		}
+		if lvl.Compression() != source.CompressionJPEG && lvl.Compression() != source.CompressionAVIF {
+			return false
+		}
+	}
+	return true
+}
+
+// runConvertIFEVerbatim writes the IFE by copying the source's compressed pyramid
+// tiles byte-for-byte (the lossless fast path). The Encoding byte comes from the
+// source L0 codec; L0 extents are the source L0 size (no downsample/padding).
+// Metadata assembly (ICC/associated/attributes) is shared with the engine path.
+func runConvertIFEVerbatim(cmd *cobra.Command, src source.Source, slide *opentile.Slide, start time.Time) error {
+	srcLevels := src.Levels()
+	// Encoding byte from the source L0 codec → wsitools codec name → IFE encoding.
+	var srcCodecName string
+	switch srcLevels[0].Compression() {
+	case source.CompressionAVIF:
+		srcCodecName = "avif"
+	default:
+		srcCodecName = "jpeg"
+	}
+	encByte, ok := ife.EncodingFor(srcCodecName)
+	if !ok {
+		return fmt.Errorf("convert --to ife: source codec %q not carriable by IFE", srcCodecName)
+	}
+
+	l0 := srcLevels[0].Size()
+	md := slide.Metadata()
+	w, err := ife.Create(cvOutput, ife.Options{
+		Encoding:      encByte,
+		XExtent:       uint32(l0.X),
+		YExtent:       uint32(l0.Y),
+		MPP:           md.MPP.X,
+		Magnification: md.Magnification,
+	})
+	if err != nil {
+		return fmt.Errorf("create ife: %w", err)
+	}
+
+	if err := writeIFEVerbatim(w, src); err != nil {
+		w.Abort()
+		return err
+	}
+
+	// Metadata sub-blocks: ICC, associated images, free-text attributes.
+	assembleIFEMetadata(w, src)
+
+	if err := w.Finalize(); err != nil {
+		return fmt.Errorf("finalize ife: %w", err)
+	}
+
+	if !flagQuiet {
+		fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (ife, %d levels, verbatim tile-copy) in %s\n",
+			cvOutput, len(srcLevels), time.Since(start).Round(time.Millisecond))
+	}
+	return nil
+}
+
+// writeIFEVerbatim copies every source level's compressed tiles verbatim into the
+// IFE writer. Levels are registered native-first (matching ife.Writer's and the
+// engine's convention).
+func writeIFEVerbatim(w *ife.Writer, src source.Source) error {
+	for _, lvl := range src.Levels() {
+		grid := lvl.Grid()
+		w.AddLevel(uint32(grid.X), uint32(grid.Y)) // native-first; matches engine ordering
+		buf := make([]byte, lvl.TileMaxSize())
+		for row := 0; row < grid.Y; row++ {
+			for col := 0; col < grid.X; col++ {
+				n, err := lvl.TileInto(col, row, buf)
+				if err != nil {
+					return fmt.Errorf("ife verbatim: level %d tile %d,%d: %w", lvl.Index(), col, row, err)
+				}
+				blob := make([]byte, n)
+				copy(blob, buf[:n]) // buf is reused across tiles
+				if err := w.WriteTile(lvl.Index(), col, row, blob); err != nil {
+					return fmt.Errorf("ife verbatim: level %d tile %d,%d: %w", lvl.Index(), col, row, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// assembleIFEMetadata writes the shared METADATA sub-blocks (ICC, associated
+// images, free-text attributes) into w from src. Used by both the engine and
+// verbatim pyramid paths.
+func assembleIFEMetadata(w *ife.Writer, src source.Source) {
+	smd := src.Metadata()
+	w.SetICCProfile(smd.ICCProfile) // nil-safe; Writer skips empty
+	if !cvNoAssociated {
+		addIFEAssociated(w, src)
+	}
+	w.SetAttributes(buildIFEAttributes(smd, src.Format()))
 }
 
 // addIFEAssociated copies the source's associated images into the IFE writer's
