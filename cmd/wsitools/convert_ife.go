@@ -286,6 +286,13 @@ func assembleIFEMetadata(w *ife.Writer, src source.Source) {
 // JPEG2000, etc.) is decoded and re-encoded to lossless PNG. A decode/encode
 // failure logs a warning and skips that one image (mirroring the DICOM writer),
 // rather than failing the whole conversion.
+//
+// KNOWN LIMITATION: lossless-PNG associated images (encoding=1) are
+// IFE-conformant (the official Iris-Codec validator accepts them) but opentile-go
+// has no PNG-associated decoder, so it reports them as CompressionUnknown — our
+// own `info`/`extract`/ife→ife re-convert can't read a PNG label back. The label
+// is correctly stored; the reader gap is upstream's (filed against opentile-go).
+// PNG is kept deliberately so the label stays lossless (crisp barcodes).
 func addIFEAssociated(w *ife.Writer, src source.Source) {
 	for _, a := range src.Associated() {
 		size := a.Size()
