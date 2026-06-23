@@ -112,6 +112,7 @@ const (
 	CompressionWebP
 	CompressionJPEGXL
 	CompressionHTJ2K
+	CompressionPNG
 )
 
 func (c Compression) String() string {
@@ -136,6 +137,8 @@ func (c Compression) String() string {
 		return "jpegxl"
 	case CompressionHTJ2K:
 		return "htj2k"
+	case CompressionPNG:
+		return "png"
 	}
 	return "unknown"
 }

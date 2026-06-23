@@ -120,3 +120,29 @@ func TestConvertToIFE_VerbatimByteIdentical(t *testing.T) {
 		}
 	}
 }
+
+// TestConvertToIFE_PNGLabelDecodesBack guards opentile-go#74 (fixed in v0.49.0).
+// CMU-1's LZW label is re-encoded to lossless PNG (encoding=1) in the IFE; before
+// v0.49.0 opentile-go mapped PNG associated images to CompressionUnknown and could
+// not decode them, so `extract --type label` failed on our own output. v0.49.0
+// adds PNG associated decode, so it must now succeed.
+func TestConvertToIFE_PNGLabelDecodesBack(t *testing.T) {
+	td := testdir(t)
+	src := filepath.Join(td, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	bin := buildOnce(t)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.iris")
+	if b, err := runCLI(bin, "convert", "--to", "ife", "-o", out, src); err != nil {
+		t.Fatalf("convert --to ife: %v\n%s", err, b)
+	}
+	lbl := filepath.Join(dir, "label.png")
+	if b, err := runCLI(bin, "extract", "--type", "label", "-o", lbl, out); err != nil {
+		t.Fatalf("extract PNG label (opentile-go#74): %v\n%s", err, b)
+	}
+	if fi, err := os.Stat(lbl); err != nil || fi.Size() == 0 {
+		t.Fatalf("extracted label missing/empty: %v", err)
+	}
+}

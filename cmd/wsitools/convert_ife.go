@@ -283,16 +283,11 @@ func assembleIFEMetadata(w *ife.Writer, src source.Source) {
 
 // addIFEAssociated copies the source's associated images into the IFE writer's
 // IMAGE_ARRAY. JPEG/AVIF blobs are copied verbatim; any other codec (LZW label,
-// JPEG2000, etc.) is decoded and re-encoded to lossless PNG. A decode/encode
-// failure logs a warning and skips that one image (mirroring the DICOM writer),
-// rather than failing the whole conversion.
-//
-// KNOWN LIMITATION: lossless-PNG associated images (encoding=1) are
-// IFE-conformant (the official Iris-Codec validator accepts them) but opentile-go
-// has no PNG-associated decoder, so it reports them as CompressionUnknown — our
-// own `info`/`extract`/ife→ife re-convert can't read a PNG label back. The label
-// is correctly stored; the reader gap is upstream's (filed against opentile-go).
-// PNG is kept deliberately so the label stays lossless (crisp barcodes).
+// JPEG2000, etc.) is decoded and re-encoded to lossless PNG (encoding=1) so the
+// label stays lossless (crisp barcodes). A decode/encode failure logs a warning
+// and skips that one image (mirroring the DICOM writer), rather than failing the
+// whole conversion. PNG associated images round-trip through opentile-go ≥ v0.49.0
+// (#74); JPEG/AVIF associated images round-trip on any version.
 func addIFEAssociated(w *ife.Writer, src source.Source) {
 	for _, a := range src.Associated() {
 		size := a.Size()

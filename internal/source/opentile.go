@@ -203,6 +203,8 @@ func mapOpentileCompression(c opentile.Compression) Compression {
 		return CompressionJPEGXL
 	case opentile.CompressionHTJ2K:
 		return CompressionHTJ2K
+	case opentile.CompressionPNG:
+		return CompressionPNG
 	}
 	return CompressionUnknown
 }

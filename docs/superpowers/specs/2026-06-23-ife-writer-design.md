@@ -101,16 +101,15 @@ labels-stay-lossless stance. (AVIF associated sources copy verbatim as
 - **Associated images:** PNG / JPEG / AVIF per the policy above.
 - IRIS is never written.
 
-**Known limitation (PNG associated read-back).** Non-JPEG/AVIF associated images
-(e.g. an Aperio LZW label) are stored as lossless **PNG** (`encoding=1`). This is
-spec-conformant — the official Iris-Codec validator accepts it — but **opentile-go
-has no PNG-associated decoder**: it maps `IMAGE_ENTRY.encoding==1` to
-`CompressionUnknown`, so on our own output `info` shows the label codec as
-`unknown`, `extract --type label` fails, and an `ife→ife` verbatim re-convert
-drops the PNG label. The file is correct; the gap is in opentile's reader. Per the
-opentile-go boundary, this is filed upstream as opentile-go#74 (PNG-associated read support) for
-upstream to implement; the lossless-PNG label is kept deliberately (barcodes stay
-crisp). JPEG/AVIF associated images round-trip fine.
+**PNG associated read-back (resolved in opentile-go v0.49.0).** Non-JPEG/AVIF
+associated images (e.g. an Aperio LZW label) are stored as lossless **PNG**
+(`encoding=1`) so the label stays lossless (crisp barcodes). This is
+spec-conformant (the official Iris-Codec validator accepts it). Originally
+opentile-go mapped `IMAGE_ENTRY.encoding==1` to `CompressionUnknown` and could not
+decode it — filed as **opentile-go#74** and **fixed in v0.49.0** (PNG associated
+decode via a pure-Go `image/png` branch). wsitools maps `opentile.CompressionPNG`
+→ `source.CompressionPNG` so `info` shows `png` and `extract --type label` decodes
+the PNG label. JPEG/AVIF associated images round-trip on any version.
 
 ## Data flow
 
