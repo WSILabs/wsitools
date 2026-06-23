@@ -26,3 +26,7 @@ mem.prof
 
 # Local direnv env (machine-specific paths)
 .envrc
+
+# Python bytecode (validator scripts)
+__pycache__/
+*.pyc
