@@ -1,6 +1,7 @@
 package ife
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 
@@ -58,5 +59,66 @@ func TestWriterBarePyramid(t *testing.T) {
 	}
 	if md.Magnification != 20 {
 		t.Errorf("Magnification = %v, want 20", md.Magnification)
+	}
+}
+
+// writeSinglePyramid writes a minimal 1-tile (256x256) IFE to out, calling cfg to
+// set ICC/associated/attributes before Finalize.
+func writeSinglePyramid(t *testing.T, out string, cfg func(*Writer)) {
+	t.Helper()
+	w, err := Create(out, Options{Encoding: encJPEG, XExtent: 256, YExtent: 256})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	w.AddLevel(1, 1)
+	if err := w.WriteTile(0, 0, 0, solidTile(t)); err != nil {
+		t.Fatal(err)
+	}
+	if cfg != nil {
+		cfg(w)
+	}
+	if err := w.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+}
+
+func TestWriterICCRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "icc.iris")
+	icc := []byte("FAKE-ICC-PROFILE-BYTES-\x00\x01\x02\x03")
+	writeSinglePyramid(t, out, func(w *Writer) { w.SetICCProfile(icc) })
+
+	sl, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("opentile.OpenFile: %v", err)
+	}
+	defer sl.Close()
+	if got := sl.ICCProfile(); !bytes.Equal(got, icc) {
+		t.Errorf("ICCProfile = %q, want %q", got, icc)
+	}
+}
+
+func TestWriterAssociatedRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "assoc.iris")
+	tile := solidTile(t)
+	writeSinglePyramid(t, out, func(w *Writer) {
+		w.AddAssociated("label", 256, 256, imgEncJPEG, tile)
+	})
+
+	sl, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("opentile.OpenFile: %v", err)
+	}
+	defer sl.Close()
+	imgs := sl.AssociatedImages()
+	if len(imgs) != 1 {
+		t.Fatalf("associated images = %d, want 1", len(imgs))
+	}
+	if got := imgs[0].Type(); got != opentile.AssociatedLabel {
+		t.Errorf("associated[0].Type = %q, want %q", got, opentile.AssociatedLabel)
+	}
+	if got := imgs[0].Size(); got.W != 256 || got.H != 256 {
+		t.Errorf("associated[0].Size = %dx%d, want 256x256", got.W, got.H)
 	}
 }

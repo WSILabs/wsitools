@@ -97,8 +97,18 @@ func (w *Writer) WriteTile(apiLevel, col, row int, blob []byte) error {
 }
 
 // SetICCProfile records the ICC blob to emit (nil/empty => no ICC_PROFILE block).
-// NOTE: the ICC_PROFILE writer lands in a later slice; calling this before then panics at Finalize.
 func (w *Writer) SetICCProfile(icc []byte) { w.icc = icc }
+
+// AddAssociated registers an associated image (label/macro/thumbnail/overview)
+// to emit in the IMAGE_ARRAY. title is the lowercase type; encoding is one of
+// imgEncPNG/imgEncJPEG/imgEncAVIF; blob is the self-contained encoded image.
+func (w *Writer) AddAssociated(title string, width, height uint32, encoding uint8, blob []byte) {
+	w.assoc = append(w.assoc, assocImage{title: title, width: width, height: height, encoding: encoding, blob: blob})
+}
+
+// SetAttributes records the free-text key/value attributes to emit in the
+// ATTRIBUTES block (nil/empty => no ATTRIBUTES block).
+func (w *Writer) SetAttributes(kvs [][2]string) { w.attrs = kvs }
 
 // Finalize writes the trailing blocks and backpatches the header, then atomically
 // renames tmp -> path. After Finalize (or Abort) the Writer must not be reused.
@@ -274,13 +284,105 @@ func (w *Writer) Abort() {
 // entry_count" prefix on LAYER_EXTENTS / TILE_OFFSETS.
 const blockHeaderValidation = 16
 
-// The following are implemented in a later task (Slice 3); bare-pyramid never
-// populates icc/assoc/attrs, so these stubs keep this task compiling. Replace in
-// the metadata-sub-blocks task.
-func (w *Writer) writeICC() error { panic("ife: writeICC implemented in slice 3") }
-func (w *Writer) writeImageArray() (uint64, error) {
-	panic("ife: writeImageArray implemented in slice 3")
+// writeICC appends the ICC_PROFILE block at the current position (caller captured
+// w.pos as the block offset before calling).
+func (w *Writer) writeICC() error {
+	put := binary.LittleEndian
+	b := make([]byte, 14+len(w.icc))
+	put.PutUint64(b[0:8], uint64(w.pos))
+	put.PutUint16(b[8:10], recoverICCProfile)
+	put.PutUint32(b[10:14], uint32(len(w.icc)))
+	copy(b[14:], w.icc)
+	return w.appendBlock(b)
 }
+
+// writeImageArray writes each IMAGE_BYTES block then the IMAGE_ARRAY header+entries,
+// returning the IMAGE_ARRAY offset.
+func (w *Writer) writeImageArray() (uint64, error) {
+	put := binary.LittleEndian
+	offs := make([]uint64, len(w.assoc))
+	for i, a := range w.assoc {
+		offs[i] = uint64(w.pos)
+		ib := make([]byte, 16+len(a.title)+len(a.blob))
+		put.PutUint64(ib[0:8], uint64(w.pos))
+		put.PutUint16(ib[8:10], recoverImageBytes)
+		put.PutUint16(ib[10:12], uint16(len(a.title)))
+		put.PutUint32(ib[12:16], uint32(len(a.blob)))
+		copy(ib[16:16+len(a.title)], a.title)
+		copy(ib[16+len(a.title):], a.blob)
+		if err := w.appendBlock(ib); err != nil {
+			return 0, err
+		}
+	}
+	arrOff := uint64(w.pos)
+	ab := make([]byte, blockHeaderValidation+20*len(w.assoc))
+	put.PutUint64(ab[0:8], arrOff)
+	put.PutUint16(ab[8:10], recoverImageArray)
+	put.PutUint16(ab[10:12], 20)
+	put.PutUint32(ab[12:16], uint32(len(w.assoc)))
+	for i, a := range w.assoc {
+		base := blockHeaderValidation + 20*i
+		put.PutUint64(ab[base:base+8], offs[i])
+		put.PutUint32(ab[base+8:base+12], a.width)
+		put.PutUint32(ab[base+12:base+16], a.height)
+		ab[base+16] = a.encoding
+		ab[base+17] = formatR8G8B8
+		put.PutUint16(ab[base+18:base+20], 0) // orientation
+	}
+	if err := w.appendBlock(ab); err != nil {
+		return 0, err
+	}
+	return arrOff, nil
+}
+
+// writeAttributes writes ATTRIBUTES_SIZES, ATTRIBUTES_BYTES, then the 29-byte
+// ATTRIBUTES header pointing at them; returns the ATTRIBUTES offset.
 func (w *Writer) writeAttributes() (uint64, error) {
-	panic("ife: writeAttributes implemented in slice 3")
+	put := binary.LittleEndian
+	sizesOff := uint64(w.pos)
+	sb := make([]byte, blockHeaderValidation+6*len(w.attrs))
+	put.PutUint64(sb[0:8], sizesOff)
+	put.PutUint16(sb[8:10], recoverAttributesSizes)
+	put.PutUint16(sb[10:12], 6)
+	put.PutUint32(sb[12:16], uint32(len(w.attrs)))
+	var total int
+	for i, kv := range w.attrs {
+		base := blockHeaderValidation + 6*i
+		put.PutUint16(sb[base:base+2], uint16(len(kv[0])))
+		put.PutUint32(sb[base+2:base+6], uint32(len(kv[1])))
+		total += len(kv[0]) + len(kv[1])
+	}
+	if err := w.appendBlock(sb); err != nil {
+		return 0, err
+	}
+	bytesOff := uint64(w.pos)
+	bb := make([]byte, 14+total)
+	put.PutUint64(bb[0:8], bytesOff)
+	put.PutUint16(bb[8:10], recoverAttributesBytes)
+	// @10 u32 = total concatenated key/value byte count (the body length),
+	// matching the ICC_PROFILE block's @10 body-length convention. opentile's
+	// reader names this field "entry_n" but treats it as informational and ignores
+	// it — the per-pair sizes array (ATTRIBUTES_SIZES) drives the decode, so the
+	// round-trip is unaffected either way.
+	put.PutUint32(bb[10:14], uint32(total))
+	p := 14
+	for _, kv := range w.attrs {
+		p += copy(bb[p:], kv[0])
+		p += copy(bb[p:], kv[1])
+	}
+	if err := w.appendBlock(bb); err != nil {
+		return 0, err
+	}
+	attrOff := uint64(w.pos)
+	hb := make([]byte, 29)
+	put.PutUint64(hb[0:8], attrOff)
+	put.PutUint16(hb[8:10], recoverAttributes)
+	hb[10] = attrFormatFreeText
+	put.PutUint16(hb[11:13], 0) // version
+	put.PutUint64(hb[13:21], sizesOff)
+	put.PutUint64(hb[21:29], bytesOff)
+	if err := w.appendBlock(hb); err != nil {
+		return 0, err
+	}
+	return attrOff, nil
 }

@@ -43,6 +43,15 @@ const (
 	recoverICCProfile      uint16 = 0x550C
 )
 
+// Associated-image encoding bytes (IMAGE_ENTRY.encoding) exported for the
+// convert driver, which builds IMAGE_ARRAY entries directly. Note 1=PNG here
+// (distinct from TILE_TABLE.encoding, where 1=IRIS).
+const (
+	ImgEncPNG  uint8 = imgEncPNG
+	ImgEncJPEG uint8 = imgEncJPEG
+	ImgEncAVIF uint8 = imgEncAVIF
+)
+
 // EncodingFor maps a wsitools codec name to the IFE TILE_TABLE encoding byte.
 // ok=false for codecs IFE pyramid tiles can't carry.
 func EncodingFor(codecName string) (uint8, bool) {
