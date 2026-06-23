@@ -134,6 +134,19 @@ jobs:
           xattr -dr com.apple.quarantine dicom3tools 2>/dev/null || true
           make dicom-validate DCIODVFY="$PWD/dicom3tools/dciodvfy"
 
+      # IFE conformance gate: convert the SVS fixture to IFE (JPEG + AVIF codec
+      # variants) and validate with the official Iris-Codec Python validator.
+      # --break-system-packages is required on macos-latest: the runner's Python
+      # is Homebrew-managed (PEP 668 externally-managed-environment) and rejects
+      # bare pip install without the flag. No venv needed for a single-package CI
+      # install; --quiet suppresses the pip progress bar noise.
+      - name: Install Iris-Codec (IFE validator)
+        run: python3 -m pip install --quiet --break-system-packages 'Iris-Codec==2025.3.1'
+      - name: IFE conformance (Iris-Codec validator)
+        env:
+          WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
+        run: make ife-validate PYTHON_IFE=python3
+
   build-windows:
     name: build (Windows)
     runs-on: windows-latest

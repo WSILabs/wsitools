@@ -48,7 +48,7 @@ var convertCmd = &cobra.Command{
 	Use:   "convert [--to <target>] -o <output> [flags] <input>",
 	Short: "Convert a WSI: change container and/or transform (crop, downsample, re-encode)",
 	Long: `Convert is the unified one-pass transform. It changes the container
-(--to cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif) and/or transforms the
+(--to cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif|ife) and/or transforms the
 pixels — crop a region (--rect), downsample (--factor/--target-mag), and
 re-encode tiles (--codec/--quality) — composing any subset in a single
 decode-rebuild pass. --to is optional: omitted, the output container is
@@ -78,7 +78,7 @@ Examples:
 
 func init() {
 	convertCmd.Flags().StringVarP(&cvOutput, "output", "o", "", "output file path (required)")
-	convertCmd.Flags().StringVar(&cvTo, "to", "", "conversion target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif)")
+	convertCmd.Flags().StringVar(&cvTo, "to", "", "conversion target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif|ife)")
 	convertCmd.Flags().BoolVarP(&cvForce, "force", "f", false, "overwrite output if it exists")
 	convertCmd.Flags().StringVar(&cvBigTIFFFlag, "bigtiff", "auto", "auto|on|off")
 	convertCmd.Flags().BoolVar(&cvNoAssociated, "no-associated", false, "skip label/macro/thumbnail/overview")
@@ -91,7 +91,7 @@ func init() {
 	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
 	convertCmd.Flags().IntVar(&cvJobs, "jobs", 0, "alias of --workers")
 	convertCmd.Flags().BoolVar(&cvLossless, "lossless", false, "lossless --to dzi|szi: copy source JPEG base tiles verbatim (no re-encode)")
-	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi (1 = no scaling; one of {2,4,8,16})")
+	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi|ife (1 = no scaling; one of {2,4,8,16})")
 	convertCmd.Flags().IntVar(&cvTargetMag, "target-mag", 0, "alternative to --factor: derive factor from source AppMag")
 	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
@@ -154,6 +154,9 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	}
 
 	if rectFlagsSet(cmd) && cvTo != "dzi" && cvTo != "szi" {
+		if cvTo == "ife" {
+			return fmt.Errorf("crop not yet supported for --to ife (use --factor for downsample)")
+		}
 		if err := validateRectCombo(true, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
 			return err
 		}
@@ -200,10 +203,12 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		return runConvertDICOM(cmd, input, start)
 	case "bif":
 		return runConvertBIF(cmd, input, start)
+	case "ife":
+		return runConvertIFE(cmd, input, start)
 	case "":
 		return fmt.Errorf("internal: --to unresolved")
 	default:
-		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif)", cvTo)
+		return fmt.Errorf("--to %q: unknown target (cog-wsi|svs|tiff|ome-tiff|dzi|szi|dicom|bif|ife)", cvTo)
 	}
 }
 

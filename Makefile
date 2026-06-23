@@ -1,4 +1,4 @@
-.PHONY: test vet cover bench install clean goldens-byte-stable bench-dzi dicom-validate check-fixtures
+.PHONY: test vet cover bench install clean goldens-byte-stable bench-dzi dicom-validate ife-validate check-fixtures
 
 GO ?= go
 BIN = bin/wsitools
@@ -13,6 +13,10 @@ FIXTURE_SENTINEL = svs/CMU-1-Small-Region.svs
 # under workinprogress/, or build from source). Override if it is not on PATH,
 # e.g. `make dicom-validate DCIODVFY=/tmp/dciodvfy`.
 DCIODVFY ?= dciodvfy
+# IFE conformance validator. Requires the Iris-Codec PyPI package
+# (pip install Iris-Codec). Override the Python interpreter if needed,
+# e.g. `make ife-validate PYTHON_IFE=/usr/local/bin/python3`.
+PYTHON_IFE ?= python3
 
 # Fail loud when WSI_TOOLS_TESTDIR is set but doesn't look like a fixtures dir,
 # so fixture-gated tests don't silently skip and masquerade as a pass. Unset is
@@ -150,3 +154,24 @@ dicom-validate: build
 		rm -rf "$$DIR5"; \
 	else echo "missing $$LZW; skipping A4b LZW->JPEG"; fi; \
 	exit $$RC
+
+# Emits IFE slides (JPEG + AVIF codec variants) from the CMU-1-Small-Region.svs
+# fixture and validates each with IrisDigitalPathology's official Iris-Codec
+# Python validator (the IFE equivalent of dciodvfy). Requires WSI_TOOLS_TESTDIR
+# and the Iris-Codec PyPI package (pip install Iris-Codec; see PYTHON_IFE).
+# Success bar: result.success() == True for every emitted file; a failure exits
+# the target non-zero.
+ife-validate: build
+	@if [ -z "$$WSI_TOOLS_TESTDIR" ]; then \
+		echo "WSI_TOOLS_TESTDIR not set; skipping ife-validate"; exit 0; \
+	fi
+	@command -v "$(PYTHON_IFE)" >/dev/null 2>&1 || { echo "$(PYTHON_IFE) not found (pip install Iris-Codec)"; exit 1; }; \
+	"$(PYTHON_IFE)" -c "import Iris" 2>/dev/null || { echo "Iris-Codec not importable for $(PYTHON_IFE) (pip install Iris-Codec)"; exit 1; }; \
+	RC=0; DIR=$$(mktemp -d -t ife-val.XXXXXX); \
+	SVS="$$WSI_TOOLS_TESTDIR/svs/CMU-1-Small-Region.svs"; \
+	if [ -f "$$SVS" ]; then \
+		./bin/wsitools convert --to ife -f -o "$$DIR/jpeg.iris" "$$SVS"; \
+		./bin/wsitools convert --to ife --codec avif -f -o "$$DIR/avif.iris" "$$SVS"; \
+		"$(PYTHON_IFE)" scripts/ife_validate.py "$$DIR"/*.iris || RC=$$?; \
+	else echo "missing $$SVS; skipping"; fi; \
+	rm -rf "$$DIR"; exit $$RC

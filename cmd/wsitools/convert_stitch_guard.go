@@ -12,7 +12,7 @@ import (
 // path) and bif (no engine sink yet) cannot, so they stay guarded.
 func guardTargetHandlesOverlap(target string) bool {
 	switch target {
-	case "", "dzi", "szi", "cog-wsi", "svs", "tiff", "ome-tiff":
+	case "", "dzi", "szi", "cog-wsi", "svs", "tiff", "ome-tiff", "ife":
 		return true
 	default:
 		return false
