@@ -11,8 +11,10 @@ Add `convert --to ife`: write conformant **IFE v1.0** files with **JPEG or AVIF*
 pyramid tiles — never the IRIS-proprietary codec. Full metadata fidelity (MPP,
 magnification, ICC profile, associated images, vendor attributes), with a
 verbatim tile-copy fast path for already-256px JPEG/AVIF sources. The writer is
-wsitools-side and pure Go; the verification oracle is opentile-go's existing IFE
-reader (`formats/ife`) — no opentile-go changes are required.
+wsitools-side and pure Go; verification uses two oracles — opentile-go's existing
+IFE reader (`formats/ife`) and the **official IrisDigitalPathology Iris-Codec
+validator** (`Codec.validate_slide_path`, the gold-standard conformance gate). No
+opentile-go changes are required.
 
 **Layering:** opentile-go owns the IFE *reader*; this writer is ours, like
 `bifwriter`/`cogwsiwriter`. We verify against opentile's reader, not by editing it.
@@ -131,14 +133,36 @@ this; no IFE-specific transform code).
   temp on any error.
 - Source with no readable pyramid ⇒ error before any output is created.
 
-## Testing — oracle is opentile-go's IFE reader
+## Testing — two oracles: opentile-go's reader + the official Iris-Codec validator
 
-- **Round-trip (re-encode):** `convert --to ife` on `CMU-1-Small-Region.svs` →
-  re-open via opentile-go → assert format=ife, level count + per-level dims,
-  MPP/magnification, total tile count, associated images (types via title +
-  byte-equality), ICC bytes, attribute k/v. Pixel parity via `hash --mode pixel`
-  (decode both sides) — file SHA is not byte-stable (see the pipeline-
-  nondeterminism note); use the pixel oracle.
+The strong correctness gate is **IrisDigitalPathology's own validator** — the IFE
+equivalent of `dciodvfy`. `Iris-Codec` (MIT — "Iris Codec Community License" is
+verbatim MIT; PyPI `pip install Iris-Codec`, also conda-forge) exposes
+`Codec.validate_slide_path(path) -> result` with `result.success()` /
+`result.message()`, running `validate_file_structure`'s full `validate_full()`
+chain over every data block against the published IFE spec. We gate on it
+**in addition** to the opentile round-trip.
+
+This validator is **stricter than opentile's reader**, which ignores the
+`recovery` magic on the tile-path blocks. So the writer must set the correct
+`RECOVERY` tags from Iris-Headers `IrisCodecExtension.hpp`: FILE_HEADER `0x5501`,
+TILE_TABLE `0x5502`, LAYER_EXTENTS `0x5506`, TILE_OFFSETS `0x5507`, plus the
+metadata sub-block magics METADATA `0x5504`, ATTRIBUTES `0x5505`,
+ATTRIBUTES_SIZES `0x5508`, ATTRIBUTES_BYTES `0x5509`, IMAGE_ARRAY `0x550A`,
+IMAGE_BYTES `0x550B`, ICC_PROFILE `0x550C` — **not** the `0` opentile would
+tolerate.
+
+- **Iris-Codec validation (gold standard):** every emitted `.iris` in the test
+  suite is passed through `Codec.validate_slide_path` (a Python helper invoked
+  from the integration tests / a `make ife-validate` target); a non-success
+  result fails the build. CI installs Iris-Codec (pip/conda) and runs it on the
+  fixtures, mirroring the `make dicom-validate` + dciodvfy gate (format-debt D5).
+- **opentile round-trip (re-encode):** `convert --to ife` on
+  `CMU-1-Small-Region.svs` → re-open via opentile-go → assert format=ife, level
+  count + per-level dims, MPP/magnification, total tile count, associated images
+  (types via title + byte-equality), ICC bytes, attribute k/v. Pixel parity via
+  `hash --mode pixel` (decode both sides) — file SHA is not byte-stable (see the
+  pipeline-nondeterminism note); use the pixel oracle.
 - **Verbatim-copy:** a 256px-JPEG source → IFE → assert pyramid tile bytes are
   **byte-identical** to the source's compressed tiles (the lossless promise), and
   that opentile re-opens it with the same dims/metadata.
@@ -149,22 +173,17 @@ this; no IFE-specific transform code).
   jpeg/avif pass.
 - Full `-race` on `internal/ife` + the cmd/wsitools paths.
 
-**Caveat (honest):** the oracle proves *opentile-compatibility*, not conformance
-against IrisDigitalPathology's C++ reference reader. Cross-validating our output
-with their reference tooling / Iris-Example-Files is a worthwhile follow-up but
-needs their toolchain — out of scope for v1.
-
 ## Boundaries / deferred
 
 **In v1:** `convert --to ife` (jpeg/avif pyramid), verbatim-copy fast path, full
 metadata (MPP/mag/ICC/associated/attributes), `--factor`/`--rect` via the engine,
-capability-table entry, opentile-reader round-trip + verbatim byte-identity tests.
+capability-table entry, opentile-reader round-trip + verbatim byte-identity tests,
+**and the official Iris-Codec validator gate (dev + CI)**.
 
 **Deferred:** the `ANNOTATIONS` block (no source produces them); the `cipher`/
-encryption block (always NULL); IFE v2.0 fields; cross-validation against the C++
-reference reader; reading IRIS-encoded IFE (B2 — explicitly ruled out). IFE has no
-external structural validator equivalent to `dciodvfy`; the opentile reader is the
-gate.
+encryption block (always NULL); IFE v2.0 fields; reading IRIS-encoded IFE (B2 —
+explicitly ruled out). (Cross-validation against the reference implementation is
+now **in v1** via the Iris-Codec validator, not deferred.)
 
 ## Build phasing (for the implementation plan)
 

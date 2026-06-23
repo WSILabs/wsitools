@@ -18,29 +18,29 @@
 
 All little-endian. Constants: `MAGIC = 0x49726973`, `NULL_OFFSET = 0xFFFFFFFFFFFFFFFF` (8B), `NULL_TILE = 0xFFFFFFFFFF` (40-bit), `TileSidePixels = 256`.
 
-**Recovery magics** — the reader VALIDATES these on the metadata sub-blocks (must be exact): METADATA `0x5504`, ATTRIBUTES `0x5505`, ATTRIBUTES_SIZES `0x5508`, ATTRIBUTES_BYTES `0x5509`, IMAGE_ARRAY `0x550A`, IMAGE_BYTES `0x550B`, ICC_PROFILE `0x550C`. The reader does **NOT** validate recovery on FILE_HEADER/TILE_TABLE/LAYER_EXTENTS/TILE_OFFSETS — write `0` there (correct upstream RecoverableValue tags are part of the deferred C++-reference cross-validation).
+**Recovery magics (the `RECOVERY` enum from Iris-Headers `IrisCodecExtension.hpp`)** — **every block gets its correct tag**, because the official Iris-Codec validator (the gold-standard gate, Task 7) checks them even though opentile's reader ignores the tile-path ones: FILE_HEADER `0x5501`, TILE_TABLE `0x5502`, METADATA `0x5504`, ATTRIBUTES `0x5505`, LAYER_EXTENTS `0x5506`, TILE_OFFSETS `0x5507`, ATTRIBUTES_SIZES `0x5508`, ATTRIBUTES_BYTES `0x5509`, IMAGE_ARRAY `0x550A`, IMAGE_BYTES `0x550B`, ICC_PROFILE `0x550C`. (Do NOT write `0` — that passes opentile but fails the official validator.)
 
 **Byte layouts:**
 
 ```
 FILE_HEADER (38B @ offset 0):
-  @0  u32 magic = 0x49726973     @4  u16 recovery=0   @6  u64 file_size
+  @0  u32 magic = 0x49726973     @4  u16 recovery=0x5501   @6  u64 file_size
   @14 u16 ext_major=1            @16 u16 ext_minor=0   @18 u32 file_revision=0
   @22 u64 tile_table_offset      @30 u64 metadata_offset
 
 TILE_TABLE (44B):
-  @0  u64 validation(=self off)  @8  u16 recovery=0    @10 u8 encoding(2=JPEG,3=AVIF)
+  @0  u64 validation(=self off)  @8  u16 recovery=0x5502  @10 u8 encoding(2=JPEG,3=AVIF)
   @11 u8 format=2 (R8G8B8)       @12 u64 cipher_offset=NULL_OFFSET
   @20 u64 tile_offsets_offset    @28 u64 layer_extents_offset
   @36 u32 x_extent(native W px)  @40 u32 y_extent(native H px)
 
 LAYER_EXTENTS (16B hdr + 12B×layers):
-  hdr: @0 u64 validation  @8 u16 recovery=0  @10 u16 entry_size=12  @12 u32 entry_number=layers
+  hdr: @0 u64 validation  @8 u16 recovery=0x5506  @10 u16 entry_size=12  @12 u32 entry_number=layers
   entry: @0 u32 x_tiles  @4 u32 y_tiles  @8 f32 scale
   STORED COARSEST-FIRST (file index 0 = smallest layer; native layer last).
 
 TILE_OFFSETS (16B hdr + 8B×tiles):
-  hdr: @0 u64 validation  @8 u16 recovery=0  @10 u16 entry_size=8  @12 u32 entry_number=total_tiles
+  hdr: @0 u64 validation  @8 u16 recovery=0x5507  @10 u16 entry_size=8  @12 u32 entry_number=total_tiles
   entry: @0 u40 offset  @5 u24 size  (sparse: offset = NULL_TILE)
   ORDER: layers coarsest-first; within a layer row-major (row*x_tiles + col).
 
@@ -93,6 +93,9 @@ ATTRIBUTES_BYTES (14B hdr + concatenated bytes):
 - **Modify `cmd/wsitools/capabilities.go`** — add the `"ife"` case to `containerCapabilities`.
 - **Modify `cmd/wsitools/convert.go`** — add `ife` to the `--to` help/target list and dispatch.
 - **Modify `cmd/wsitools/convert_tiff.go` (or wherever `--to` dispatches)** — route `ife` to `runConvertIFE`.
+- **Create `scripts/ife_validate.py`** — the official Iris-Codec validator wrapper (Task 6).
+- **Modify `Makefile`** — `ife-validate` target (Task 6).
+- **Modify `.github/workflows/ci.yml`** — install Iris-Codec + run `make ife-validate` (Task 6).
 
 ---
 
@@ -175,10 +178,15 @@ const (
 
 	attrFormatFreeText uint8 = 1
 
-	// Recovery magics. The reader validates only the metadata sub-blocks; the
-	// tile-path blocks (FILE_HEADER/TILE_TABLE/LAYER_EXTENTS/TILE_OFFSETS) use 0.
+	// Recovery magics — the RECOVERY enum from Iris-Headers IrisCodecExtension.hpp.
+	// EVERY block gets its correct tag: the official Iris-Codec validator checks
+	// them even though opentile's reader ignores the tile-path ones.
+	recoverHeader          uint16 = 0x5501 // FILE_HEADER
+	recoverTileTable       uint16 = 0x5502 // TILE_TABLE
 	recoverMetadata        uint16 = 0x5504
 	recoverAttributes      uint16 = 0x5505
+	recoverLayerExtents    uint16 = 0x5506 // LAYER_EXTENTS
+	recoverTileOffsets     uint16 = 0x5507 // TILE_OFFSETS
 	recoverAttributesSizes uint16 = 0x5508
 	recoverAttributesBytes uint16 = 0x5509
 	recoverImageArray      uint16 = 0x550A
@@ -481,7 +489,7 @@ func (w *Writer) Finalize() (err error) {
 	layerExtOff := uint64(w.pos)
 	le := make([]byte, blockHeaderValidation+12*n)
 	put.PutUint64(le[0:8], layerExtOff)
-	put.PutUint16(le[8:10], 0) // recovery (reader ignores)
+	put.PutUint16(le[8:10], recoverLayerExtents)
 	put.PutUint16(le[10:12], 12)
 	put.PutUint32(le[12:16], uint32(n))
 	for fi, api := range fileOrder {
@@ -505,7 +513,7 @@ func (w *Writer) Finalize() (err error) {
 	tileOffOff := uint64(w.pos)
 	to := make([]byte, blockHeaderValidation+8*totalTiles)
 	put.PutUint64(to[0:8], tileOffOff)
-	put.PutUint16(to[8:10], 0)
+	put.PutUint16(to[8:10], recoverTileOffsets)
 	put.PutUint16(to[10:12], 8)
 	put.PutUint32(to[12:16], uint32(totalTiles))
 	idx := 0
@@ -534,7 +542,7 @@ func (w *Writer) Finalize() (err error) {
 	ttOff := uint64(w.pos)
 	tt := make([]byte, 44)
 	put.PutUint64(tt[0:8], ttOff)
-	put.PutUint16(tt[8:10], 0)
+	put.PutUint16(tt[8:10], recoverTileTable)
 	tt[10] = w.opts.Encoding
 	tt[11] = formatR8G8B8
 	put.PutUint64(tt[12:20], nullOffset) // cipher
@@ -550,7 +558,7 @@ func (w *Writer) Finalize() (err error) {
 	fileSize := uint64(w.pos)
 	hdr := make([]byte, fileHeaderSize)
 	put.PutUint32(hdr[0:4], magicBytes)
-	put.PutUint16(hdr[4:6], 0)
+	put.PutUint16(hdr[4:6], recoverHeader)
 	put.PutUint64(hdr[6:14], fileSize)
 	put.PutUint16(hdr[14:16], extMajor)
 	put.PutUint16(hdr[16:18], extMinor)
@@ -947,19 +955,113 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 6: Final integration sweep
+## Task 6: Iris-Codec validator gate (gold standard) + CI
+
+The official `Iris-Codec` validator (`Codec.validate_slide_path`) is the IFE
+equivalent of `dciodvfy`. It is **stricter** than opentile (it checks the
+`recovery` magics on every block), so it is the gate that proves our files are
+*spec-conformant*, not just opentile-readable. This task adds a Python validator
+script, a `make ife-validate` target, and a CI step — mirroring the
+`make dicom-validate` + dciodvfy pattern (format-debt D5).
+
+**Files:** Create `scripts/ife_validate.py`; modify `Makefile`, `.github/workflows/ci.yml`.
+
+- [ ] **Step 1: Validator script** — `scripts/ife_validate.py`:
+
+```python
+#!/usr/bin/env python3
+"""Validate IFE files against the official IrisDigitalPathology Iris-Codec
+implementation. Exits non-zero if any file fails validation."""
+import sys
+from iris_codec import Codec
+
+def main(paths):
+    rc = 0
+    for p in paths:
+        result = Codec.validate_slide_path(p)
+        if result.success():
+            print(f"OK    {p}")
+        else:
+            print(f"FAIL  {p}: {result.message()}")
+            rc = 1
+    return rc
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+```
+
+> **Implementer:** confirm the import path — the PyPI package `Iris-Codec`
+> imports as `iris_codec` (snake_case) or `Codec`; check `pip show -f Iris-Codec`
+> / the README's `from iris_codec import Codec`. Adjust the import to match.
+
+- [ ] **Step 2: `make ife-validate` target** — in `Makefile`, mirror
+`dicom-validate`: build the binary, convert the SVS fixture to IFE in a temp dir,
+run the validator, hard-fail on non-zero. Add `ife-validate` to `.PHONY`:
+
+```makefile
+ife-validate: build
+	@if [ -z "$$WSI_TOOLS_TESTDIR" ]; then \
+		echo "WSI_TOOLS_TESTDIR not set; skipping ife-validate"; exit 0; \
+	fi
+	@command -v "$(PYTHON_IFE)" >/dev/null 2>&1 || { echo "$(PYTHON_IFE) not found (pip install Iris-Codec)"; exit 1; }; \
+	RC=0; DIR=$$(mktemp -d -t ife-val.XXXXXX); \
+	SVS="$$WSI_TOOLS_TESTDIR/svs/CMU-1-Small-Region.svs"; \
+	if [ -f "$$SVS" ]; then \
+		./bin/wsitools convert --to ife -f -o "$$DIR/jpeg.iris" "$$SVS"; \
+		./bin/wsitools convert --to ife --codec avif -f -o "$$DIR/avif.iris" "$$SVS"; \
+		"$(PYTHON_IFE)" scripts/ife_validate.py "$$DIR"/*.iris || RC=$$?; \
+	else echo "missing $$SVS; skipping"; fi; \
+	rm -rf "$$DIR"; exit $$RC
+```
+
+with `PYTHON_IFE ?= python3` near the top of the Makefile (overridable like
+`DCIODVFY`, e.g. a venv python).
+
+- [ ] **Step 3: CI step** — in `.github/workflows/ci.yml` macOS job, after the
+dciodvfy gate, add Iris-Codec install + validation (cache the pip install keyed
+on a pinned version):
+
+```yaml
+      - name: Install Iris-Codec (IFE validator)
+        run: |
+          python3 -m pip install --quiet 'Iris-Codec==2025.3.1' openslide-bin
+      - name: IFE conformance (Iris-Codec validator)
+        env:
+          WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
+        run: make ife-validate PYTHON_IFE=python3
+```
+
+> **Implementer:** pin the version (`2025.3.1` at writing) and bump deliberately,
+> as with the dciodvfy snapshot. If `openslide-bin` is unneeded for validating
+> our own `.iris` output (it is only a reader backend), drop it to slim the install.
+
+- [ ] **Step 4: Controller-run gate** — `WSI_TOOLS_TESTDIR=$(pwd)/sample_files make ife-validate PYTHON_IFE=/path/to/venv/python` → every emitted `.iris` reports `OK`. (Set up a venv with `pip install Iris-Codec` first; matches how D7 used a venv.) **This is the gold-standard pass: it proves the recovery magics + every block layout are conformant, not merely opentile-readable.**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/ife_validate.py Makefile .github/workflows/ci.yml
+git commit -m "ci(ife): Iris-Codec validator gate (official IFE conformance)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+## Task 7: Final integration sweep
 
 - [ ] **Step 1:** `go test ./internal/ife/ -race -count=1` PASS.
 - [ ] **Step 2:** `WSI_TOOLS_TESTDIR=$(pwd)/sample_files go test -tags integration ./tests/integration/ -run IFE -count=1` PASS.
 - [ ] **Step 3:** `go test ./cmd/wsitools/ -run 'IFE|Capabilities|Convert' -count=1` PASS.
 - [ ] **Step 4:** `gofmt -l internal/ife/ cmd/wsitools/convert_ife.go` clean; `go vet ./internal/ife/ ./cmd/wsitools/`.
-- [ ] **Step 5:** `./bin/wsitools convert --to ife -o /tmp/smoke.iris sample_files/svs/CMU-1-Small-Region.svs && ./bin/wsitools info /tmp/smoke.iris` shows format ife, levels, MPP/mag. Clean up `/tmp/smoke.iris`.
+- [ ] **Step 5:** `WSI_TOOLS_TESTDIR=$(pwd)/sample_files make ife-validate PYTHON_IFE=<venv-python>` → all `OK` (the official conformance gate).
+- [ ] **Step 6:** `./bin/wsitools convert --to ife -o /tmp/smoke.iris sample_files/svs/CMU-1-Small-Region.svs && ./bin/wsitools info /tmp/smoke.iris` shows format ife, levels, MPP/mag. Clean up `/tmp/smoke.iris`.
 
 ---
 
 ## Self-review
 
-**Spec coverage:** Writer core + bare pyramid (Tasks 1–2); engine path + capability gate (Task 3); ICC + IMAGE_ARRAY + ATTRIBUTES (Task 4); verbatim copy + byte-identity (Task 5); round-trip + dims (Task 3 test) + verbatim (Task 5 test) + synthetic (Task 2 test). The padding quirk is documented and asserted (Task 2/Task 3 tests assert 256-padded dims). Boundaries (no ANNOTATIONS/cipher/v2.0/IRIS) are honored by writing NULL pointers + jpeg/avif only.
+**Spec coverage:** Writer core + bare pyramid (Tasks 1–2); engine path + capability gate (Task 3); ICC + IMAGE_ARRAY + ATTRIBUTES (Task 4); verbatim copy + byte-identity (Task 5); **official Iris-Codec validator gate + CI (Task 6)**; round-trip + dims (Task 3 test) + verbatim (Task 5 test) + synthetic (Task 2 test). The padding quirk is documented and asserted (Task 2/Task 3 tests assert 256-padded dims). The correct `RECOVERY` magics (FILE_HEADER 0x5501 / TILE_TABLE 0x5502 / LAYER_EXTENTS 0x5506 / TILE_OFFSETS 0x5507 / sub-blocks 0x5504–0x550C) are written on every block so the official validator passes. Boundaries (no ANNOTATIONS/cipher/v2.0/IRIS) are honored by writing NULL pointers + jpeg/avif only.
 
 **Placeholder scan:** Task 3 `runConvertIFE` body and Task 5 verbatim path reference the engine/tile-copy patterns by exact file (`convert_factor.go` `downsampleToTIFF`, `convert_cogwsi.go`) rather than re-pasting large existing functions — the implementer copies the established pattern, substituting the sink + 256 tile size. The two "confirm/pin from the parser" notes (ATTRIBUTES_BYTES @10 field; the `Metadata().Properties` accessor) are explicit verification steps, not vague gaps.
 
@@ -967,4 +1069,4 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ## Boundaries
 
-**In:** the four slices above. **Deferred (per spec):** ANNOTATIONS, cipher/encryption, IFE v2.0, cross-validation against IrisDigitalPathology's C++ reference, reading IRIS-encoded IFE.
+**In:** the four slices above + the Iris-Codec validator gate (Task 6). **Deferred (per spec):** ANNOTATIONS, cipher/encryption, IFE v2.0, reading IRIS-encoded IFE. (Cross-validation against the reference implementation is now **in scope** via the Iris-Codec validator, not deferred.)
