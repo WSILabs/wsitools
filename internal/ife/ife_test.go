@@ -20,6 +20,28 @@ func TestPutUint24(t *testing.T) {
 	}
 }
 
+func TestEncodingFor(t *testing.T) {
+	cases := []struct {
+		name   string
+		want   uint8
+		wantOK bool
+	}{
+		{"jpeg", encJPEG, true},
+		{"", encJPEG, true},
+		{"avif", encAVIF, true},
+		{"htj2k", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := EncodingFor(c.name)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("EncodingFor(%q) = (%d, %v), want (%d, %v)", c.name, got, ok, c.want, c.wantOK)
+		}
+	}
+	if encJPEG != 2 || encAVIF != 3 {
+		t.Errorf("encoding consts changed: jpeg=%d avif=%d", encJPEG, encAVIF)
+	}
+}
+
 func TestConsts(t *testing.T) {
 	if magicBytes != 0x49726973 {
 		t.Errorf("magic = %#x", magicBytes)

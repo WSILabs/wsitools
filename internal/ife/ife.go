@@ -43,6 +43,19 @@ const (
 	recoverICCProfile      uint16 = 0x550C
 )
 
+// EncodingFor maps a wsitools codec name to the IFE TILE_TABLE encoding byte.
+// ok=false for codecs IFE pyramid tiles can't carry.
+func EncodingFor(codecName string) (uint8, bool) {
+	switch codecName {
+	case "jpeg", "":
+		return encJPEG, true
+	case "avif":
+		return encAVIF, true
+	default:
+		return 0, false
+	}
+}
+
 // putUint40 writes v as a 40-bit little-endian integer into b[0:5].
 func putUint40(b []byte, v uint64) {
 	b[0] = byte(v)

@@ -41,3 +41,17 @@ func TestValidateCodec(t *testing.T) {
 		})
 	}
 }
+
+func TestContainerCapabilitiesIFE(t *testing.T) {
+	caps := containerCapabilities("ife")
+	for _, c := range []string{"jpeg", "avif"} {
+		if !codecInSet(caps.conformant, c) {
+			t.Errorf("ife should accept %s", c)
+		}
+	}
+	for _, c := range []string{"jpeg2000", "htj2k", "jpegxl", "webp", "png"} {
+		if codecInSet(caps.conformant, c) {
+			t.Errorf("ife should NOT list %s conformant", c)
+		}
+	}
+}
