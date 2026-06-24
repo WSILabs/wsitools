@@ -152,6 +152,21 @@ func (l *opentileLevel) DecodedTile(x, y int) (*decoder.Image, error) {
 	return l.lvl.DecodedTile(x, y, opentile.WithFormat(decoder.PixelFormatRGB))
 }
 
+// StitchedGrid is the canonical ceil(Size/TileSize) display grid. For an
+// overlapping (stitched BIF) level it differs from Grid (which counts the raw
+// overlapping stored tiles); for every other format it equals Grid.
+func (l *opentileLevel) StitchedGrid() image.Point {
+	g := l.lvl.StitchedGrid()
+	return image.Point{X: g.W, Y: g.H}
+}
+
+// StitchedTile decodes the canonical display tile at (x, y) — for an overlapping
+// level it composites the stitched image into a clean, non-overlapping partition
+// of Size; for every other format it equals DecodedTile. opentile-go ≥ v0.50.0.
+func (l *opentileLevel) StitchedTile(x, y int) (*decoder.Image, error) {
+	return l.lvl.StitchedTile(x, y, opentile.WithFormat(decoder.PixelFormatRGB))
+}
+
 func (l *opentileLevel) Compression() Compression {
 	return mapOpentileCompression(l.lvl.Compression)
 }
