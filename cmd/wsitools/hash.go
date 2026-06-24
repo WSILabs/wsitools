@@ -4,14 +4,25 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"image"
 	"io"
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/wsilabs/opentile-go/decoder"
 
 	"github.com/wsilabs/wsitools/internal/cliout"
 	"github.com/wsilabs/wsitools/internal/source"
 )
+
+// stitchedLevel is the optional de-overlapped display-tile surface (opentile-go
+// ≥ v0.50.0, exposed by the opentile-backed source level). For an overlapping
+// (stitched BIF) level it yields the canonical ceil(Size/TileSize) partition;
+// for every other level it equals Grid/DecodedTile.
+type stitchedLevel interface {
+	StitchedGrid() image.Point
+	StitchedTile(x, y int) (*decoder.Image, error)
+}
 
 var (
 	hashMode string
@@ -99,13 +110,25 @@ func hashL0Pixels(path string) (string, error) {
 	}
 	l0 := levels[0]
 	h := sha256.New()
+
+	// Hash the canonical (de-overlapped) display image. For a stitched/overlapping
+	// source (a Ventana BIF) StitchedGrid/StitchedTile composite the logical image
+	// over the ceil(Size/TileSize) partition, so the pixel digest reflects the real
+	// slide rather than the raw overlapping tile set; for every other format these
+	// equal Grid/DecodedTile, leaving the digest unchanged.
 	grid := l0.Grid()
+	decode := l0.DecodedTile
+	if sl, ok := l0.(stitchedLevel); ok {
+		grid = sl.StitchedGrid()
+		decode = sl.StitchedTile
+	}
+
 	for ty := 0; ty < grid.Y; ty++ {
 		for tx := 0; tx < grid.X; tx++ {
-			// DecodedTile decodes via opentile-go's level-decode, which handles
-			// every source compression (JPEG / JPEG 2000 / LZW / uncompressed /
-			// Deflate / …), not just the JPEG/JP2K a standalone codec covers.
-			img, err := l0.DecodedTile(tx, ty)
+			// decode routes through opentile-go's level-decode, which handles every
+			// source compression (JPEG / JPEG 2000 / LZW / uncompressed / Deflate /
+			// …), not just the JPEG/JP2K a standalone codec covers.
+			img, err := decode(tx, ty)
 			if err != nil {
 				return "", fmt.Errorf("decode tile (%d,%d): %w", tx, ty, err)
 			}
