@@ -155,7 +155,8 @@ func runConvert(cmd *cobra.Command, args []string) error {
 
 	if rectFlagsSet(cmd) && cvTo != "dzi" && cvTo != "szi" {
 		if cvTo == "ife" {
-			return fmt.Errorf("crop not yet supported for --to ife (use --factor for downsample)")
+			// IFE has its own driver (engine-backed); it resolves --rect itself.
+			return runConvertIFE(cmd, input, start)
 		}
 		if err := validateRectCombo(true, cvFactor, cvTargetMag, cvCodec, cvTo); err != nil {
 			return err

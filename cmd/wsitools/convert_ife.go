@@ -37,17 +37,14 @@ func (s ifeSink) WriteTile(level, col, row int, encoded []byte) error {
 
 // runConvertIFE writes an Iris File Extension (IFE) v1.0 file from any
 // opentile-readable source. The whole pyramid is decoded and re-encoded to
-// 256px JPEG/AVIF tiles via the streaming retile engine. With no transform
-// flags the output L0 matches the source L0; --factor/--target-mag reduce it
-// (outL0 = L0/factor, octave-floored pyramid). --rect (crop) is not yet
-// supported. ICC, associated images (verbatim JPEG/AVIF or decoded→PNG), and
-// free-text attributes are copied into the METADATA sub-blocks.
+// 256px JPEG/AVIF tiles via the streaming retile engine, composing crop and
+// downsample in one pass: --rect X,Y,W,H selects the source region, and
+// --factor/--target-mag reduces it (outL0 = region/factor, octave-floored
+// pyramid); with neither, the output L0 matches the source L0. MPP/mag scale
+// with --factor (×factor / ÷factor); a pure crop preserves them. ICC, associated
+// images (verbatim JPEG/AVIF or decoded→PNG), and free-text attributes are copied
+// into the METADATA sub-blocks.
 func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
-	// --rect (crop) not yet supported for IFE.
-	if rectFlagsSet(cmd) {
-		return fmt.Errorf("crop not yet supported for --to ife (use --factor for downsample)")
-	}
-
 	if _, err := os.Stat(input); err != nil {
 		return fmt.Errorf("input %s: %w", input, err)
 	}
@@ -85,13 +82,29 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 		return runConvertIFEVerbatim(cmd, src, slide, start)
 	}
 
-	// Resolve downsample factor (1 = no scaling) and the output L0 dims.
+	// Resolve downsample factor (1 = no scaling).
 	factor, ferr := resolveFactor(src, input, cvFactor, cvTargetMag)
 	if ferr != nil {
 		return ferr
 	}
 	srcSize := slide.Levels()[0].Size
-	outW, outH, derr := reducedDims(srcSize.W, srcSize.H, factor)
+
+	// Source region: the full L0, or the --rect crop (in L0 coords).
+	rx, ry, rw, rh := 0, 0, srcSize.W, srcSize.H
+	if rectFlagsSet(cmd) {
+		var rerr error
+		rx, ry, rw, rh, rerr = resolveRectValues(cmd, cvRect, cvRectX, cvRectY, cvRectW, cvRectH)
+		if rerr != nil {
+			return rerr
+		}
+		if err := validateCropBounds(rx, ry, rw, rh, srcSize.W, srcSize.H); err != nil {
+			return err
+		}
+	}
+	srcRegion := opentile.Region{Origin: opentile.Point{X: rx, Y: ry}, Size: opentile.Size{W: rw, H: rh}}
+
+	// Output L0 = the (cropped) region reduced by factor.
+	outW, outH, derr := reducedDims(rw, rh, factor)
 	if derr != nil {
 		return derr
 	}
@@ -117,13 +130,16 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 		return fmt.Errorf("convert --to ife: resolved codec %q not carriable by IFE", resolvedName)
 	}
 
+	// Crop preserves resolution; --factor scales it (MPP ×factor, mag ÷factor).
 	md := slide.Metadata()
+	outMPP := md.MPP.X * float64(factor)
+	outMag := md.Magnification / float64(factor) // factor ≥ 1; 0 mag stays 0
 	w, err := ife.Create(cvOutput, ife.Options{
 		Encoding:      encByte,
 		XExtent:       uint32(outL0.W),
 		YExtent:       uint32(outL0.H),
-		MPP:           md.MPP.X,
-		Magnification: md.Magnification,
+		MPP:           outMPP,
+		Magnification: outMag,
 	})
 	if err != nil {
 		return fmt.Errorf("create ife: %w", err)
@@ -136,10 +152,9 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 	}
 
 	kernel := resample.Box
-	if outL0 == srcSize {
-		kernel = resample.Nearest // identity (no downscale)
+	if outL0 == srcRegion.Size {
+		kernel = resample.Nearest // identity (crop only, no downscale)
 	}
-	srcRegion := opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}
 	runErr := retile.Run(cmd.Context(), retile.Spec{
 		Slide: slide, SrcRegion: srcRegion, OutL0: outL0, Levels: levels,
 		Kernel: kernel, Encoder: &codecTileEncoder{enc: enc}, Sink: ifeSink{w}, Workers: cvWorkers,
