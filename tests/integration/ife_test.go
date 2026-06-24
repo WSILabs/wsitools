@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,5 +145,67 @@ func TestConvertToIFE_PNGLabelDecodesBack(t *testing.T) {
 	}
 	if fi, err := os.Stat(lbl); err != nil || fi.Size() == 0 {
 		t.Fatalf("extracted label missing/empty: %v", err)
+	}
+}
+
+// TestConvertToIFE_RectCrop: convert --to ife --rect crops the source region
+// (the IFE writer composes crop via the retile engine's SrcRegion).
+func TestConvertToIFE_RectCrop(t *testing.T) {
+	td := testdir(t)
+	src := filepath.Join(td, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	bin := buildOnce(t)
+	out := filepath.Join(t.TempDir(), "rect.iris")
+	if b, err := runCLI(bin, "convert", "--to", "ife", "--rect", "0,0,1024,1024", "-o", out, src); err != nil {
+		t.Fatalf("convert --to ife --rect: %v\n%s", err, b)
+	}
+	sl, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer sl.Close()
+	if string(sl.Format()) != "ife" {
+		t.Errorf("format = %q, want ife", sl.Format())
+	}
+	if w, h := sl.Levels()[0].Size.W, sl.Levels()[0].Size.H; w != 1024 || h != 1024 {
+		t.Errorf("cropped L0 = %dx%d, want 1024x1024", w, h)
+	}
+}
+
+// TestConvertToIFE_FactorScalesMetadata guards that --factor scales MPP (×factor)
+// and magnification (÷factor) — a regression: the IFE --factor path previously
+// wrote the source MPP/mag unchanged on a downsampled pyramid.
+func TestConvertToIFE_FactorScalesMetadata(t *testing.T) {
+	td := testdir(t)
+	src := filepath.Join(td, "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	bin := buildOnce(t)
+	srcSlide, err := opentile.OpenFile(src)
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	srcMPP := srcSlide.Metadata().MPP.X
+	srcMag := srcSlide.Metadata().Magnification
+	srcSlide.Close()
+
+	out := filepath.Join(t.TempDir(), "f2.iris")
+	if b, err := runCLI(bin, "convert", "--to", "ife", "--factor", "2", "-o", out, src); err != nil {
+		t.Fatalf("convert --to ife --factor 2: %v\n%s", err, b)
+	}
+	sl, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer sl.Close()
+	md := sl.Metadata()
+	if want := srcMPP * 2; math.Abs(md.MPP.X-want) > 0.001 { // IFE stores MPP as f32
+		t.Errorf("MPP = %v, want ~%v (src %v ×2)", md.MPP.X, want, srcMPP)
+	}
+	if want := srcMag / 2; md.Magnification != want {
+		t.Errorf("Magnification = %v, want %v (src %v ÷2)", md.Magnification, want, srcMag)
 	}
 }
