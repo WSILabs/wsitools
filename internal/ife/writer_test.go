@@ -46,12 +46,15 @@ func TestWriterBarePyramid(t *testing.T) {
 	if len(levels) != 2 {
 		t.Fatalf("levels = %d, want 2", len(levels))
 	}
-	// PADDING QUIRK: dims = x_tiles*256 x y_tiles*256.
+	// opentile-go ≥ v0.53.0 reads Level.Size as the true content extent: L0 from
+	// TILE_TABLE.x_extent/y_extent (= Options.XExtent/YExtent = 512x256), and each
+	// reduced level scaled from it (L1 = native ÷ 2 = 256x128) — not the
+	// 256-padded tile-grid extent.
 	if levels[0].Size.W != 512 || levels[0].Size.H != 256 {
 		t.Errorf("L0 = %dx%d, want 512x256", levels[0].Size.W, levels[0].Size.H)
 	}
-	if levels[1].Size.W != 256 || levels[1].Size.H != 256 {
-		t.Errorf("L1 = %dx%d, want 256x256", levels[1].Size.W, levels[1].Size.H)
+	if levels[1].Size.W != 256 || levels[1].Size.H != 128 {
+		t.Errorf("L1 = %dx%d, want 256x128 (native ÷2 content extent)", levels[1].Size.W, levels[1].Size.H)
 	}
 	md := sl.Metadata()
 	if md.MPP.X != 0.25 {
