@@ -37,10 +37,12 @@ func TestConvertToIFE_RoundTrip(t *testing.T) {
 	if len(sl.Levels()) == 0 {
 		t.Fatal("no levels")
 	}
-	// PADDING QUIRK: L0 dims = ceil(srcW/256)*256 x ceil(srcH/256)*256.
-	// CMU-1-Small-Region is 2220x2967 -> 2304x3072.
-	if w, h := sl.Levels()[0].Size.W, sl.Levels()[0].Size.H; w != 2304 || h != 3072 {
-		t.Errorf("L0 = %dx%d, want 2304x3072 (256-padded)", w, h)
+	// L0 reports the TRUE content extent (= source dims). opentile-go ≥ v0.53.0
+	// reads IFE Level.Size from TILE_TABLE.x_extent/y_extent (which the writer sets
+	// to the native pixel dims), not the 256-padded tile-grid extent.
+	// CMU-1-Small-Region is 2220x2967.
+	if w, h := sl.Levels()[0].Size.W, sl.Levels()[0].Size.H; w != 2220 || h != 2967 {
+		t.Errorf("L0 = %dx%d, want 2220x2967 (true content extent)", w, h)
 	}
 }
 
