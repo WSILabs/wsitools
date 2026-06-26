@@ -1,13 +1,18 @@
 name: Release
 
-# Create a GitHub Release when a vX.Y.Z tag is pushed. Release notes are the
-# matching section of CHANGELOG.md; the title is the annotated tag's subject
-# line (falling back to the tag name). Notes-only — no binary artifacts (the
-# codec cgo deps make cross-platform binaries a separate concern). The CI
-# workflow runs the test suite on the same tag push in parallel.
+# On a vX.Y.Z tag push: create a GitHub Release (notes from the matching
+# CHANGELOG.md section), then build statically-linked binaries for 5 OS/arch
+# targets and attach them. workflow_dispatch runs the build matrix against an
+# existing (pre)release for a dry-run. The CI workflow runs the test suite on
+# the same tag push in parallel.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "tag or ref to dry-run the matrix against (uploads to that existing (pre)release)"
+        required: false
 
 permissions:
   contents: write
@@ -15,6 +20,10 @@ permissions:
 jobs:
   release:
     name: create GitHub release
+    # Notes job: real tag pushes only. On workflow_dispatch, GITHUB_REF_NAME is a
+    # branch, so this would mis-create a release — skip it and upload to the
+    # pre-existing (pre)release named by inputs.ref instead.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,3 +93,83 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "$TITLE" --notes-file release_notes.md $PRERELEASE
           fi
+
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: release
+    # Order after the notes job on a tag push, but still run on workflow_dispatch
+    # (where `release` is skipped).
+    if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    goos: linux,   goarch: amd64, triplet: x64-linux-static,   static: "false", bin: wsitools,     archive: tar }
+          - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64, triplet: arm64-linux-static, static: "false", bin: wsitools,     archive: tar }
+          - { runner: macos-latest,     goos: darwin,  goarch: arm64, triplet: arm64-osx-static,   static: "false", bin: wsitools,     archive: tar }
+          - { runner: macos-13,         goos: darwin,  goarch: amd64, triplet: x64-osx-static,     static: "false", bin: wsitools,     archive: tar }
+          - { runner: windows-latest,   goos: windows, goarch: amd64, triplet: x64-mingw-static,   static: "true",  bin: wsitools.exe, archive: zip }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install vcpkg build prerequisites (Linux)
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y autoconf-archive nasm
+
+      - name: Set up MSYS2 mingw toolchain (Windows)
+        if: matrix.goos == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+
+      - name: Add mingw to PATH (Windows)
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: echo "$(cygpath -w /mingw64/bin)" >> "$GITHUB_PATH"
+
+      - name: Build (static)
+        id: build
+        uses: ./.github/actions/build-static
+        with:
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          vcpkg-triplet: ${{ matrix.triplet }}
+          static-libc: ${{ matrix.static }}
+          bin-name: ${{ matrix.bin }}
+
+      - name: Archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="${{ steps.build.outputs.artifact-path }}"
+          BASE="wsitools-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd dist && 7z a "../$BASE.zip" "$(basename "$DIR")" >/dev/null)
+            echo "asset=$BASE.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$BASE.tar.gz" -C dist "$(basename "$DIR")"
+            echo "asset=$BASE.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.ref || github.ref_name }}"
+          gh release upload "$TAG" "${{ steps.archive.outputs.asset }}" --clobber --repo "$GITHUB_REPOSITORY"
