@@ -75,11 +75,14 @@ runs:
         set -euo pipefail
         case "${{ inputs.goos }}" in
           linux)
-            if ldd "${{ inputs.bin-name }}" 2>&1 | grep -qiE "not a dynamic executable|statically linked"; then
-              echo "linux: static OK"
-            else
-              echo "linux: NOT static:"; ldd "${{ inputs.bin-name }}" || true; exit 1
-            fi ;;
+            # mostly-static: codec libs are statically linked into the binary;
+            # only system glibc libs remain dynamic. Fail if any CODEC shared
+            # object is referenced. (Also passes for a fully-static binary,
+            # whose ldd lists nothing.)
+            if ldd "${{ inputs.bin-name }}" 2>&1 | grep -qiE "libjxl|libavif|libwebp|libsharpyuv|libopenjph|libturbojpeg|libjpeg|libopenjp2|libhwy|libbrotli|liblcms2|libyuv"; then
+              echo "linux: codec lib dynamically linked:"; ldd "${{ inputs.bin-name }}"; exit 1
+            fi
+            echo "linux: no codec shared libs (codecs static) OK" ;;
           darwin)
             if otool -L "${{ inputs.bin-name }}" | tail -n +2 | grep -vqE "/usr/lib/|/System/"; then
               echo "darwin: NON-system dylib linked:"; otool -L "${{ inputs.bin-name }}"; exit 1
