@@ -4,8 +4,11 @@
 package htj2k
 
 /*
-#cgo CXXFLAGS: -I/opt/homebrew/include -std=c++17
-#cgo LDFLAGS: -L/opt/homebrew/lib -lopenjph -lstdc++
+#cgo CXXFLAGS: -std=c++17
+#cgo pkg-config: openjph
+#cgo darwin LDFLAGS: -lc++
+#cgo linux LDFLAGS: -lstdc++
+#cgo windows LDFLAGS: -lstdc++
 #include <stdlib.h>
 
 extern int wsi_htj2k_encode(
