@@ -196,6 +196,11 @@ with a logged warning.
 
 ## Component 5 — Workflow integration
 
+Two workflow files plus a shared build recipe. The expensive 5-target matrix lives in
+`release.yml` (tag-triggered); a one-target build-only **canary** lives in
+`release-canary.yml` (release-path PRs); both invoke the **same** vcpkg + static-build
++ smoke-test steps via a composite action / reusable workflow so they can't drift.
+
 Extend the existing `.github/workflows/release.yml`:
 
 - **`release` job** (existing, unchanged): create/update the GitHub Release from the
@@ -207,10 +212,38 @@ Extend the existing `.github/workflows/release.yml`:
 - **`checksums` job** (new): `needs: build`; download all assets, compute
   `SHA256SUMS`, upload it.
 
-**Triggering:** keep the `push: tags: ['v*']` trigger, and add
-`workflow_dispatch` with an input (e.g. a target ref/tag) so the matrix can be
-**dry-run on a branch** — uploading to a *draft* or *prerelease* — before it is
-trusted on a real tag.
+**Triggering (release):** keep `release.yml` on `push: tags: ['v*']`, and add
+`workflow_dispatch` with an input (e.g. a target ref/tag) so the **full matrix** can
+be **dry-run** — uploading to a *draft* or *prerelease* — before it is trusted on a
+real tag. Releasing (attach assets + notarize + publish) is **always tag-only**.
+
+**Triggering (canary):** a separate, lightweight workflow —
+`.github/workflows/release-canary.yml` — guards the *static/vcpkg build path* (the
+new fragile surface: musl quirks, mingw/openjph, triplet drift) **before** a tag is
+ever cut. It runs on `pull_request` and `push` **filtered to release-relevant
+paths**:
+
+```yaml
+on:
+  pull_request:
+    paths: [.github/workflows/release*.yml, vcpkg.json,
+            internal/codec/**, go.mod]
+  push:
+    branches: [main]
+    paths: [.github/workflows/release*.yml, vcpkg.json,
+            internal/codec/**, go.mod]
+```
+
+It builds **one representative target only — `linux/amd64` (musl/Alpine)** — through
+the *same* vcpkg + static-build + smoke-test steps as the release matrix, but **does
+not notarize and does not upload anything**. One runner's time, only when a
+release-relevant file changes. Rationale: the regular `ci.yml` already covers the
+*dynamic* build + full test suite on every push/PR; this canary covers only what
+`ci.yml` doesn't — that the *static* release build still links and produces a
+complete binary. The linux/musl target is the most representative single canary
+because it is the strictest (fully static, the libjxl/libavif-on-musl risk lives
+here). Reusing shared steps (a composite action or reusable workflow) keeps the
+canary and the release matrix from drifting apart.
 
 **Release notes** gain a short, documented **per-platform codec matrix** (all six on
 every target, per the decisions here) and a macOS Gatekeeper note (moot once
@@ -259,3 +292,6 @@ notarized, retained for any unsigned dry-run artifacts).
   goreleaser (its single-host cross-compile model fights cgo + per-platform static).
 - **Static deps:** **vcpkg** static triplets, uniform across platforms.
 - **Linux libc:** **musl/Alpine** for maximum "runs anywhere" portability.
+- **Triggers:** full matrix builds + releases **tag-only** (`v*`) + `workflow_dispatch`
+  dry-run; a one-target (`linux/amd64` musl) **build-only canary** runs on PRs/pushes
+  touching release-relevant paths, to catch static-build rot before a tag is cut.
