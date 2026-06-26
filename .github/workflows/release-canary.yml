@@ -1,0 +1,41 @@
+name: Release canary
+# Guards the STATIC/vcpkg build path before a tag is cut. ci.yml already covers
+# the dynamic build + tests; this covers only what ci.yml doesn't.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release*.yml
+      - .github/actions/build-static/**
+      - .github/vcpkg-triplets/**
+      - vcpkg.json
+      - vcpkg-configuration.json
+      - internal/codec/**
+      - go.mod
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release*.yml
+      - .github/actions/build-static/**
+      - .github/vcpkg-triplets/**
+      - vcpkg.json
+      - vcpkg-configuration.json
+      - internal/codec/**
+      - go.mod
+
+jobs:
+  canary-linux-musl:
+    runs-on: ubuntu-latest
+    container: golang:1.26-alpine
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Install build prerequisites (Alpine is bare)
+        run: apk add --no-cache git bash cmake ninja pkgconf build-base linux-headers perl python3 zip tar zstd curl
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-static
+        with:
+          goos: linux
+          goarch: amd64
+          vcpkg-triplet: x64-linux-static
+          static-libc: "true"
+          bin-name: wsitools
