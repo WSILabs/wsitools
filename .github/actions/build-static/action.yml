@@ -1,0 +1,109 @@
+name: Build static wsitools
+description: vcpkg static deps + static go build + doctor smoke + linkage assertion
+inputs:
+  goos:        { description: "linux|darwin|windows", required: true }
+  goarch:      { description: "amd64|arm64", required: true }
+  vcpkg-triplet: { description: "e.g. x64-linux-static, arm64-osx-static, x64-mingw-static", required: true }
+  static-libc: { description: "true to add -extldflags -static (linux/windows)", required: true }
+  bin-name:    { description: "wsitools or wsitools.exe", required: true }
+outputs:
+  artifact-path: { description: "staged binary path", value: "${{ steps.stage.outputs.path }}" }
+runs:
+  using: composite
+  steps:
+    - name: Bootstrap vcpkg (pinned)
+      shell: bash
+      run: |
+        set -euo pipefail
+        git clone https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+        BASELINE=$(python3 -c "import json;print(json.load(open('vcpkg.json'))['builtin-baseline'])")
+        git -C "$RUNNER_TEMP/vcpkg" checkout "$BASELINE"
+        "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+        echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+    - name: Configure vcpkg binary cache dir
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/vcpkg-bincache"
+        echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg-bincache" >> "$GITHUB_ENV"
+
+    - name: Cache vcpkg-built packages
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+        key: vcpkg-${{ inputs.vcpkg-triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+
+    - name: Install codec libs (static)
+      shell: bash
+      run: |
+        set -euo pipefail
+        "$VCPKG_ROOT/vcpkg" install \
+          --triplet "${{ inputs.vcpkg-triplet }}" \
+          --overlay-triplets="$PWD/.github/vcpkg-triplets" \
+          --x-install-root="$PWD/vcpkg_installed"
+        echo "PKG_CONFIG_PATH=$PWD/vcpkg_installed/${{ inputs.vcpkg-triplet }}/lib/pkgconfig" >> "$GITHUB_ENV"
+
+    - name: Static build
+      shell: bash
+      env:
+        CGO_ENABLED: "1"
+        GOOS: ${{ inputs.goos }}
+        GOARCH: ${{ inputs.goarch }}
+      run: |
+        set -euo pipefail
+        LDFLAGS="-s -w"
+        if [ "${{ inputs.static-libc }}" = "true" ]; then
+          LDFLAGS="$LDFLAGS -extldflags \"-static\""
+        fi
+        go build -trimpath -ldflags "$LDFLAGS" -o "${{ inputs.bin-name }}" ./cmd/wsitools
+
+    - name: Smoke test — version + all six codecs
+      shell: bash
+      run: |
+        set -euo pipefail
+        ./${{ inputs.bin-name }} version
+        OUT=$(./${{ inputs.bin-name }} doctor)
+        echo "$OUT"
+        for c in jpeg jpeg2000 htj2k jpegxl avif webp; do
+          echo "$OUT" | grep -qE "✓ $c\b" || { echo "MISSING CODEC: $c"; exit 1; }
+        done
+
+    - name: Assert static linkage
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${{ inputs.goos }}" in
+          linux)
+            if ldd "${{ inputs.bin-name }}" 2>&1 | grep -qiE "not a dynamic executable|statically linked"; then
+              echo "linux: static OK"
+            else
+              echo "linux: NOT static:"; ldd "${{ inputs.bin-name }}" || true; exit 1
+            fi ;;
+          darwin)
+            if otool -L "${{ inputs.bin-name }}" | tail -n +2 | grep -vqE "/usr/lib/|/System/"; then
+              echo "darwin: NON-system dylib linked:"; otool -L "${{ inputs.bin-name }}"; exit 1
+            fi
+            echo "darwin: only system dylibs OK" ;;
+          windows)
+            if command -v ldd >/dev/null && ldd "${{ inputs.bin-name }}" | grep -qiE "openjph|jxl|avif|webp|turbojpeg|openjp2"; then
+              echo "windows: codec DLL referenced:"; ldd "${{ inputs.bin-name }}"; exit 1
+            fi
+            echo "windows: no codec DLLs OK" ;;
+        esac
+
+    - name: Stage artifact (binary + LICENSE + README)
+      id: stage
+      shell: bash
+      run: |
+        set -euo pipefail
+        DIR="dist/wsitools-${{ inputs.goos }}-${{ inputs.goarch }}"
+        mkdir -p "$DIR"
+        cp "${{ inputs.bin-name }}" "$DIR/"
+        cp LICENSE "$DIR/"
+        cat > "$DIR/README.txt" <<'EOF'
+        wsitools — whole-slide-imaging CLI (https://github.com/WSILabs/wsitools)
+        Statically-linked build. All codecs (jpeg, jpeg2000, htj2k, jpegxl, avif, webp) included.
+        Run `wsitools --help` to begin.
+        EOF
+        echo "path=$DIR" >> "$GITHUB_OUTPUT"
