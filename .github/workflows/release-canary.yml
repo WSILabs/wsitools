@@ -28,6 +28,9 @@ jobs:
     container: golang:1.26-alpine
     env:
       GOTOOLCHAIN: local
+      # musl/Alpine: make vcpkg use the apk-installed musl-native cmake/ninja
+      # instead of downloading its own glibc-linked tools (which can't exec on musl).
+      VCPKG_FORCE_SYSTEM_BINARIES: "1"
     steps:
       - name: Install build prerequisites (Alpine is bare)
         run: apk add --no-cache git bash cmake ninja pkgconf build-base linux-headers perl python3 zip tar zstd curl
