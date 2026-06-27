@@ -157,6 +157,30 @@ re-tiling transform (routes through `derivedsource`).
 - `--to bif`: **error** (vendor format).
 - DZI/SZI: no specific allowed sizes → `N > 0` is the only validation.
 
+## Related cleanup: remove the `--jobs` alias
+
+`--jobs` is a redundant alias of `--workers`, present on `convert`, `crop`,
+`downsample`, and `transcode` (and reversed on `downsample`, where `--jobs` is the
+primary and `--workers` the alias). Reconciled by `resolveWorkers`
+(`cmd/wsitools/workers.go`). It bloats the (already long) option list for no benefit.
+
+**Change:** `--workers` becomes the single canonical worker flag on every command;
+`--jobs` is **removed** everywhere (breaking; pre-1.0). `resolveWorkers` and
+`workers.go` are deleted — with one flag there is nothing to reconcile; each command
+reads its `--workers` value directly.
+
+| File | Change |
+|---|---|
+| `cmd/wsitools/convert.go` | drop `cvJobs` + `--jobs`; `cvWorkers` used directly (remove the `resolveWorkers` call) |
+| `cmd/wsitools/crop.go` | drop `cropJobs` + `--jobs`; `cropWorkers` directly |
+| `cmd/wsitools/transcode.go` | drop `cvJobs` + `--jobs` |
+| `cmd/wsitools/downsample.go` | make `--workers` the primary (default `runtime.NumCPU()`, preserving today's effective default); drop `--jobs`/`dsJobs` |
+| `cmd/wsitools/workers.go` | **delete** (`resolveWorkers` no longer needed) |
+| tests / help text | update any `--jobs` references |
+
+Defaults are preserved: `convert`/`crop`/`transcode` keep `--workers` default `0`
+(GOMAXPROCS); `downsample` keeps the effective `NumCPU` default on `--workers`.
+
 ## Out of scope / follow-ups
 
 - A wsitools issue to add LZW/uncompressed (and Deflate) as **encode** targets, so
