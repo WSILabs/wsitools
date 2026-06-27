@@ -25,8 +25,8 @@ var (
 	cvQuality      string
 	cvWorkers      int
 
-	cvDZITileSize int
-	cvDZIOverlap  int
+	cvTileSize   int
+	cvDZIOverlap int
 	cvDZIFormat   string
 
 	cvLossless bool
@@ -91,7 +91,7 @@ func init() {
 	convertCmd.Flags().BoolVar(&cvLossless, "lossless", false, "lossless --to dzi|szi: copy source JPEG base tiles verbatim (no re-encode)")
 	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi|ife (1 = no scaling; one of {2,4,8,16})")
 	convertCmd.Flags().IntVar(&cvTargetMag, "target-mag", 0, "alternative to --factor: derive factor from source AppMag")
-	convertCmd.Flags().IntVar(&cvDZITileSize, "dzi-tile-size", 256, "DZI/SZI tile size in pixels")
+	convertCmd.Flags().IntVar(&cvTileSize, "tile-size", 0, "output tile size in pixels (0 = match source; replaces --dzi-tile-size)")
 	convertCmd.Flags().IntVar(&cvDZIOverlap, "dzi-overlap", 1, "DZI/SZI tile overlap pixels on each side")
 	convertCmd.Flags().StringVar(&cvDZIFormat, "dzi-format", "jpeg", "DZI/SZI tile codec: jpeg or png")
 	convertCmd.Flags().BoolVar(&cvAllowNonconformant, "allow-nonconformant", false, "write a valid-but-non-readable output (e.g. non-jpeg OME-TIFF) with a warning")
