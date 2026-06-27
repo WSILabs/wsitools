@@ -2,10 +2,25 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.23.0] - 2026-06-27
 
 ### Added
 
+- **Prebuilt binaries** — every `vX.Y.Z` release now ships statically-linked,
+  download-and-run `wsitools` binaries for **5 targets** (Linux amd64/arm64,
+  macOS arm64/amd64, Windows amd64), each bundling all six codecs with no system
+  libraries to install. Built on native runners (cgo rules out cross-compiling
+  the host) with the codec C libraries sourced **statically via vcpkg**
+  (`vcpkg.json` + `.github/vcpkg-triplets/`), a shared `build-static` composite
+  action, and a 5-target matrix in `release.yml` (notes → build → `SHA256SUMS`);
+  a `release-canary` workflow guards the static build on release-relevant PRs.
+  Linux is glibc *mostly-static* (runs on all mainstream distros); Windows is
+  fully static; Intel-Mac binaries are **cross-compiled on Apple Silicon** (the
+  Intel runner pool is being sunset). **macOS binaries are sign+notarize-ready
+  but ship unsigned until Developer-ID signing secrets are provisioned** — see
+  `docs/RELEASING.md`. As part of this, `internal/codec/htj2k` now discovers
+  OpenJPH via `pkg-config` instead of hardcoded Homebrew paths (also fixes
+  Intel-Mac and clean-environment source builds).
 - **`convert --to bif`** (experimental) — write a Ventana/Roche **DP 200-shaped
   BIF** from any source (`internal/tiff/bifwriter` + `cmd/wsitools/convert_bif.go`).
   Full pyramid as row-major `level=N` IFDs (verbatim JPEG **tile-copy** for JPEG
