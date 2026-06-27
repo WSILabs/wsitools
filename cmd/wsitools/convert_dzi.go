@@ -79,7 +79,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 			rectSet:         rectFlagsSet(cmd),
 			userSetTileSize: cmd.Flags().Changed("tile-size"),
 			userSetOverlap:  cmd.Flags().Changed("dzi-overlap"),
-			reqTileSize:     resolveTileSize(l0.TileSize.W, cvTileSize),
+			reqTileSize:     tileSize,
 			reqOverlap:      cvDZIOverlap,
 		})
 		if lerr != nil {

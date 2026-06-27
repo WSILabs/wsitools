@@ -116,6 +116,22 @@ func TestTileSizeBIFErrors(t *testing.T) {
 	}
 }
 
+// TestTileSizeIFEErrors: IFE is a fixed-256px-tile format, so --tile-size != 256
+// is rejected (like --to bif).
+func TestTileSizeIFEErrors(t *testing.T) {
+	src := cmuFixture(t)
+	bin := buildOnce(t)
+	out := filepath.Join(t.TempDir(), "out.iris")
+
+	o, err := runCLI(bin, "convert", "--to", "ife", "--tile-size", "512", "-f", "-o", out, src)
+	if err == nil {
+		t.Fatalf("expected error for --to ife --tile-size 512, got success\n%s", o)
+	}
+	if !strings.Contains(o, "tile-size") {
+		t.Errorf("error output does not mention tile-size:\n%s", o)
+	}
+}
+
 // TestTileSizeDICOMRowsColumns verifies --tile-size surfaces as the DICOM frame
 // Rows/Columns (read back by opentile as the level tile size).
 func TestTileSizeDICOMRowsColumns(t *testing.T) {
