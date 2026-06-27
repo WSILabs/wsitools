@@ -83,7 +83,12 @@ func targetAcceptsCodec(target string, c source.Compression) bool {
 // tileCopyEligible returns true iff the convert request can use the
 // bit-exact tile-copy fast path. dzi/szi targets always re-encode
 // (overlap + extra pyramid levels make tile-copy impossible).
-func tileCopyEligible(target, codecFlag string, src source.Compression, srcNativelyTiled bool) bool {
+func tileCopyEligible(target, codecFlag string, src source.Compression, srcNativelyTiled bool, tileSize, srcL0TileW int) bool {
+	// A verbatim tile-copy cannot change tile size; a --tile-size that differs
+	// from the source forces a re-encode, so disqualify the copy.
+	if tileSize > 0 && tileSize != srcL0TileW {
+		return false
+	}
 	if target == "dzi" || target == "szi" {
 		return false
 	}

@@ -62,14 +62,14 @@ func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) e
 		return runConvertTIFFReencode(cmd, input, target, codecName, cvQuality, cvWorkers, start)
 	}
 
-	if tileCopyEligible(target, cvCodec, srcCodec, tiled) {
+	if tileCopyEligible(target, cvCodec, srcCodec, tiled, cvTileSize, l0.TileSize().X) {
 		return runConvertTIFFTileCopy(cmd, src, input, target, start)
 	}
-	if cvCodec == "" {
-		return fmt.Errorf("--codec required for --to %s with source codec %s (no tile-copy path)",
-			target, srcCodec)
+	codecName, cerr := reencodeCodecFor(srcCodec, cvCodec)
+	if cerr != nil {
+		return cerr
 	}
-	return runConvertTIFFReencode(cmd, input, target, cvCodec, cvQuality, cvWorkers, start)
+	return runConvertTIFFReencode(cmd, input, target, codecName, cvQuality, cvWorkers, start)
 }
 
 func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target string, start time.Time) error {
