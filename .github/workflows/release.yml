@@ -53,6 +53,25 @@ jobs:
             printf 'Release %s\n' "$TAG" > release_notes.md
           fi
 
+          # Append the prebuilt-binary footer (codec matrix + verification note).
+          cat >> release_notes.md <<'EOF'
+
+          ---
+          ### Prebuilt binaries
+          Statically linked; every target includes all codecs (jpeg, jpeg2000, htj2k, jpegxl, avif, webp).
+
+          | Target | Asset |
+          |---|---|
+          | Linux x86-64 | `wsitools-linux-amd64.tar.gz` |
+          | Linux arm64  | `wsitools-linux-arm64.tar.gz` |
+          | macOS Apple Silicon | `wsitools-darwin-arm64.tar.gz` |
+          | macOS Intel  | `wsitools-darwin-amd64.tar.gz` |
+          | Windows x86-64 | `wsitools-windows-amd64.zip` |
+
+          Verify with `sha256sum -c SHA256SUMS`. macOS binaries are signed + notarized; an
+          unsigned (dry-run) build instead needs `xattr -d com.apple.quarantine wsitools`.
+          EOF
+
           # actions/checkout fetches the tag as a lightweight ref, so
           # %(contents:subject) falls back to the commit subject. Re-fetch the
           # annotated tag object explicitly, then read its subject only when the
@@ -255,3 +274,23 @@ jobs:
           set -euo pipefail
           TAG="${{ github.event.inputs.ref || github.ref_name }}"
           gh release upload "$TAG" "${{ steps.archive.outputs.asset }}" --clobber --repo "$GITHUB_REPOSITORY"
+
+  checksums:
+    name: SHA256SUMS
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Compute + upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.ref || github.ref_name }}"
+          mkdir dl && cd dl
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'wsitools-*'
+          sha256sum wsitools-* > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
