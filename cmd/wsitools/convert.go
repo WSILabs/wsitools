@@ -24,7 +24,6 @@ var (
 	cvCodec        string
 	cvQuality      string
 	cvWorkers      int
-	cvJobs         int
 
 	cvDZITileSize int
 	cvDZIOverlap  int
@@ -89,7 +88,6 @@ func init() {
 	convertCmd.Flags().StringVar(&cvCodec, "codec", "", "output tile codec (jpeg|jpeg2000|jpegxl|avif|webp|htj2k; jpeg|png for dzi|szi); absent = tile-copy when eligible")
 	convertCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs accepted)")
 	convertCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
-	convertCmd.Flags().IntVar(&cvJobs, "jobs", 0, "alias of --workers")
 	convertCmd.Flags().BoolVar(&cvLossless, "lossless", false, "lossless --to dzi|szi: copy source JPEG base tiles verbatim (no re-encode)")
 	convertCmd.Flags().IntVar(&cvFactor, "factor", 1, "downsample factor for svs|tiff|ome-tiff|cog-wsi|dicom|dzi|szi|ife (1 = no scaling; one of {2,4,8,16})")
 	convertCmd.Flags().IntVar(&cvTargetMag, "target-mag", 0, "alternative to --factor: derive factor from source AppMag")
@@ -107,7 +105,6 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	input := args[0]
 	start := time.Now()
-	cvWorkers = resolveWorkers(cvWorkers, cmd.Flags().Changed("workers"), cvJobs, cmd.Flags().Changed("jobs"))
 
 	if cvFactor != 1 || cvTargetMag != 0 {
 		if cvFactor != 1 && !isValidFactor(cvFactor) {
