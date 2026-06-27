@@ -53,6 +53,7 @@ type Encoder struct {
 
 func (*Encoder) LevelHeader() []byte        { return nil }
 func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionHTJ2K }
+func (*Encoder) TIFFPhotometric() uint16    { return codec.PhotometricRGB }
 func (*Encoder) Close() error               { return nil }
 
 // EncodeTile encodes an RGB888 tile as a raw J2K codestream using OpenJPH.

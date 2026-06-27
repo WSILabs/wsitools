@@ -37,10 +37,24 @@ type Quality struct {
 	Knobs map[string]string
 }
 
+// TIFF PhotometricInterpretation values an encoder can declare for its output.
+// JPEG tiles are stored as YCbCr (the JFIF default), so a TIFF wrapping them
+// MUST tag PhotometricInterpretation=YCbCr(6) — tagging RGB(2) makes spec-
+// following readers (OpenSlide, ImageScope) skip the YCbCr→RGB conversion and
+// render wrong colors. Codecs that store RGB samples (JPEG 2000, WebP, AVIF,
+// JPEG XL, HTJ2K, PNG-in-TIFF) declare RGB(2).
+const (
+	PhotometricRGB   uint16 = 2
+	PhotometricYCbCr uint16 = 6
+)
+
 type Encoder interface {
 	LevelHeader() []byte
 	EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error)
 	TIFFCompressionTag() uint16
+	// TIFFPhotometric is the PhotometricInterpretation (tag 262) a TIFF
+	// container must use for this encoder's tiles. See PhotometricRGB/YCbCr.
+	TIFFPhotometric() uint16
 	Close() error
 }
 

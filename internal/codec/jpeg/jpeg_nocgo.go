@@ -30,4 +30,5 @@ func (*Encoder) EncodeTile(_ []byte, _, _ int, _ []byte) ([]byte, error) { retur
 func (*Encoder) EncodeStandalone(_ []byte, _, _ int) ([]byte, error)     { return nil, errNoCGO }
 func (*Encoder) LevelHeader() []byte                                      { return nil }
 func (*Encoder) TIFFCompressionTag() uint16                               { return tiff.CompressionJPEG }
+func (*Encoder) TIFFPhotometric() uint16                                  { return codec.PhotometricYCbCr }
 func (*Encoder) Close() error                                             { return nil }

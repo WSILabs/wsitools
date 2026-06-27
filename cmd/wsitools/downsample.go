@@ -268,7 +268,7 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 			TileWidth:       outputTileSize,
 			TileHeight:      outputTileSize,
 			Compression:     enc.TIFFCompressionTag(),
-			Photometric:     2,
+			Photometric:     enc.TIFFPhotometric(),
 			SamplesPerPixel: 3,
 			BitsPerSample:   []uint16{8, 8, 8},
 			JPEGTables:      tables,
@@ -448,7 +448,7 @@ func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []b
 		TileWidth:       outputTileSize,
 		TileHeight:      outputTileSize,
 		Compression:     tiff.CompressionJPEG,
-		Photometric:     2, // RGB (Aperio)
+		Photometric:     codec.PhotometricYCbCr, // JPEG tiles are YCbCr
 		SamplesPerPixel: 3,
 		BitsPerSample:   []uint16{8, 8, 8},
 		JPEGTables:      tables,

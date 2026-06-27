@@ -2,6 +2,23 @@
 
 All notable changes to wsi-tools will be documented here. The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Wrong colours in Aperio-ecosystem viewers (ImageScope, OpenSlide) for
+  re-encoded / tile-copied JPEG output.** A TIFF wrapping YCbCr JPEG tiles was
+  tagged `PhotometricInterpretation=RGB(2)`, so spec-following readers skipped the
+  YCbCr→RGB conversion and rendered all colours wrong (opentile is lenient and
+  decoded by the JPEG's own markers, which masked the bug). The photometric is now
+  derived from the actual tile colour model: re-encoded JPEG tiles (always YCbCr)
+  are tagged `YCbCr(6)`, and verbatim tile-copies are tagged from the source JPEG's
+  framing — JFIF/standard `Y,Cb,Cr` component IDs → `YCbCr(6)`, Aperio bare-JPEG
+  framing → `RGB(2)`. Spans every re-encode/copy path (`convert --to
+  svs|tiff|ome-tiff|cog-wsi`, `--factor`, `downsample`, `crop`, associated-image
+  rebuild). YCbCrSubSampling now accompanies the YCbCr photometric on all
+  containers. Verified pixel-faithful against OpenSlide for SVS/IFE/BIF sources.
+
 ## [0.23.0] - 2026-06-27
 
 ### Added

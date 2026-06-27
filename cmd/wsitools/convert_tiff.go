@@ -177,11 +177,16 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 	// omits it rather than risking a wrong value.
 	if container == "svs" {
 		opts.ImageDepth = 1
-		if compressionTagFor(l0.Compression()) == tiff.CompressionJPEG {
-			buf := make([]byte, l0.TileMaxSize())
-			// Independent of the write loop below; samples tile (0,0)'s
-			// chroma subsampling to describe the JPEG bytes we copy.
-			if n, err := l0.TileInto(0, 0, buf); err == nil {
+	}
+	// YCbCrSubSampling describes the verbatim JPEG bytes we copy. It is required
+	// when the tiles are tagged Photometric=YCbCr (JFIF/Adobe-YCbCr sources); SVS
+	// also carries it by Aperio convention even when the photometric is RGB. It
+	// is omitted for a non-SVS RGB-tagged JPEG (the tag would be meaningless).
+	// Sampled from tile (0,0), independent of the write loop below.
+	if compressionTagFor(l0.Compression()) == tiff.CompressionJPEG {
+		buf := make([]byte, l0.TileMaxSize())
+		if n, err := l0.TileInto(0, 0, buf); err == nil {
+			if container == "svs" || jpegTilePhotometric(buf[:n]) == codec.PhotometricYCbCr {
 				if h, v, ok := qualityjpeg.LumaSampling(buf[:n]); ok {
 					opts.YCbCrSubSampling = []uint16{h, v}
 				}
@@ -335,9 +340,13 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	// matches the JPEG bytes we write (and is omitted for non-JPEG codecs).
 	if resolvedContainer == "svs" {
 		opts.ImageDepth = 1
-		if sub, ok := encoderChromaSubsampling(fac, knobs); ok {
-			opts.YCbCrSubSampling = sub
-		}
+	}
+	// Emit YCbCrSubSampling (530) whenever the codec stores YCbCr (JPEG), so the
+	// tag matches the JPEG bytes — required for Photometric=YCbCr tiles to decode
+	// correctly in spec-following readers (OpenSlide/ImageScope). The probe
+	// returns false (no tag) for non-JPEG codecs, which store RGB.
+	if sub, ok := encoderChromaSubsampling(fac, knobs); ok {
+		opts.YCbCrSubSampling = sub
 	}
 
 	w, err := streamwriter.Create(cvOutput, opts)
@@ -490,7 +499,7 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 		TileWidth:       uint32(lvl.TileSize().X),
 		TileHeight:      uint32(lvl.TileSize().Y),
 		Compression:     enc.TIFFCompressionTag(),
-		Photometric:     2, // RGB; codecs carry their own colour model
+		Photometric:     enc.TIFFPhotometric(), // YCbCr for JPEG tiles, RGB otherwise
 		SamplesPerPixel: 3,
 		BitsPerSample:   []uint16{8, 8, 8},
 		JPEGTables:      enc.LevelHeader(),
@@ -639,16 +648,100 @@ func tightRGB(img *decoder.Image) []byte {
 // and writes its associated images per plan. l0Desc is the L0 ImageDescription
 // (OME-XML / Aperio header) emitted as an L0-only ExtraTag for svs/ome-tiff.
 // Caller owns Create/Close/Abort. Does NOT call w.Abort() on error — returns it.
+// jpegTilePhotometric returns the TIFF PhotometricInterpretation that makes a
+// verbatim-copied JPEG tile render correctly in libtiff/Aperio readers
+// (OpenSlide, ImageScope): YCbCr(6) for a JPEG that holds YCbCr samples (so the
+// reader applies YCbCr→RGB), RGB(2) for one that holds RGB samples.
+//
+// Colorspace is inferred from the JPEG's own markers, mirroring libjpeg, with one
+// deliberate deviation: a JFIF APP0 marker MANDATES YCbCr per the JFIF spec, so it
+// takes precedence over an Adobe APP14 marker. This matters because opentile's
+// abbreviated-tile reconstruction prepends a spurious Adobe transform=0 (RGB)
+// marker to tiles that are plainly YCbCr (they also carry JFIF + Y,Cb,Cr SOF IDs
+// 1,2,3 and decode as YCbCr) — trusting that Adobe marker would mislabel them RGB.
+//
+// Precedence: JFIF → YCbCr; else Adobe APP14 transform (0→RGB, 1/2→YCbCr); else
+// SOF component IDs 1,2,3 → YCbCr; else RGB. Non-JPEG input falls back to RGB.
+func jpegTilePhotometric(tile []byte) uint16 {
+	hasJFIF := false
+	adobeTransform := -1 // -1 = no Adobe APP14 marker
+	sofYCbCr := false    // SOF carries the standard Y,Cb,Cr component IDs 1,2,3
+	for i := 0; i+1 < len(tile); {
+		if tile[i] != 0xFF {
+			i++
+			continue
+		}
+		m := tile[i+1]
+		switch {
+		case m == 0xFF: // fill byte
+			i++
+			continue
+		case m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7): // SOI/TEM/RSTn: no payload
+			i += 2
+			continue
+		case m == 0xDA || m == 0xD9: // SOS/EOI: header scan done
+			i = len(tile)
+			continue
+		}
+		if i+4 > len(tile) {
+			break
+		}
+		ln := int(tile[i+2])<<8 | int(tile[i+3])
+		if ln < 2 || i+2+ln > len(tile) {
+			break
+		}
+		seg := tile[i+4 : i+2+ln]
+		switch {
+		case m == 0xEE && len(seg) >= 12 && string(seg[:5]) == "Adobe":
+			adobeTransform = int(seg[11])
+		case m == 0xE0 && len(seg) >= 5 && string(seg[:5]) == "JFIF\x00":
+			hasJFIF = true
+		case (m >= 0xC0 && m <= 0xC3): // SOFn: precision,h,w,ncomp, then ncomp×(id,samp,qt)
+			if len(seg) >= 15 && seg[5] == 3 && seg[6] == 1 && seg[9] == 2 && seg[12] == 3 {
+				sofYCbCr = true
+			}
+		}
+		i += 2 + ln
+	}
+	switch {
+	case hasJFIF: // JFIF mandates YCbCr (authoritative over a stray Adobe marker)
+		return codec.PhotometricYCbCr
+	case adobeTransform == 0:
+		return codec.PhotometricRGB
+	case adobeTransform == 1 || adobeTransform == 2:
+		return codec.PhotometricYCbCr
+	case sofYCbCr:
+		return codec.PhotometricYCbCr
+	default:
+		return codec.PhotometricRGB
+	}
+}
+
 func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0Desc string, omeSynthetic bool, plan omeEditPlan) error {
+	levels := src.Levels()
+	// A verbatim-copied JPEG tile must be tagged with the photometric matching
+	// its own framing (JFIF/Adobe-YCbCr → YCbCr(6); bare/Aperio → RGB(2)).
+	// Sampled once from L0's first tile — all levels share the source's framing.
+	jpegPhoto := uint16(codec.PhotometricRGB)
+	if len(levels) > 0 && compressionTagFor(levels[0].Compression()) == tiff.CompressionJPEG {
+		probe := make([]byte, levels[0].TileMaxSize())
+		if n, err := levels[0].TileInto(0, 0, probe); err == nil {
+			jpegPhoto = jpegTilePhotometric(probe[:n])
+		}
+	}
 	// Tile-copy: emit levels in source order (L0 first).
-	for _, lvl := range src.Levels() {
+	for _, lvl := range levels {
+		photometric := uint16(codec.PhotometricRGB)
+		if compressionTagFor(lvl.Compression()) == tiff.CompressionJPEG {
+			photometric = jpegPhoto
+		}
 		spec := streamwriter.LevelSpec{
 			ImageWidth:      uint32(lvl.Size().X),
 			ImageHeight:     uint32(lvl.Size().Y),
 			TileWidth:       uint32(lvl.TileSize().X),
 			TileHeight:      uint32(lvl.TileSize().Y),
 			Compression:     compressionTagFor(lvl.Compression()),
-			Photometric:     2, // RGB; lossless copy preserves source codec's colour model
+			Photometric:     photometric,
 			SamplesPerPixel: 3,
 			BitsPerSample:   []uint16{8, 8, 8},
 			NewSubfileType:  newSubfileTypeForLevel(lvl.Index(), container),

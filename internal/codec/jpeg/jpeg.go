@@ -124,6 +124,7 @@ func New(g codec.LevelGeometry, q codec.Quality) (*Encoder, error) {
 
 func (e *Encoder) LevelHeader() []byte        { return e.tables }
 func (e *Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEG }
+func (e *Encoder) TIFFPhotometric() uint16    { return codec.PhotometricYCbCr }
 func (e *Encoder) Close() error               { return nil }
 
 func (e *Encoder) computeTables() error {

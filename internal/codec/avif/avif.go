@@ -114,6 +114,7 @@ type Encoder struct {
 
 func (*Encoder) LevelHeader() []byte        { return nil }
 func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionAVIF }
+func (*Encoder) TIFFPhotometric() uint16    { return codec.PhotometricRGB }
 func (*Encoder) Close() error               { return nil }
 
 func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {

@@ -166,6 +166,7 @@ type Encoder struct {
 
 func (*Encoder) LevelHeader() []byte        { return nil }
 func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEGXL }
+func (*Encoder) TIFFPhotometric() uint16    { return codec.PhotometricRGB }
 func (*Encoder) Close() error               { return nil }
 
 // IsLossless reports whether this encoder produces byte-exact output (distance 0).
