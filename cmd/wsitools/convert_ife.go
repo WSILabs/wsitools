@@ -63,6 +63,11 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 	if _, ok := ife.EncodingFor(codecName); !ok {
 		return fmt.Errorf("convert --to ife: --codec %q not supported; IFE tiles are jpeg or avif", codecName)
 	}
+	// IFE is a fixed-256px-tile format (internal/ife.tileSidePixels); the writer's
+	// geometry assumes 256, so --tile-size cannot vary it.
+	if cvTileSize > 0 && cvTileSize != 256 {
+		return fmt.Errorf("convert --to ife: --tile-size %d not supported; IFE uses fixed 256px tiles (omit --tile-size or pass 256)", cvTileSize)
+	}
 
 	slide, err := opentile.OpenFile(input)
 	if err != nil {
@@ -110,8 +115,8 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 	}
 	outL0 := opentile.Size{W: outW, H: outH}
 
-	outTile := resolveTileSize(slide.Levels()[0].TileSize.W, cvTileSize)
-	levels := octaveLevelSpecsFor(outL0, outTile)
+	// IFE tiles are fixed at 256px (format constraint; guarded above).
+	levels := octaveLevelSpecsFor(outL0, 256)
 
 	// Build the tile encoder for the resolved codec.
 	fac, knobs, resolvedName, rerr := resolveTransformCodec(codecName, cvQuality)
@@ -119,7 +124,7 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 		return rerr
 	}
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
-		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
+		TileWidth: 256, TileHeight: 256, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)

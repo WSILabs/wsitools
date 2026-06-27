@@ -47,11 +47,10 @@ func TestConvertToIFE_RoundTrip(t *testing.T) {
 }
 
 // TestConvertToIFE_VerbatimByteIdentical generates a 256px-JPEG pyramid TIFF (the
-// IFE fixture pool has no native 256px-JPEG WSI; CMU-1 is 240px-tiled and the
-// no-transform TIFF path preserves source geometry, so we force the 256px retile
-// engine with --factor), converts it to IFE — which should take the verbatim
-// tile-copy fast path — and asserts a sample of pyramid tile bytes are
-// byte-identical between the TIFF and the IFE.
+// IFE fixture pool has no native 256px-JPEG WSI; CMU-1 is 240px-tiled, and IFE
+// requires 256px tiles, so we force 256px output with --tile-size), converts it
+// to IFE — which should take the verbatim tile-copy fast path — and asserts a
+// sample of pyramid tile bytes are byte-identical between the TIFF and the IFE.
 func TestConvertToIFE_VerbatimByteIdentical(t *testing.T) {
 	td := testdir(t)
 	srcSVS := filepath.Join(td, "svs", "CMU-1-Small-Region.svs")
@@ -61,11 +60,11 @@ func TestConvertToIFE_VerbatimByteIdentical(t *testing.T) {
 	bin := buildOnce(t)
 	dir := t.TempDir()
 
-	// 1. make a 256px-JPEG pyramid TIFF. --factor forces the retile engine (which
-	// emits 256px tiles, the default output tile size); the no-transform path
-	// would instead preserve the source's 240px tiling.
+	// 1. make a 256px-JPEG pyramid TIFF. --tile-size 256 forces 256px output tiles
+	// (the default now matches the source's 240px tiling), which the IFE verbatim
+	// tile-copy fast path requires. --factor also routes through the retile engine.
 	tiff256 := filepath.Join(dir, "src256.tiff")
-	if b, err := runCLI(bin, "convert", "--to", "tiff", "--codec", "jpeg", "--factor", "2", "-o", tiff256, srcSVS); err != nil {
+	if b, err := runCLI(bin, "convert", "--to", "tiff", "--codec", "jpeg", "--factor", "2", "--tile-size", "256", "-o", tiff256, srcSVS); err != nil {
 		t.Fatalf("make tiff: %v\n%s", err, b)
 	}
 
