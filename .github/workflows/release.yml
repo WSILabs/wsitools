@@ -102,6 +102,11 @@ jobs:
     if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
+    env:
+      # Sentinel for the macOS signing gate: presence of the Developer-ID cert
+      # secret. Absent on forks / before the maintainer provisions secrets →
+      # the sign step is skipped and an unsigned binary is shipped.
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
     strategy:
       fail-fast: false
       matrix:
@@ -176,6 +181,56 @@ jobs:
           vcpkg-triplet: ${{ matrix.triplet }}
           static-libc: ${{ matrix.static }}
           bin-name: ${{ matrix.bin }}
+
+      - name: Sign + notarize (macOS, if secrets present)
+        if: matrix.goos == 'darwin' && env.MACOS_CERT_P12_BASE64 != ''
+        shell: bash
+        env:
+          MACOS_CERT_PASSWORD:        ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
+          MACOS_NOTARY_KEY_ID:        ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID:     ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          BIN="${{ steps.build.outputs.artifact-path }}/wsitools"
+
+          # Import the Developer ID Application cert into an ephemeral keychain.
+          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
+          KCPASS="$(uuidgen)"
+          security create-keychain -p "$KCPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
+          echo "$MACOS_CERT_P12_BASE64" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
+          # Make the ephemeral keychain searchable (preserve the login keychain).
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/{print $2; exit}')"
+          if [ -z "$IDENTITY" ]; then echo "no Developer ID Application identity in cert"; exit 1; fi
+
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$BIN"
+          codesign --verify --strict --verbose=2 "$BIN"
+
+          # Notarize (App Store Connect API key) then staple the ticket.
+          echo "$MACOS_NOTARY_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k "${{ steps.build.outputs.artifact-path }}" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$BIN"
+          xcrun stapler validate "$BIN"
+
+          # Scrub secrets from the runner.
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
+          security delete-keychain "$KEYCHAIN" || true
+
+      - name: Note unsigned macOS build (no secrets)
+        if: matrix.goos == 'darwin' && env.MACOS_CERT_P12_BASE64 == ''
+        shell: bash
+        run: echo "::warning::macOS signing secrets absent — shipping an UNSIGNED binary (Gatekeeper will quarantine it on download)."
 
       - name: Archive
         id: archive
