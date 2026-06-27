@@ -70,7 +70,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err != nil {
 		return err
 	}
-	tileSize, overlap := cvTileSize, cvDZIOverlap
+	tileSize, overlap := resolveTileSize(l0.TileSize.W, cvTileSize), cvDZIOverlap
 	if cvLossless {
 		res, lerr := losslessDZIConfig(losslessDZIInputs{
 			isJPEG:          src.Levels()[0].Compression() == source.CompressionJPEG,
@@ -79,7 +79,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 			rectSet:         rectFlagsSet(cmd),
 			userSetTileSize: cmd.Flags().Changed("tile-size"),
 			userSetOverlap:  cmd.Flags().Changed("dzi-overlap"),
-			reqTileSize:     cvTileSize,
+			reqTileSize:     resolveTileSize(l0.TileSize.W, cvTileSize),
 			reqOverlap:      cvDZIOverlap,
 		})
 		if lerr != nil {

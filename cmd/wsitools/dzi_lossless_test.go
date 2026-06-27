@@ -43,6 +43,6 @@ func TestLosslessDZIConfig_Errors(t *testing.T) {
 	bad.userSetTileSize = true
 	bad.reqTileSize = 512
 	if _, err := losslessDZIConfig(bad); err == nil {
-		t.Error("explicit --dzi-tile-size != source must error")
+		t.Error("explicit --tile-size != source must error")
 	}
 }
