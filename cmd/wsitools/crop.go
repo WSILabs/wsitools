@@ -242,7 +242,8 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if outW <= 0 || outH <= 0 {
 		return fmt.Errorf("--factor %d too large for crop extent %dx%d", factor, ew, eh)
 	}
-	nLevels := flooredLevelCount(outW, outH, outputTileSize)
+	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
+	nLevels := flooredLevelCount(outW, outH, outTile)
 
 	p := cropEmitParams{
 		ctx: ctx, src: src, srcL0: srcL0, input: input, output: output,
@@ -251,7 +252,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		factor: factor, outW: outW, outH: outH,
 		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
 		start: start,
-		fac:   fac, knobs: knobs, codecName: resolvedCodec,
+		fac:   fac, knobs: knobs, codecName: resolvedCodec, outTile: outTile,
 	}
 	switch target {
 	case "svs":

@@ -44,9 +44,6 @@ import (
 )
 
 const (
-	// outputTileSize is the standard Aperio SVS tile size and what
-	// opentile-go's SVS reader expects on re-open.
-	outputTileSize = 256
 	// bigTIFFThreshold is the predicted output size at which we auto-promote
 	// to BigTIFF (8-byte offsets). Classic TIFF tops out at 4 GiB but we
 	// promote earlier with safety margin against late-IFD growth.
@@ -212,11 +209,11 @@ func predictBigTIFFNeeded(srcL0 *opentile.Level, levels []*opentile.Level, facto
 	return total > bigTIFFThreshold
 }
 
-// countTilesForLevel returns the number of 256×256 tiles needed to cover a
-// raster of the given dimensions.
-func countTilesForLevel(w, h int) int {
-	tilesX := (w + outputTileSize - 1) / outputTileSize
-	tilesY := (h + outputTileSize - 1) / outputTileSize
+// countTilesForLevel returns the number of outTile×outTile tiles needed to
+// cover a raster of the given dimensions.
+func countTilesForLevel(w, h, outTile int) int {
+	tilesX := (w + outTile - 1) / outTile
+	tilesY := (h + outTile - 1) / outTile
 	return tilesX * tilesY
 }
 
@@ -238,7 +235,8 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 	if outL0.W <= 0 || outL0.H <= 0 {
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
-	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, fac, knobs, workers, postL0Hook)
+	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
+	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, outTile, fac, knobs, workers, postL0Hook)
 }
 
 // buildEnginePyramid builds a streamwriter pyramid by streaming srcRegion
@@ -246,11 +244,11 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 // selected by fac+knobs; Compression is derived from enc.TIFFCompressionTag().
 // postL0Hook runs after L0's AddLevel, before L1 (the thumbnail-IFD interleave).
 // Shared by downsample (full-L0 region, outL0=L0/factor) and crop (rect region, identity).
-func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
-	levels := octaveLevelSpecsFor(outL0, outputTileSize)
+func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
+	levels := octaveLevelSpecsFor(outL0, outTile)
 
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
-		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
+		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)
@@ -262,8 +260,8 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 		return streamwriter.LevelSpec{
 			ImageWidth:      uint32(levels[i].Width),
 			ImageHeight:     uint32(levels[i].Height),
-			TileWidth:       outputTileSize,
-			TileHeight:      outputTileSize,
+			TileWidth:       uint32(outTile),
+			TileHeight:      uint32(outTile),
 			Compression:     enc.TIFFCompressionTag(),
 			Photometric:     enc.TIFFPhotometric(),
 			SamplesPerPixel: 3,
@@ -302,13 +300,13 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 // JPEG pyramid via the streamwriter, box-halving between levels. nLevels is the
 // total number of pyramid levels to emit (L0 included). postL0Hook runs
 // immediately after L0 (used to interleave the thumbnail IFD). bar may be nil.
-func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, workers int, postL0Hook func() error) error {
+func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, workers, outTile int, postL0Hook func() error) error {
 	// Total tile count across all output levels for the progress bar.
 	var totalTiles int64
 	{
 		lw, lh := l0W, l0H
 		for lvl := 0; lvl < nLevels; lvl++ {
-			totalTiles += int64(countTilesForLevel(lw, lh))
+			totalTiles += int64(countTilesForLevel(lw, lh, outTile))
 			if lvl < nLevels-1 {
 				lw /= 2
 				lh /= 2
@@ -341,10 +339,10 @@ func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []by
 
 	for outLvl := 0; outLvl < nLevels; outLvl++ {
 		lvlStart := time.Now()
-		tiles := countTilesForLevel(currentW, currentH)
+		tiles := countTilesForLevel(currentW, currentH, outTile)
 		slog.Debug("encoding level", "level", outLvl, "w", currentW, "h", currentH, "tiles", tiles)
 
-		if err := encodeAndWriteLevel(ctx, w, currentRaster, currentW, currentH, quality, workers, bar); err != nil {
+		if err := encodeAndWriteLevel(ctx, w, currentRaster, currentW, currentH, quality, workers, outTile, bar); err != nil {
 			if progress != nil {
 				progress.Wait()
 			}
@@ -427,10 +425,10 @@ func cropRaster(src []byte, srcW, srcH, dstW, dstH int) []byte {
 // JPEG tiles and writes them via a streamwriter LevelHandle. All pyramid IFDs
 // use NewSubfileType=0 — opentile-go's SVS classifier rejects pyramid levels
 // with the reduced bit set. bar may be nil when --quiet is set.
-func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []byte, levelW, levelH, quality, workers int, bar *mpb.Bar) error {
+func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []byte, levelW, levelH, quality, workers, outTile int, bar *mpb.Bar) error {
 	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
-		TileWidth:   outputTileSize,
-		TileHeight:  outputTileSize,
+		TileWidth:   outTile,
+		TileHeight:  outTile,
 		PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
 	if err != nil {
@@ -442,8 +440,8 @@ func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []b
 	lh, err := w.AddLevel(streamwriter.LevelSpec{
 		ImageWidth:      uint32(levelW),
 		ImageHeight:     uint32(levelH),
-		TileWidth:       outputTileSize,
-		TileHeight:      outputTileSize,
+		TileWidth:       uint32(outTile),
+		TileHeight:      uint32(outTile),
 		Compression:     tiff.CompressionJPEG,
 		Photometric:     codec.PhotometricYCbCr, // JPEG tiles are YCbCr
 		SamplesPerPixel: 3,
@@ -456,13 +454,13 @@ func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []b
 		return fmt.Errorf("AddLevel: %w", err)
 	}
 
-	tilesX := (levelW + outputTileSize - 1) / outputTileSize
-	tilesY := (levelH + outputTileSize - 1) / outputTileSize
+	tilesX := (levelW + outTile - 1) / outTile
+	tilesY := (levelH + outTile - 1) / outTile
 
 	source := func(ctx context.Context, emit func(pipeline.Tile) error) error {
 		for ty := 0; ty < tilesY; ty++ {
 			for tx := 0; tx < tilesX; tx++ {
-				tile, err := extractTileFromRaster(raster, levelW, levelH, tx, ty)
+				tile, err := extractTileFromRaster(raster, levelW, levelH, tx, ty, outTile)
 				if err != nil {
 					return err
 				}
@@ -474,7 +472,7 @@ func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []b
 		return nil
 	}
 	process := func(t pipeline.Tile) (pipeline.Tile, error) {
-		out, err := enc.EncodeTile(t.Bytes, outputTileSize, outputTileSize, nil)
+		out, err := enc.EncodeTile(t.Bytes, outTile, outTile, nil)
 		if err != nil {
 			return pipeline.Tile{}, err
 		}
@@ -531,12 +529,12 @@ func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []b
 	return <-drainErr
 }
 
-// extractTileFromRaster cuts a 256x256 RGB tile out of the level raster at
-// tile coord (tx, ty). Edge tiles are padded with zero where the raster
-// doesn't extend that far. Always returns a fresh outputTileSize×outputTileSize
+// extractTileFromRaster cuts an outTile×outTile RGB tile out of the level
+// raster at tile coord (tx, ty). Edge tiles are padded with zero where the
+// raster doesn't extend that far. Always returns a fresh outTile×outTile
 // buffer for the encoder.
-func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty int) ([]byte, error) {
-	return downscale.ExtractTile(raster, rasterW, rasterH, tx, ty, outputTileSize), nil
+func extractTileFromRaster(raster []byte, rasterW, rasterH, tx, ty, outTile int) ([]byte, error) {
+	return downscale.ExtractTile(raster, rasterW, rasterH, tx, ty, outTile), nil
 }
 
 // writeOneAssociated writes a single associated image verbatim into the output

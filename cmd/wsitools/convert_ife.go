@@ -110,7 +110,8 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 	}
 	outL0 := opentile.Size{W: outW, H: outH}
 
-	levels := octaveLevelSpecsFor(outL0, outputTileSize)
+	outTile := resolveTileSize(slide.Levels()[0].TileSize.W, cvTileSize)
+	levels := octaveLevelSpecsFor(outL0, outTile)
 
 	// Build the tile encoder for the resolved codec.
 	fac, knobs, resolvedName, rerr := resolveTransformCodec(codecName, cvQuality)
@@ -118,7 +119,7 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 		return rerr
 	}
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
-		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
+		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)

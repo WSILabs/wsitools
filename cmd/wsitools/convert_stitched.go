@@ -34,10 +34,7 @@ func sourceIsOverlapping(src source.Source) bool {
 func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src source.Source, w *cogwsiwriter.Writer, plan assocEditPlan, workers int, knobs map[string]string, codecName string) error {
 	l0 := slide.Pyramid(0).Levels[0]
 	outL0 := opentile.Size{W: l0.Size.W, H: l0.Size.H}
-	tile := l0.TileSize.W
-	if tile <= 0 {
-		tile = 256
-	}
+	tile := resolveTileSize(l0.TileSize.W, cvTileSize)
 	levels := octaveLevelSpecsFor(outL0, tile)
 
 	fac, err := codec.Lookup(codecName)
@@ -100,10 +97,7 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.Source, w *streamwriter.Writer, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool, workers int, fac codec.EncoderFactory, knobs map[string]string) error {
 	l0 := slide.Pyramid(0).Levels[0]
 	outL0 := opentile.Size{W: l0.Size.W, H: l0.Size.H}
-	tile := l0.TileSize.W
-	if tile <= 0 {
-		tile = 256
-	}
+	tile := resolveTileSize(l0.TileSize.W, cvTileSize)
 	levels := octaveLevelSpecsFor(outL0, tile)
 
 	enc, err := fac.NewEncoder(codec.LevelGeometry{TileWidth: tile, TileHeight: tile, PixelFormat: codec.PixelFormatRGB8}, codec.Quality{Knobs: knobs})
@@ -193,6 +187,25 @@ func encoderIsLossless(enc codec.Encoder) bool {
 // Index 0..M-1 + their source tile size.
 func convertTranscodeTIFF(ctx context.Context, slide *opentile.Slide, src source.Source, w *streamwriter.Writer, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool, workers int, fac codec.EncoderFactory, knobs map[string]string, levels []retile.LevelSpec) error {
 	l0 := slide.Pyramid(0).Levels[0]
+
+	// Honor --tile-size: the engine (retile.Run) reads the source via ScaledStrips
+	// and re-tiles to whatever the level specs declare, so overriding the per-level
+	// tile sizes here produces correct output at the requested tile size. Cols/Rows
+	// must be recomputed from the new tile size so the engine's grid stays consistent
+	// (emitted levels only; intermediate levels carry the internal box-reduction
+	// strip height and never emit tiles). When unset (cvTileSize == 0) this is a
+	// no-op → source tiling preserved.
+	if cvTileSize > 0 {
+		for i := range levels {
+			if levels[i].Intermediate {
+				continue
+			}
+			levels[i].TileW = cvTileSize
+			levels[i].TileH = cvTileSize
+			levels[i].Cols = (levels[i].Width + cvTileSize - 1) / cvTileSize
+			levels[i].Rows = (levels[i].Height + cvTileSize - 1) / cvTileSize
+		}
+	}
 
 	enc, err := fac.NewEncoder(codec.LevelGeometry{TileWidth: levels[0].TileW, TileHeight: levels[0].TileH, PixelFormat: codec.PixelFormatRGB8}, codec.Quality{Knobs: knobs})
 	if err != nil {

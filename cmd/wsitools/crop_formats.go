@@ -99,6 +99,7 @@ type cropEmitParams struct {
 	fac          codec.EncoderFactory
 	knobs        map[string]string
 	codecName    string
+	outTile      int
 }
 
 func cropToTIFF(p cropEmitParams) error {
@@ -142,7 +143,7 @@ func cropToTIFF(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -158,7 +159,7 @@ func cropToTIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -199,7 +200,7 @@ func cropToSVS(p cropEmitParams) error {
 		return fmt.Errorf("parse source ImageDescription: %w", derr)
 	}
 	baseW, baseH := p.src.Levels()[0].Size.W, p.src.Levels()[0].Size.H
-	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, p.ex, p.ey, p.l0W, p.l0H, outputTileSize, outputTileSize, p.quality, p.codecName)
+	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, p.ex, p.ey, p.l0W, p.l0H, p.outTile, p.outTile, p.quality, p.codecName)
 	cropDesc = scaleAperioResolutionTokens(cropDesc, p.factor)
 	outMPP := desc.MPP * float64(p.factor)
 	outMag := desc.AppMag / float64(p.factor)
@@ -262,7 +263,7 @@ func cropToSVS(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, wtr, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, wtr, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -278,7 +279,7 @@ func cropToSVS(p cropEmitParams) error {
 				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, wtr, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, wtr, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -357,7 +358,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -373,7 +374,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -455,14 +456,14 @@ func cropToCOGWSI(p cropEmitParams) error {
 				aborted = true
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality); err != nil {
+			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.outTile); err != nil {
 				aborted = true
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
 	} else {
 		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
-		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.fac, p.knobs, p.workers); err != nil {
+		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers); err != nil {
 			aborted = true
 			return fmt.Errorf("build pyramid: %w", err)
 		}
@@ -555,7 +556,7 @@ func cropToDICOM(p cropEmitParams) error {
 		}
 		ds, err := derivedsource.WithLosslessL0(
 			src.Levels()[0], p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H,
-			p.l0, p.nLevels, outputTileSize, p.quality, p.workers, src.Format(), md, assoc)
+			p.l0, p.nLevels, p.outTile, p.quality, p.workers, src.Format(), md, assoc)
 		if err != nil {
 			return fmt.Errorf("build derived source: %w", err)
 		}
