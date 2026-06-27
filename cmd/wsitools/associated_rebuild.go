@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/wsilabs/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 )
 
@@ -24,14 +25,28 @@ type assocEditPlan struct {
 // associated images per plan. It does NOT Abort/Close w — the caller owns the
 // writer lifecycle. Pyramid tile bytes are copied unmodified (no re-encode).
 func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) error {
-	for _, lvl := range src.Levels() {
+	levels := src.Levels()
+	// Verbatim JPEG tiles must carry the photometric matching their own framing
+	// (JFIF/Adobe-YCbCr → YCbCr(6); bare/Aperio → RGB(2)); sampled once from L0.
+	jpegPhoto := uint16(2)
+	if len(levels) > 0 && compressionTagFor(levels[0].Compression()) == tiff.CompressionJPEG {
+		probe := make([]byte, levels[0].TileMaxSize())
+		if n, err := levels[0].TileInto(0, 0, probe); err == nil {
+			jpegPhoto = jpegTilePhotometric(probe[:n])
+		}
+	}
+	for _, lvl := range levels {
+		photometric := uint16(2)
+		if compressionTagFor(lvl.Compression()) == tiff.CompressionJPEG {
+			photometric = jpegPhoto
+		}
 		spec := cogwsiwriter.LevelSpec{
 			ImageWidth:      uint32(lvl.Size().X),
 			ImageHeight:     uint32(lvl.Size().Y),
 			TileWidth:       uint32(lvl.TileSize().X),
 			TileHeight:      uint32(lvl.TileSize().Y),
 			Compression:     compressionTagFor(lvl.Compression()),
-			Photometric:     2,
+			Photometric:     photometric,
 			SamplesPerPixel: 3,
 			BitsPerSample:   []uint16{8, 8, 8},
 			IsL0:            lvl.Index() == 0,

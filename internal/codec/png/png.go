@@ -49,6 +49,7 @@ func (e *Encoder) EncodeTile(rgb []byte, w, h int, _ []byte) ([]byte, error) {
 // TIFFCompressionTag returns 0: PNG is not a TIFF tile codec. Callers writing a
 // TIFF MUST assert this is non-zero before use (DZI/SZI is the only valid sink).
 func (e *Encoder) TIFFCompressionTag() uint16 { return 0 }
+func (e *Encoder) TIFFPhotometric() uint16    { return codec.PhotometricRGB }
 
 func (e *Encoder) Close() error { return nil }
 

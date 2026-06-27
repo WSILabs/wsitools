@@ -1050,7 +1050,7 @@ func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cog
 		h, err := w.AddLevel(cogwsiwriter.LevelSpec{
 			ImageWidth: uint32(levels[i].Width), ImageHeight: uint32(levels[i].Height),
 			TileWidth: outputTileSize, TileHeight: outputTileSize,
-			Compression: enc.TIFFCompressionTag(), Photometric: 2,
+			Compression: enc.TIFFCompressionTag(), Photometric: enc.TIFFPhotometric(),
 			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
 			JPEGTables: enc.LevelHeader(),
 			IsL0:       i == 0,
@@ -1112,7 +1112,7 @@ func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, rast
 		TileWidth:       outputTileSize,
 		TileHeight:      outputTileSize,
 		Compression:     tiff.CompressionJPEG,
-		Photometric:     2, // RGB
+		Photometric:     codec.PhotometricYCbCr, // JPEG tiles are YCbCr
 		SamplesPerPixel: 3,
 		BitsPerSample:   []uint16{8, 8, 8},
 		JPEGTables:      tables,

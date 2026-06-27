@@ -55,7 +55,7 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 		h, err := w.AddLevel(cogwsiwriter.LevelSpec{
 			ImageWidth: uint32(ls.Width), ImageHeight: uint32(ls.Height),
 			TileWidth: uint32(ls.TileW), TileHeight: uint32(ls.TileH),
-			Compression: enc.TIFFCompressionTag(), Photometric: 2,
+			Compression: enc.TIFFCompressionTag(), Photometric: enc.TIFFPhotometric(),
 			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
 			JPEGTables: enc.LevelHeader(),
 			IsL0:       i == 0,
@@ -117,7 +117,7 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 		spec := streamwriter.LevelSpec{
 			ImageWidth: uint32(ls.Width), ImageHeight: uint32(ls.Height),
 			TileWidth: uint32(ls.TileW), TileHeight: uint32(ls.TileH),
-			Compression: enc.TIFFCompressionTag(), Photometric: 2,
+			Compression: enc.TIFFCompressionTag(), Photometric: enc.TIFFPhotometric(),
 			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
 			JPEGTables:     enc.LevelHeader(),
 			NewSubfileType: newSubfileTypeForLevel(i, container),
@@ -212,7 +212,7 @@ func convertTranscodeTIFF(ctx context.Context, slide *opentile.Slide, src source
 		spec := streamwriter.LevelSpec{
 			ImageWidth: uint32(ls.Width), ImageHeight: uint32(ls.Height),
 			TileWidth: uint32(ls.TileW), TileHeight: uint32(ls.TileH),
-			Compression: enc.TIFFCompressionTag(), Photometric: 2,
+			Compression: enc.TIFFCompressionTag(), Photometric: enc.TIFFPhotometric(),
 			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
 			JPEGTables:     enc.LevelHeader(),
 			NewSubfileType: newSubfileTypeForLevel(ls.Index, container),
