@@ -157,6 +157,16 @@ re-tiling transform (routes through `derivedsource`).
 - `--to bif`: **error** (vendor format).
 - DZI/SZI: no specific allowed sizes → `N > 0` is the only validation.
 
+## Implementation correction: IFE is fixed-256
+
+This spec listed `--to ife` as an arbitrary-tile target. **Implementation found IFE
+is a fixed-256px-tile format** (`internal/ife.tileSidePixels = 256`; the writer's
+geometry assumes 256), so IFE cannot vary its tile size. Shipped behavior: `--to
+ife` always uses 256px tiles, and `--tile-size != 256` for `--to ife` **errors**
+(like `--to bif`). The "unset → match source" default does NOT apply to IFE (it
+would mis-shape the output). Lifting this needs a tile-size-parameterized IFE
+writer + confirming the IFE spec permits non-256 tiles — out of scope.
+
 ## Related cleanup: remove the `--jobs` alias
 
 `--jobs` is a redundant alias of `--workers`, present on `convert`, `crop`,
