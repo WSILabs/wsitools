@@ -200,6 +200,9 @@ func runConvert(cmd *cobra.Command, args []string) error {
 		}
 		return runConvertDICOM(cmd, input, start)
 	case "bif":
+		if cvTileSize > 0 {
+			return fmt.Errorf("--tile-size is not supported for --to bif (verbatim DP-200 tiling)")
+		}
 		return runConvertBIF(cmd, input, start)
 	case "ife":
 		return runConvertIFE(cmd, input, start)
