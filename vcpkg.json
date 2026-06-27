@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "wsitools",
+  "version-string": "0.0.0",
+  "description": "Codec C libraries for wsitools static binary builds",
+  "dependencies": [
+    "libjpeg-turbo",
+    "openjpeg",
+    "libjxl",
+    "libavif",
+    "libwebp",
+    "openjph"
+  ],
+  "builtin-baseline": "e287d598bce5311742c23b421820cc78396142e5"
+}

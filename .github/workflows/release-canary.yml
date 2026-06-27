@@ -1,0 +1,45 @@
+name: Release canary
+# Guards the STATIC/vcpkg build path before a tag is cut. ci.yml already covers
+# the dynamic build + tests; this covers only what ci.yml doesn't.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release*.yml
+      - .github/actions/build-static/**
+      - .github/vcpkg-triplets/**
+      - vcpkg.json
+      - vcpkg-configuration.json
+      - internal/codec/**
+      - go.mod
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release*.yml
+      - .github/actions/build-static/**
+      - .github/vcpkg-triplets/**
+      - vcpkg.json
+      - vcpkg-configuration.json
+      - internal/codec/**
+      - go.mod
+
+jobs:
+  canary-linux:
+    # glibc on the standard ubuntu runner (vcpkg is first-class here): static
+    # codec libs + dynamic glibc ("mostly-static"). Runs on all mainstream
+    # distros. Avoids the musl/Alpine vcpkg toolchain pitfalls (glibc-cmake,
+    # samurai-not-ninja).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install vcpkg build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y autoconf-archive nasm
+      - uses: ./.github/actions/build-static
+        with:
+          goos: linux
+          goarch: amd64
+          vcpkg-triplet: x64-linux-static
+          static-libc: "false"
+          bin-name: wsitools

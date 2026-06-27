@@ -30,3 +30,7 @@ mem.prof
 # Python bytecode (validator scripts)
 __pycache__/
 *.pyc
+
+# vcpkg local build artifacts
+/vcpkg_installed/
+/vcpkg/

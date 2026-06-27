@@ -1,13 +1,18 @@
 name: Release
 
-# Create a GitHub Release when a vX.Y.Z tag is pushed. Release notes are the
-# matching section of CHANGELOG.md; the title is the annotated tag's subject
-# line (falling back to the tag name). Notes-only — no binary artifacts (the
-# codec cgo deps make cross-platform binaries a separate concern). The CI
-# workflow runs the test suite on the same tag push in parallel.
+# On a vX.Y.Z tag push: create a GitHub Release (notes from the matching
+# CHANGELOG.md section), then build statically-linked binaries for 5 OS/arch
+# targets and attach them. workflow_dispatch runs the build matrix against an
+# existing (pre)release for a dry-run. The CI workflow runs the test suite on
+# the same tag push in parallel.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "tag or ref to dry-run the matrix against (uploads to that existing (pre)release)"
+        required: false
 
 permissions:
   contents: write
@@ -15,6 +20,10 @@ permissions:
 jobs:
   release:
     name: create GitHub release
+    # Notes job: real tag pushes only. On workflow_dispatch, GITHUB_REF_NAME is a
+    # branch, so this would mis-create a release — skip it and upload to the
+    # pre-existing (pre)release named by inputs.ref instead.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +52,25 @@ jobs:
             echo "::warning::no CHANGELOG section for ${VERSION}; using a placeholder"
             printf 'Release %s\n' "$TAG" > release_notes.md
           fi
+
+          # Append the prebuilt-binary footer (codec matrix + verification note).
+          cat >> release_notes.md <<'EOF'
+
+          ---
+          ### Prebuilt binaries
+          Statically linked; every target includes all codecs (jpeg, jpeg2000, htj2k, jpegxl, avif, webp).
+
+          | Target | Asset |
+          |---|---|
+          | Linux x86-64 | `wsitools-linux-amd64.tar.gz` |
+          | Linux arm64  | `wsitools-linux-arm64.tar.gz` |
+          | macOS Apple Silicon | `wsitools-darwin-arm64.tar.gz` |
+          | macOS Intel  | `wsitools-darwin-amd64.tar.gz` |
+          | Windows x86-64 | `wsitools-windows-amd64.zip` |
+
+          Verify with `sha256sum -c SHA256SUMS`. macOS binaries are signed + notarized; an
+          unsigned (dry-run) build instead needs `xattr -d com.apple.quarantine wsitools`.
+          EOF
 
           # actions/checkout fetches the tag as a lightweight ref, so
           # %(contents:subject) falls back to the commit subject. Re-fetch the
@@ -84,3 +112,192 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "$TITLE" --notes-file release_notes.md $PRERELEASE
           fi
+
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: release
+    # Order after the notes job on a tag push, but still run on workflow_dispatch
+    # (where `release` is skipped).
+    if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    env:
+      # Sentinel for the macOS signing gate: presence of the Developer-ID cert
+      # secret. Absent on forks / before the maintainer provisions secrets →
+      # the sign step is skipped and an unsigned binary is shipped.
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    goos: linux,   goarch: amd64, triplet: x64-linux-static,   static: "false", bin: wsitools,     archive: tar }
+          - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64, triplet: arm64-linux-static, static: "false", bin: wsitools,     archive: tar }
+          - { runner: macos-latest,     goos: darwin,  goarch: arm64, triplet: arm64-osx-static,   static: "false", bin: wsitools,     archive: tar }
+          - { runner: macos-latest,     goos: darwin,  goarch: amd64, triplet: x64-osx-static,     static: "false", bin: wsitools,     archive: tar }
+          - { runner: windows-latest,   goos: windows, goarch: amd64, triplet: x64-mingw-static,   static: "true",  bin: wsitools.exe, archive: zip }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install vcpkg build prerequisites (Linux)
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y autoconf-archive nasm
+
+      - name: Set up MSYS2 mingw toolchain (Windows)
+        id: msys2
+        if: matrix.goos == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+
+      - name: Put MSYS2 mingw64 on PATH + select pkgconf (Windows)
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Prepend the MSYS2 mingw64 bin (gcc + pkgconf live here) so its pkgconf
+          # wins over the runner's broken Strawberry-Perl pkg-config.bat. Use the
+          # setup-msys2 install location — NOT git-bash's /mingw64, which is Git's
+          # own mingw and has no gcc/pkgconf.
+          echo '${{ steps.msys2.outputs.msys2-location }}\mingw64\bin' >> "$GITHUB_PATH"
+          # cgo: invoke pkgconf explicitly (default 'pkg-config' resolves to the
+          # Strawberry stub). pkgconf honors the PKG_CONFIG_PATH the composite sets.
+          echo "PKG_CONFIG=pkgconf" >> "$GITHUB_ENV"
+
+      - name: Configure macOS x86_64 cross-build (darwin/amd64 on arm64 runner)
+        if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build the Intel-Mac binary on the (plentiful) Apple-Silicon runner by
+          # cross-targeting x86_64. Use CGO_*FLAGS (cgo-only; vcpkg ignores them,
+          # so its bootstrap/tool stay native arm64) rather than overriding CC.
+          # clang is a universal cross-compiler; the x64-osx-static vcpkg triplet
+          # already pins VCPKG_OSX_ARCHITECTURES=x86_64, so the codec .a libs are
+          # x86_64 too. (GOARCH=amd64 is set by the build-static composite.)
+          echo "CGO_CFLAGS=-arch x86_64" >> "$GITHUB_ENV"
+          echo "CGO_CXXFLAGS=-arch x86_64" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-arch x86_64" >> "$GITHUB_ENV"
+          # Rosetta lets the x86_64 `doctor` smoke test run on the arm64 host.
+          softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Build (static)
+        id: build
+        uses: ./.github/actions/build-static
+        with:
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          vcpkg-triplet: ${{ matrix.triplet }}
+          static-libc: ${{ matrix.static }}
+          bin-name: ${{ matrix.bin }}
+
+      - name: Sign + notarize (macOS, if secrets present)
+        if: matrix.goos == 'darwin' && env.MACOS_CERT_P12_BASE64 != ''
+        shell: bash
+        env:
+          MACOS_CERT_PASSWORD:        ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
+          MACOS_NOTARY_KEY_ID:        ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID:     ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          BIN="${{ steps.build.outputs.artifact-path }}/wsitools"
+          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
+
+          # Scrub decoded key material + the signing keychain on ANY exit path
+          # (set -e means a mid-step failure — e.g. a notarization rejection —
+          # would otherwise skip a trailing cleanup, leaving plaintext .p12/.p8
+          # on the runner for the rest of the job).
+          cleanup() {
+            rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
+            security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          # Import the Developer ID Application cert into an ephemeral keychain.
+          KCPASS="$(uuidgen)"
+          security create-keychain -p "$KCPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
+          echo "$MACOS_CERT_P12_BASE64" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
+          # Make the ephemeral keychain searchable (preserve the login keychain).
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/{print $2; exit}')"
+          if [ -z "$IDENTITY" ]; then echo "no Developer ID Application identity in cert"; exit 1; fi
+
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$BIN"
+          codesign --verify --strict --verbose=2 "$BIN"
+
+          # Notarize (App Store Connect API key) then staple the ticket.
+          echo "$MACOS_NOTARY_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k "${{ steps.build.outputs.artifact-path }}" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$BIN"
+          xcrun stapler validate "$BIN"
+          # (cleanup runs via the EXIT trap above)
+
+      - name: Note unsigned macOS build (no secrets)
+        if: matrix.goos == 'darwin' && env.MACOS_CERT_P12_BASE64 == ''
+        shell: bash
+        run: echo "::warning::macOS signing secrets absent — shipping an UNSIGNED binary (Gatekeeper will quarantine it on download)."
+
+      - name: Archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="${{ steps.build.outputs.artifact-path }}"
+          BASE="wsitools-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd dist && 7z a "../$BASE.zip" "$(basename "$DIR")" >/dev/null)
+            echo "asset=$BASE.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$BASE.tar.gz" -C dist "$(basename "$DIR")"
+            echo "asset=$BASE.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.ref || github.ref_name }}"
+          gh release upload "$TAG" "${{ steps.archive.outputs.asset }}" --clobber --repo "$GITHUB_REPOSITORY"
+
+  checksums:
+    name: SHA256SUMS
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Compute + upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.ref || github.ref_name }}"
+          mkdir dl && cd dl
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'wsitools-*'
+          sha256sum wsitools-* > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"

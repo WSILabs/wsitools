@@ -267,8 +267,26 @@ go build -tags 'nojxl noavif nowebp nohtj2k' ./cmd/wsitools   # only JPEG
 
 ## Install
 
-wsitools builds from source; its image codecs are C libraries linked via cgo, so
-install those first. With **Go 1.26+** and the codec libraries present:
+### Prebuilt binaries (recommended)
+
+Download the archive for your platform from the
+[latest release](https://github.com/WSILabs/wsitools/releases/latest), extract,
+and run `wsitools` — no toolchain or codec libraries to install. Every binary is
+statically linked and includes all codecs (jpeg, jpeg2000, htj2k, jpegxl, avif,
+webp). Verify integrity with `sha256sum -c SHA256SUMS`.
+
+| Platform | Asset |
+|---|---|
+| Linux x86-64 / arm64 | `wsitools-linux-{amd64,arm64}.tar.gz` |
+| macOS Apple Silicon / Intel | `wsitools-darwin-{arm64,amd64}.tar.gz` |
+| Windows x86-64 | `wsitools-windows-amd64.zip` |
+
+macOS binaries are signed + notarized, so they run with no Gatekeeper prompt.
+
+### From source
+
+Its image codecs are C libraries linked via cgo, so install those first. With
+**Go 1.26+** and the codec libraries present:
 
 ```sh
 go install github.com/wsilabs/wsitools/cmd/wsitools@latest
