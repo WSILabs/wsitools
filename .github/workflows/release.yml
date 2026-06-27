@@ -212,9 +212,19 @@ jobs:
         run: |
           set -euo pipefail
           BIN="${{ steps.build.outputs.artifact-path }}/wsitools"
+          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
+
+          # Scrub decoded key material + the signing keychain on ANY exit path
+          # (set -e means a mid-step failure — e.g. a notarization rejection —
+          # would otherwise skip a trailing cleanup, leaving plaintext .p12/.p8
+          # on the runner for the rest of the job).
+          cleanup() {
+            rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
+            security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+          }
+          trap cleanup EXIT
 
           # Import the Developer ID Application cert into an ephemeral keychain.
-          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
           KCPASS="$(uuidgen)"
           security create-keychain -p "$KCPASS" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -241,10 +251,7 @@ jobs:
             --wait
           xcrun stapler staple "$BIN"
           xcrun stapler validate "$BIN"
-
-          # Scrub secrets from the runner.
-          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
-          security delete-keychain "$KEYCHAIN" || true
+          # (cleanup runs via the EXIT trap above)
 
       - name: Note unsigned macOS build (no secrets)
         if: matrix.goos == 'darwin' && env.MACOS_CERT_P12_BASE64 == ''
