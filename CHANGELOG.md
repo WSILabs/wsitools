@@ -6,15 +6,21 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Added
 
-- **`convert --tile-size N`** — general output tile-size control for every
-  raster/re-encode target (`svs`/`tiff`/`ome-tiff`/`cog-wsi`, `dzi`/`szi`,
-  `dicom`). Unset (`0`) defaults to the **source's tile size** — fixing the
-  previously hardcoded 256 in `--factor`, `downsample`, and `--to ife`; `N`
-  overrides. On an otherwise-lossless tile-copy, a `--tile-size` differing from
-  the source forces a re-encode whose codec defaults to the **source's own**
-  codec (erroring if the source codec has no encoder). `--to dicom` re-tiles
-  (frame `Rows`/`Columns` follow); `--to bif` (verbatim DP-200) and `--to ife`
-  (fixed 256px tiles) reject a non-matching `--tile-size`.
+- **`convert --tile-size N`** — output tile-size control for the re-encode
+  targets (`svs`/`tiff`/`ome-tiff`/`cog-wsi`, `dzi`/`szi`, `dicom`). When unset
+  (`0`), the output tile size **matches the source** — fixing the previously
+  hardcoded 256 in `--factor` and `downsample`; pass `N` to override. A
+  `--tile-size` equal to the source tiling is a no-op (a lossless tile-copy stays
+  a copy); a `--tile-size` that *differs* from the source forces a re-encode,
+  whose codec defaults to the **source's own** codec (erroring if that codec has
+  no encoder — pass `--codec`). Per-target notes:
+  - `--to dicom`: re-tiles **only when a size differing from the source is
+    requested** (the DICOM `Rows`/`Columns` frame tags then follow); otherwise
+    the existing verbatim frame-copy is unchanged.
+  - `--to bif` (verbatim Ventana/Roche DP-200 layout) and `--to ife` (Iris IFE
+    mandates fixed 256×256 tiles in v1.0): a `--tile-size` they can't honor is
+    **rejected with a clear error** rather than silently ignored. `--to ife`
+    always emits 256px tiles.
 
 ### Changed
 
