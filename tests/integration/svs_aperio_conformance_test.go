@@ -79,6 +79,62 @@ func TestSVSEdgeTilesAreFullSize(t *testing.T) {
 	}
 }
 
+// TestDICOMEdgeFramesAreFullSize guards the same padding fix in the DICOM engine
+// path: DICOM TILED_FULL requires every frame to be exactly Rows×Columns, but the
+// retile engine hands partial edge frames (and sub-frame levels) at content size.
+// `--to dicom --factor` routes through the engine; converting a 2220×2967 source
+// yields L0 edge frames AND a deepest level smaller than one frame, so the edge
+// frame and the deepest-level frame JPEGs must both decode to the full frame size.
+func TestDICOMEdgeFramesAreFullSize(t *testing.T) {
+	src := cmuFixture(t)
+	bin := buildOnce(t)
+	out := filepath.Join(t.TempDir(), "dcmout")
+
+	if o, err := runCLI(bin, "convert", "--to", "dicom", "--factor", "2", "-f", "-o", out, src); err != nil {
+		t.Fatalf("convert --to dicom --factor 2: %v\n%s", err, o)
+	}
+	sl, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("open dicom output: %v", err)
+	}
+	defer sl.Close()
+
+	levels := sl.Levels()
+	l0 := levels[0]
+	fw, fh := l0.TileSize.W, l0.TileSize.H // DICOM Columns×Rows
+	cols := (l0.Size.W + fw - 1) / fw
+	rows := (l0.Size.H + fh - 1) / fh
+	type tc struct {
+		lvl, col, row int
+		label         string
+	}
+	cases := []tc{{0, 0, 0, "L0 interior"}}
+	if cols > 1 {
+		cases = append(cases, tc{0, cols - 1, 0, "L0 right edge"})
+	}
+	if rows > 1 {
+		cases = append(cases, tc{0, 0, rows - 1, "L0 bottom edge"})
+	}
+	// Deepest level (smaller than one frame).
+	cases = append(cases, tc{len(levels) - 1, 0, 0, "deepest level"})
+
+	for _, c := range cases {
+		lv := levels[c.lvl]
+		b, err := lv.Tile(c.col, c.row)
+		if err != nil {
+			t.Fatalf("%s: read frame L%d(%d,%d): %v", c.label, c.lvl, c.col, c.row, err)
+		}
+		w, h, ok := jpegSOFDims(b)
+		if !ok {
+			t.Fatalf("%s: frame has no JPEG SOF", c.label)
+		}
+		if w != lv.TileSize.W || h != lv.TileSize.H {
+			t.Errorf("%s: frame JPEG = %dx%d, want full frame %dx%d (DICOM frames must be uniform Rows×Columns)",
+				c.label, w, h, lv.TileSize.W, lv.TileSize.H)
+		}
+	}
+}
+
 // TestSVSSynthesizesThumbnailAtIFD1 guards the Aperio-layout fix: a source
 // without a thumbnail, converted to SVS, must get a synthesized thumbnail at
 // IFD 1. Genuine Aperio SVS always carries the thumbnail as the second IFD;
