@@ -4,6 +4,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-06-27
+
 ### Added
 
 - **`convert --tile-size N`** — output tile-size control for the re-encode
