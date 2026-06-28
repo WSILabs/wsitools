@@ -140,8 +140,22 @@ jobs:
       # is Homebrew-managed (PEP 668 externally-managed-environment) and rejects
       # bare pip install without the flag. No venv needed for a single-package CI
       # install; --quiet suppresses the pip progress bar noise.
+      # Iris-Codec builds its dependencies from source (its pyproject hardcodes
+      # IRIS_BUILD_DEPENDENCIES=ON). Its AVIF dependency ExternalProject-clones
+      # libavif and FetchContent-pulls libaom from aomedia.googlesource.com, whose
+      # gitiles "+archive" on-the-fly tarball endpoint intermittently returns HTTP
+      # 503 under load and reds the entire job before the validator even runs. Point
+      # AVIF_LIBRARY/AVIF_INCLUDE at the brew libavif already installed above so
+      # cmake/avif.cmake skips that ExternalProject — it only clones when either var
+      # is unset (lines guard `if (NOT AVIF_LIBRARY OR NOT AVIF_INCLUDE)`). Every
+      # other Iris-Codec dependency still builds vendored exactly as before.
       - name: Install Iris-Codec (IFE validator)
-        run: python3 -m pip install --quiet --break-system-packages 'Iris-Codec==2025.3.1'
+        run: |
+          AVIF_PREFIX="$(brew --prefix libavif)"
+          python3 -m pip install --quiet --break-system-packages \
+            --config-settings=cmake.define.AVIF_LIBRARY="$AVIF_PREFIX/lib/libavif.dylib" \
+            --config-settings=cmake.define.AVIF_INCLUDE="$AVIF_PREFIX/include" \
+            'Iris-Codec==2025.3.1'
       - name: IFE conformance (Iris-Codec validator)
         env:
           WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
