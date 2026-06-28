@@ -4,6 +4,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-06-28
+
 ### Fixed
 
 - **Corrupt edge tiles in re-encoded SVS/TIFF/OME-TIFF/COG-WSI/IFE output (TIFF
