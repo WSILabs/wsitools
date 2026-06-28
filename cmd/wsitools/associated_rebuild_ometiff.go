@@ -71,7 +71,9 @@ func rebuildOMETIFF(src source.Source, outPath string, plan omeEditPlan, fsync b
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
-	if err := writeTIFFTileCopy(w, src, "ome-tiff", l0Desc, true /*omeSynthetic*/, plan); err != nil {
+	// nil slide: OME-TIFF doesn't classify IFD 1 positionally, so no thumbnail
+	// synthesis (it's SVS-only); the existing pyramid is copied verbatim.
+	if err := writeTIFFTileCopy(w, src, "ome-tiff", l0Desc, true /*omeSynthetic*/, plan, nil); err != nil {
 		w.Abort()
 		os.Remove(tmp)
 		return err

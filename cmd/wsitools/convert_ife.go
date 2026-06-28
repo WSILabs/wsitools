@@ -163,7 +163,7 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 	}
 	runErr := retile.Run(cmd.Context(), retile.Spec{
 		Slide: slide, SrcRegion: srcRegion, OutL0: outL0, Levels: levels,
-		Kernel: kernel, Encoder: &codecTileEncoder{enc: enc}, Sink: ifeSink{w}, Workers: cvWorkers,
+		Kernel: kernel, Encoder: &codecTileEncoder{enc: enc, tileW: 256, tileH: 256}, Sink: ifeSink{w}, Workers: cvWorkers,
 	})
 	if runErr != nil {
 		w.Abort()

@@ -293,7 +293,7 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 	}
 
 	sink := newStreamwriterSink(handles)
-	return runEngineRetile(ctx, slide, srcRegion, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
+	return runEngineRetile(ctx, slide, srcRegion, outL0, levels, &codecTileEncoder{enc: enc, tileW: outTile, tileH: outTile}, sink, workers)
 }
 
 // buildPyramidFromRaster encodes an in-memory RGB888 L0 raster into a tiled

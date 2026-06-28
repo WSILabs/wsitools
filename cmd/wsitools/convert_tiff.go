@@ -200,7 +200,21 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 	}
 
 	omeSynthetic := container == "ome-tiff" && src.Format() != string(opentile.FormatOMETIFF)
-	if err := writeTIFFTileCopy(w, src, container, srcImageDesc, omeSynthetic, omeEditPlan{dropAll: cvNoAssociated}); err != nil {
+	// For SVS output, emitSVSThumbnailAtL0 synthesizes a thumbnail at IFD 1 when
+	// the source carries none (ScaledStrips over L0); it needs the opentile slide.
+	// Non-SVS containers don't classify IFD 1 positionally, so a nil slide there
+	// is harmless (synthesis is gated on container=="svs").
+	var slide *opentile.Slide
+	if container == "svs" {
+		s, oerr := opentile.OpenFile(input)
+		if oerr != nil {
+			w.Abort()
+			return fmt.Errorf("open slide for thumbnail synthesis: %w", oerr)
+		}
+		defer s.Close()
+		slide = s
+	}
+	if err := writeTIFFTileCopy(w, src, container, srcImageDesc, omeSynthetic, omeEditPlan{dropAll: cvNoAssociated}, slide); err != nil {
 		w.Abort()
 		return err
 	}
@@ -387,7 +401,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			w.Abort()
 			return fmt.Errorf("--tile-size %d differs from the source tiling (%d) and this path (lossless or non-octave-aligned source) cannot re-tile; omit --tile-size, or use a lossy octave-aligned conversion", cvTileSize, srcL0TileW)
 		}
-		if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic); err != nil {
+		if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic, slide); err != nil {
 			w.Abort()
 			return err
 		}
@@ -478,12 +492,12 @@ func parseQualityKnobs(quality string) (map[string]string, error) {
 	return knobs, nil
 }
 
-func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool) error {
+func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool, slide *opentile.Slide) error {
 	for _, lvl := range src.Levels() {
 		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers, container, srcImageDesc); err != nil {
 			return fmt.Errorf("level %d: %w", lvl.Index(), err)
 		}
-		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan); err != nil {
+		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan, slide); err != nil {
 			return err
 		}
 	}
@@ -724,7 +738,7 @@ func jpegTilePhotometric(tile []byte) uint16 {
 	}
 }
 
-func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0Desc string, omeSynthetic bool, plan omeEditPlan) error {
+func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0Desc string, omeSynthetic bool, plan omeEditPlan, slide *opentile.Slide) error {
 	levels := src.Levels()
 	// A verbatim-copied JPEG tile must be tagged with the photometric matching
 	// its own framing (JFIF/Adobe-YCbCr → YCbCr(6); bare/Aperio → RGB(2)).
@@ -818,7 +832,7 @@ func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0D
 		if err := <-drainErr; err != nil {
 			return fmt.Errorf("drain level %d: %w", lvl.Index(), err)
 		}
-		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan); err != nil {
+		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan, slide); err != nil {
 			return err
 		}
 	}
@@ -949,7 +963,7 @@ func emitOneAssociated(src source.Source, w *streamwriter.Writer, a source.Assoc
 // container=="svs" && lvlIndex==0. Honors the plan via emitOneAssociated
 // (dropAll/remove emit nothing; replace emits plan.spec). Handles the upsert
 // (replace a thumbnail the source lacks). Returns whether an IFD was emitted.
-func emitSVSThumbnailAtL0(src source.Source, w *streamwriter.Writer, lvlIndex int, container string, omeSynthetic bool, plan omeEditPlan) (bool, error) {
+func emitSVSThumbnailAtL0(src source.Source, w *streamwriter.Writer, lvlIndex int, container string, omeSynthetic bool, plan omeEditPlan, slide *opentile.Slide) (bool, error) {
 	if container != "svs" || lvlIndex != 0 || plan.dropAll {
 		return false, nil
 	}
@@ -965,8 +979,31 @@ func emitSVSThumbnailAtL0(src source.Source, w *streamwriter.Writer, lvlIndex in
 		}
 		return true, nil
 	}
+	// Synthesize: SVS classifies the SECOND IFD positionally as the thumbnail
+	// (opentile by page index; ImageScope/Aperio strictly so). A source without a
+	// thumbnail (IFE, BIF, …) would otherwise leave the first reduced pyramid
+	// level at IFD 1, where ImageScope mis-reads it as the thumbnail and DROPS it
+	// from the pyramid. Genuine Aperio SVS always carries a thumbnail at IFD 1, so
+	// render one from L0 to match (longest edge thumbLongSide, baseline JPEG).
+	if slide != nil {
+		l0 := slide.Pyramid(0).Levels[0]
+		rect := opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size}
+		jpegBytes, tw, th, terr := streamCropThumbnail(slide, rect, l0.Size.W, l0.Size.H, synthThumbnailQuality)
+		if terr != nil {
+			return false, fmt.Errorf("synthesize SVS thumbnail: %w", terr)
+		}
+		if err := addCropThumbnailStripped(w, jpegBytes, tw, th); err != nil {
+			return false, fmt.Errorf("write synthesized SVS thumbnail: %w", err)
+		}
+		return true, nil
+	}
 	return false, nil
 }
+
+// synthThumbnailQuality is the baseline-JPEG quality for a thumbnail synthesized
+// for an SVS whose source carries none. The thumbnail is a small navigation
+// preview, so a moderate quality keeps it tiny without visible artifacts.
+const synthThumbnailQuality = 80
 
 func writeAssociatedImages(src source.Source, w *streamwriter.Writer, container string, omeSynthetic bool, plan omeEditPlan) error {
 	if plan.dropAll {
