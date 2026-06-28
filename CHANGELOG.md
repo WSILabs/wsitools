@@ -4,6 +4,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-06-28
+
 ### Fixed
 
 - **Corrupt edge frames in `convert --to dicom --factor` / `downsample` / `crop`
