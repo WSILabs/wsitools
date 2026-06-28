@@ -4,6 +4,21 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Corrupt edge frames in `convert --to dicom --factor` / `downsample` / `crop`
+  to DICOM (the retile-engine DICOM path).** Partial right/bottom edge frames —
+  and whole levels smaller than one frame — were encoded at their truncated
+  content size, but DICOM TILED_FULL requires every frame to be exactly
+  `Rows`×`Columns`; OpenSlide's DICOM reader (and other strict consumers) rejected
+  them (`Dimensional mismatch reading JPEG, expected 256x256, got …`). This is the
+  same class as the v0.24.1 TIFF edge-tile fix, which only covered the TIFF/IFE
+  encoder; `dicomFrameEncoder` now edge-replicates partial frames up to the full
+  frame size as well. The verbatim DICOM-source frame-copy path was never
+  affected. Added a cross-tool manual QA harness under `scripts/qa/` (matrix
+  generator + OpenSlide/Bio-Formats auto-validators + viewer checklist) that
+  surfaced this.
+
 ## [0.24.1] - 2026-06-28
 
 ### Fixed

@@ -28,6 +28,9 @@ func runDICOMEngine(ctx context.Context, slide *opentile.Slide, srcRegion openti
 	if err != nil {
 		return err
 	}
+	// Pad partial edge frames up to the full frame size (DICOM TILED_FULL frames
+	// are uniform Rows×Columns); all levels share one square tile size.
+	enc.tileW, enc.tileH = levels[0].TileW, levels[0].TileH
 	defer enc.Close()
 
 	spoolDir, err := os.MkdirTemp("", "wsitools-dcm-spool-*")
@@ -162,8 +165,9 @@ func (l *spoolLevel) DecodedTile(x, y int) (*decoder.Image, error) {
 // EncodeStandalone; J2K-family codecs (jpeg2000/htj2k) already return a complete
 // codestream from EncodeTile.
 type dicomFrameEncoder struct {
-	jpeg  *jpegcodec.Encoder // non-nil for jpeg
-	codec codec.Encoder      // non-nil for j2k-family
+	jpeg         *jpegcodec.Encoder // non-nil for jpeg
+	codec        codec.Encoder      // non-nil for j2k-family
+	tileW, tileH int                // full frame size; partial edge tiles are padded up to it
 }
 
 // newDicomFrameEncoder builds the frame encoder + reports the source.Compression
@@ -202,6 +206,15 @@ func newJ2KFrameEncoder(codecName string, quality int) (*dicomFrameEncoder, sour
 }
 
 func (e *dicomFrameEncoder) EncodeTile(rgb []byte, w, h int) ([]byte, error) {
+	// DICOM TILED_FULL requires every frame to be exactly Rows×Columns; the engine
+	// hands partial right/bottom edge frames (and whole levels smaller than one
+	// frame) at truncated content size. Pad up to the full frame (edge-replicated)
+	// so strict readers (OpenSlide's DICOM reader, pydicom consumers) don't hit a
+	// frame/dimension mismatch — mirrors codecTileEncoder for the TIFF family.
+	if e.tileW > 0 && e.tileH > 0 && (w < e.tileW || h < e.tileH) {
+		rgb = padRGBTileReplicate(rgb, w, h, e.tileW, e.tileH)
+		w, h = e.tileW, e.tileH
+	}
 	if e.jpeg != nil {
 		return e.jpeg.EncodeStandalone(rgb, w, h)
 	}
