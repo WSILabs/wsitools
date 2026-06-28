@@ -1064,7 +1064,7 @@ func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cog
 	}
 
 	sink := newCogwsiSink(handles, levels)
-	return runEngineRetile(ctx, slide, srcRegion, outL0, levels, &codecTileEncoder{enc: enc}, sink, workers)
+	return runEngineRetile(ctx, slide, srcRegion, outL0, levels, &codecTileEncoder{enc: enc, tileW: outTile, tileH: outTile}, sink, workers)
 }
 
 // buildPyramidFromRasterCOGWSI encodes an in-memory RGB888 L0 raster into a

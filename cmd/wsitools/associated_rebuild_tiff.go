@@ -60,7 +60,10 @@ func finalizeRebuild(src source.Source, outPath, container, l0Desc string, omeSy
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
-	if err := writeTIFFTileCopy(w, src, container, l0Desc, omeSynthetic, plan); err != nil {
+	// nil slide: the associated-image edit rebuilds an existing file faithfully
+	// and must not synthesize a new thumbnail IFD; an SVS source that already has
+	// a thumbnail keeps it (emitted from src.Associated()).
+	if err := writeTIFFTileCopy(w, src, container, l0Desc, omeSynthetic, plan, nil); err != nil {
 		w.Abort()
 		os.Remove(tmp)
 		return err

@@ -4,6 +4,30 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Corrupt edge tiles in re-encoded SVS/TIFF/OME-TIFF/COG-WSI/IFE output (TIFF
+  conformance).** The retile engine encoded partial right/bottom edge tiles — and
+  whole pyramid levels smaller than one tile — at their truncated content size
+  instead of the full declared `TileWidth×TileLength`. TIFF requires uniform
+  full-size tiles (pixels beyond `ImageWidth/Length` are padding, ignored by
+  readers); OpenSlide and ImageScope reject a sub-full-size JPEG tile as a
+  "dimensional mismatch", rendering black/garbled edges (opentile is lenient and
+  masked it). Edge tiles are now padded up to the full tile size (last row/column
+  edge-replicated to avoid JPEG bleed) before encoding, across every engine-backed
+  re-encode path (`convert --to svs|tiff|ome-tiff|cog-wsi`, `--factor`,
+  `downsample`, `crop`, `--to ife`). DZI/SZI legitimately use partial edge tiles
+  and are unaffected. Verified pixel-faithful against OpenSlide on a Ventana BIF
+  source.
+- **A pyramid level dropped in ImageScope for `--to svs` from a source without a
+  thumbnail (BIF, IFE/Iris, …).** Genuine Aperio SVS always carries the thumbnail
+  as the second IFD; ImageScope classifies IFD 1 positionally as the thumbnail, so
+  when no thumbnail was emitted the first reduced pyramid level landed at IFD 1 and
+  ImageScope dropped it (e.g. a 1×/4×/16×/64× source showed only 1×/16×/64×).
+  `convert --to svs` now synthesizes an Aperio thumbnail (longest edge 1024px,
+  baseline JPEG, rendered from L0) at IFD 1 when the source has none, matching the
+  genuine Aperio layout; sources that already carry a thumbnail are unchanged.
+
 ## [0.24.0] - 2026-06-27
 
 ### Added

@@ -11,12 +11,53 @@ import (
 // (347) carries the shared tables from enc.LevelHeader(). One codecTileEncoder
 // is shared across the engine's worker pool — codec.Encoder.EncodeTile is
 // concurrency-safe (the existing transcode pipeline shares one the same way).
+//
+// tileW/tileH, when >0, are the full output tile dimensions. The retile engine
+// hands edge/corner tiles (and whole levels smaller than one tile) at their
+// truncated CONTENT size; TIFF requires every tile to be a uniform full
+// TileWidth×TileLength (edge pixels beyond ImageWidth/Length are padding,
+// ignored by readers), and OpenSlide/ImageScope (and the IFE 256px-tile format)
+// enforce it — a sub-full-size JPEG tile reads as a "dimensional mismatch" and
+// corrupts the slide. So partial tiles are edge-replicated up to the full size
+// before encoding. DZI/SZI legitimately use partial edge tiles and go through
+// internal/dzi's own encoders, not this type, so they are unaffected.
 type codecTileEncoder struct {
-	enc codec.Encoder
+	enc          codec.Encoder
+	tileW, tileH int
 }
 
 func (e *codecTileEncoder) EncodeTile(rgb []byte, w, h int) ([]byte, error) {
+	if e.tileW > 0 && e.tileH > 0 && (w < e.tileW || h < e.tileH) {
+		rgb = padRGBTileReplicate(rgb, w, h, e.tileW, e.tileH)
+		w, h = e.tileW, e.tileH
+	}
 	return e.enc.EncodeTile(rgb, w, h, nil)
+}
+
+// padRGBTileReplicate copies a w×h tightly-packed RGB tile into a tw×th buffer,
+// replicating the last valid column and row across the padding. Edge replication
+// (rather than a constant fill) keeps the padded pixels close to the content so
+// the JPEG MCUs straddling the boundary don't bleed an alien colour back into
+// the visible edge. Requires w>0, h>0, tw>=w, th>=h.
+func padRGBTileReplicate(src []byte, w, h, tw, th int) []byte {
+	dst := make([]byte, tw*th*3)
+	srcStride, dstStride := w*3, tw*3
+	for y := 0; y < th; y++ {
+		sy := y
+		if sy >= h {
+			sy = h - 1 // replicate the last source row downward
+		}
+		srow := src[sy*srcStride : sy*srcStride+w*3]
+		drow := dst[y*dstStride : y*dstStride+tw*3]
+		copy(drow[:w*3], srow)
+		if w < tw {
+			last := srow[(w-1)*3 : w*3] // replicate the last source column rightward
+			for x := w; x < tw; x++ {
+				copy(drow[x*3:x*3+3], last)
+			}
+		}
+	}
+	return dst
 }
 
 // flooredLevelCount returns the number of octave levels (each half the previous,

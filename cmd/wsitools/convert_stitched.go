@@ -70,7 +70,7 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 		OutL0:     outL0,
 		Levels:    levels,
 		Kernel:    resample.Nearest, // identity scale: ScaledStrips only stitches
-		Encoder:   &codecTileEncoder{enc: enc},
+		Encoder:   &codecTileEncoder{enc: enc, tileW: tile, tileH: tile},
 		Sink:      sink,
 		Workers:   workers,
 	})
@@ -133,7 +133,7 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 	handles[0] = h0
 
 	// SVS thumbnail at IFD 1 (no-op unless container==svs) — must precede L1.
-	if _, err := emitSVSThumbnailAtL0(src, w, 0, container, omeSynthetic, plan); err != nil {
+	if _, err := emitSVSThumbnailAtL0(src, w, 0, container, omeSynthetic, plan, slide); err != nil {
 		return err
 	}
 
@@ -153,7 +153,7 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 		OutL0:     outL0,
 		Levels:    levels,
 		Kernel:    resample.Nearest,
-		Encoder:   &codecTileEncoder{enc: enc},
+		Encoder:   &codecTileEncoder{enc: enc, tileW: tile, tileH: tile},
 		Sink:      sink,
 		Workers:   workers,
 	})
@@ -243,7 +243,7 @@ func convertTranscodeTIFF(ctx context.Context, slide *opentile.Slide, src source
 		return fmt.Errorf("add level 0: %w", err)
 	}
 	handles[0] = h0
-	if _, err := emitSVSThumbnailAtL0(src, w, 0, container, omeSynthetic, plan); err != nil {
+	if _, err := emitSVSThumbnailAtL0(src, w, 0, container, omeSynthetic, plan, slide); err != nil {
 		return err
 	}
 	for e := 1; e < len(emitted); e++ {
@@ -261,7 +261,7 @@ func convertTranscodeTIFF(ctx context.Context, slide *opentile.Slide, src source
 		OutL0:     l0.Size, // identity: transcode is same geometry
 		Levels:    levels,  // FULL octave chain (emit + intermediate)
 		Kernel:    resample.Nearest,
-		Encoder:   &codecTileEncoder{enc: enc},
+		Encoder:   &codecTileEncoder{enc: enc, tileW: levels[0].TileW, tileH: levels[0].TileH},
 		Sink:      sink,
 		Workers:   workers,
 	})
