@@ -25,7 +25,6 @@ var (
 	cropOutput    string
 	cropQuality   int
 	cropWorkers   int
-	cropJobs      int
 	cropTileOrder string
 	cropBigTIFF   string
 	cropForce     bool
@@ -61,7 +60,7 @@ effective snapped rect when the input is not already tile-aligned.`,
 		if err != nil {
 			return err
 		}
-		workers := resolveWorkers(cropWorkers, cmd.Flags().Changed("workers"), cropJobs, cmd.Flags().Changed("jobs"))
+		workers := cropWorkers
 		return runCrop(cmd.Context(), args[0], cropOutput, x, y, w, h,
 			cropQuality, workers, 1, cropTileOrder, cropBigTIFF, cropForce, cropNoAssoc, cropLossless, "", "", "", time.Now())
 	},
@@ -76,7 +75,6 @@ func init() {
 	cropCmd.Flags().StringVarP(&cropOutput, "output", "o", "", "Output path, same container as source (required)")
 	cropCmd.Flags().IntVar(&cropQuality, "quality", 0, "JPEG quality 1-100 (default: per-codec, 85 for jpeg)")
 	cropCmd.Flags().IntVar(&cropWorkers, "workers", 0, "Encode workers (default: NumCPU)")
-	cropCmd.Flags().IntVar(&cropJobs, "jobs", 0, "alias of --workers")
 	cropCmd.Flags().StringVar(&cropTileOrder, "tile-order", "row-major", "Tile order: row-major|hilbert|morton")
 	cropCmd.Flags().StringVar(&cropBigTIFF, "bigtiff", "auto", "BigTIFF mode: auto|on|off")
 	cropCmd.Flags().BoolVarP(&cropForce, "force", "f", false, "Overwrite existing output")
@@ -244,7 +242,8 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if outW <= 0 || outH <= 0 {
 		return fmt.Errorf("--factor %d too large for crop extent %dx%d", factor, ew, eh)
 	}
-	nLevels := flooredLevelCount(outW, outH, outputTileSize)
+	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
+	nLevels := flooredLevelCount(outW, outH, outTile)
 
 	p := cropEmitParams{
 		ctx: ctx, src: src, srcL0: srcL0, input: input, output: output,
@@ -253,7 +252,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 		factor: factor, outW: outW, outH: outH,
 		lossless: lossless, stx0: stx0, sty0: sty0, outTilesX: outTilesX, outTilesY: outTilesY,
 		start: start,
-		fac:   fac, knobs: knobs, codecName: resolvedCodec,
+		fac:   fac, knobs: knobs, codecName: resolvedCodec, outTile: outTile,
 	}
 	switch target {
 	case "svs":

@@ -62,14 +62,14 @@ func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) e
 		return runConvertTIFFReencode(cmd, input, target, codecName, cvQuality, cvWorkers, start)
 	}
 
-	if tileCopyEligible(target, cvCodec, srcCodec, tiled) {
+	if tileCopyEligible(target, cvCodec, srcCodec, tiled, cvTileSize, l0.TileSize().X) {
 		return runConvertTIFFTileCopy(cmd, src, input, target, start)
 	}
-	if cvCodec == "" {
-		return fmt.Errorf("--codec required for --to %s with source codec %s (no tile-copy path)",
-			target, srcCodec)
+	codecName, cerr := reencodeCodecFor(srcCodec, cvCodec)
+	if cerr != nil {
+		return cerr
 	}
-	return runConvertTIFFReencode(cmd, input, target, cvCodec, cvQuality, cvWorkers, start)
+	return runConvertTIFFReencode(cmd, input, target, codecName, cvQuality, cvWorkers, start)
 }
 
 func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target string, start time.Time) error {
@@ -380,6 +380,13 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			return err
 		}
 	} else {
+		// Non-engine path (lossless transcode or non-octave-aligned source): a
+		// strict 1:1 decode-source-tile→re-encode pipeline that cannot re-tile.
+		// Reject a differing --tile-size rather than emit malformed output.
+		if srcL0TileW := slide.Pyramid(0).Levels[0].TileSize.W; cvTileSize > 0 && cvTileSize != srcL0TileW {
+			w.Abort()
+			return fmt.Errorf("--tile-size %d differs from the source tiling (%d) and this path (lossless or non-octave-aligned source) cannot re-tile; omit --tile-size, or use a lossy octave-aligned conversion", cvTileSize, srcL0TileW)
+		}
 		if err := transcodePyramid(cmd.Context(), src, w, fac, knobs, workers, resolvedContainer, srcImageDesc, omeEditPlan{dropAll: cvNoAssociated}, omeSynthetic); err != nil {
 			w.Abort()
 			return err

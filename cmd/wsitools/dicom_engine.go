@@ -22,7 +22,7 @@ import (
 // hands a spoolSource to emitDICOM. md/assoc/format describe the OUTPUT (md
 // scale-adjusted by the caller). codecName selects the frame codec (default jpeg).
 func runDICOMEngine(ctx context.Context, slide *opentile.Slide, srcRegion opentile.Region, outL0 opentile.Size, codecName string, quality, workers int, format string, md source.Metadata, assoc []source.AssociatedImage, opts dicomwriter.Options, output string, force bool) error {
-	levels := octaveLevelSpecsFor(outL0, outputTileSize)
+	levels := octaveLevelSpecsFor(outL0, resolveTileSize(slide.Levels()[0].TileSize.W, cvTileSize))
 
 	enc, comp, err := newDicomFrameEncoder(codecName, quality)
 	if err != nil {

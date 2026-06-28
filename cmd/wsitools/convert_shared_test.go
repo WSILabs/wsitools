@@ -30,7 +30,7 @@ func TestTileCopyEligible(t *testing.T) {
 		{"szi jpeg tiled", "szi", "", source.CompressionJPEG, true, false},
 	}
 	for _, c := range cases {
-		got := tileCopyEligible(c.target, c.codec, c.srcC, c.tiled)
+		got := tileCopyEligible(c.target, c.codec, c.srcC, c.tiled, 0, 0)
 		if got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}

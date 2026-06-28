@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	opentile "github.com/wsilabs/opentile-go"
 
 	"github.com/wsilabs/wsitools/internal/derivedsource"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
@@ -39,7 +40,7 @@ func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 			return fmt.Errorf("output %s already exists (use --force)", cvOutput)
 		}
 	}
-	src, err := source.Open(input)
+	src, slide, err := source.OpenWithSlide(input)
 	if err != nil {
 		if errors.Is(err, source.ErrUnsupportedFormat) {
 			return fmt.Errorf("source format unsupported: %w", err)
@@ -47,6 +48,39 @@ func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer src.Close()
+
+	// --tile-size forces a re-tile, which the verbatim/1:1 frame path can't do.
+	// Route through the engine at full resolution (factor 1) so frames are
+	// re-tiled to the requested size (Rows/Columns follow). The engine re-encodes
+	// to JPEG-baseline.
+	srcL0 := slide.Levels()[0]
+	if cvTileSize > 0 && cvTileSize != srcL0.TileSize.W {
+		if cvCodec != "" && cvCodec != "jpeg" {
+			return fmt.Errorf("--codec %q is not supported for --to dicom (only 'jpeg')", cvCodec)
+		}
+		if cmd.Flags().Changed("level") {
+			return fmt.Errorf("--tile-size with --level is not supported for --to dicom; omit one")
+		}
+		quality, qerr := dicomReencodeQuality()
+		if qerr != nil {
+			return qerr
+		}
+		workers := cvWorkers
+		if workers == 0 {
+			workers = runtime.NumCPU()
+		}
+		slog.Warn("re-tiling pyramid to JPEG-baseline (lossy) for --to dicom --tile-size", "tile", cvTileSize, "quality", quality)
+		md := src.Metadata()
+		assoc := src.Associated()
+		if cvNoAssociated {
+			assoc = nil
+		}
+		srcRegion := opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcL0.Size}
+		return runDICOMEngine(cmd.Context(), slide, srcRegion, opentile.Size{W: srcL0.Size.W, H: srcL0.Size.H},
+			"jpeg", quality, workers, src.Format(), md, assoc,
+			dicomwriter.Options{Associated: !cvNoAssociated, L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}},
+			cvOutput, cvForce)
+	}
 
 	// --codec is the explicit opt-in to RE-ENCODE the pyramid (lossy) rather
 	// than frame-copy it verbatim — mirroring the TIFF family's --codec. Without

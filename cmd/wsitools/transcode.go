@@ -31,7 +31,6 @@ func init() {
 	transcodeCmd.Flags().StringVar(&cvQuality, "quality", "", "codec quality (codec-specific; comma-separated k=v knobs)")
 	transcodeCmd.Flags().StringVarP(&cvOutput, "output", "o", "", "output file path (required)")
 	transcodeCmd.Flags().IntVar(&cvWorkers, "workers", 0, "pipeline workers (0 = GOMAXPROCS)")
-	transcodeCmd.Flags().IntVar(&cvJobs, "jobs", 0, "alias of --workers")
 	transcodeCmd.Flags().BoolVarP(&cvForce, "force", "f", false, "overwrite output if it exists")
 	transcodeCmd.Flags().BoolVar(&cvNoAssociated, "no-associated", false, "skip label/macro/thumbnail/overview")
 	transcodeCmd.Flags().StringVar(&cvTileOrder, "tile-order", "row-major", "tile emission order (row-major|hilbert|morton)")

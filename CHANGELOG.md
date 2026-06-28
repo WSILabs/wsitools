@@ -4,6 +4,34 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Added
+
+- **`convert --tile-size N`** — output tile-size control for the re-encode
+  targets (`svs`/`tiff`/`ome-tiff`/`cog-wsi`, `dzi`/`szi`, `dicom`). When unset
+  (`0`), the output tile size **matches the source** — fixing the previously
+  hardcoded 256 in `--factor` and `downsample`; pass `N` to override. A
+  `--tile-size` equal to the source tiling is a no-op (a lossless tile-copy stays
+  a copy); a `--tile-size` that *differs* from the source forces a re-encode,
+  whose codec defaults to the **source's own** codec (erroring if that codec has
+  no encoder — pass `--codec`). Per-target notes:
+  - `--to dicom`: re-tiles **only when a size differing from the source is
+    requested** (the DICOM `Rows`/`Columns` frame tags then follow); otherwise
+    the existing verbatim frame-copy is unchanged.
+  - `--to bif` (verbatim Ventana/Roche DP-200 layout) and `--to ife` (Iris IFE
+    mandates fixed 256×256 tiles in v1.0): a `--tile-size` they can't honor is
+    **rejected with a clear error** rather than silently ignored. `--to ife`
+    always emits 256px tiles.
+
+### Changed
+
+- **Removed `--dzi-tile-size`** — replaced by the unified `--tile-size`. DZI/SZI
+  now default to the source tile size when `--tile-size` is unset (was a fixed
+  256). Breaking CLI change (pre-1.0).
+- **Removed the `--jobs` alias** of `--workers` across `convert`/`crop`/
+  `downsample`/`transcode`; `--workers` is the single canonical worker flag
+  (`downsample`'s primary flips to `--workers`, default `NumCPU`). Breaking CLI
+  change (pre-1.0).
+
 ### Fixed
 
 - **Wrong colours in Aperio-ecosystem viewers (ImageScope, OpenSlide) for

@@ -259,9 +259,10 @@ func downsampleToSVS(
 	} else {
 		md := src.Metadata()
 		srcSoft := strings.TrimSpace(md.ScannerManufacturer + " " + md.ScannerModel)
+		outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
 		imageDesc = SyntheticAperioDescription(
 			uint32(outW), uint32(outH),
-			outputTileSize, outputTileSize,
+			uint32(outTile), uint32(outTile),
 			quality,
 			outMPP, outMag,
 			srcSoft,
@@ -1026,7 +1027,8 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 	if outL0.W <= 0 || outL0.H <= 0 {
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
-	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, fac, knobs, workers)
+	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
+	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, outTile, fac, knobs, workers)
 }
 
 // buildEnginePyramidCOGWSI streams srcRegion through the retile engine into a
@@ -1034,11 +1036,11 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 // by fac+knobs; Compression is derived from enc.TIFFCompressionTag(). It mirrors
 // buildEnginePyramid but targets COG-WSI (no postL0Hook; no SVS thumbnail IFD).
 // Shared by downsample (full-L0 region) and crop (rect region, identity).
-func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
-	levels := octaveLevelSpecsFor(outL0, outputTileSize)
+func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
+	levels := octaveLevelSpecsFor(outL0, outTile)
 
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
-		TileWidth: outputTileSize, TileHeight: outputTileSize, PixelFormat: codec.PixelFormatRGB8,
+		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)
@@ -1049,7 +1051,7 @@ func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cog
 	for i := range levels {
 		h, err := w.AddLevel(cogwsiwriter.LevelSpec{
 			ImageWidth: uint32(levels[i].Width), ImageHeight: uint32(levels[i].Height),
-			TileWidth: outputTileSize, TileHeight: outputTileSize,
+			TileWidth: uint32(outTile), TileHeight: uint32(outTile),
 			Compression: enc.TIFFCompressionTag(), Photometric: enc.TIFFPhotometric(),
 			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
 			JPEGTables: enc.LevelHeader(),
@@ -1069,11 +1071,11 @@ func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cog
 // cogwsiwriter pyramid, box-halving between levels via halveRaster. nLevels is
 // the total level count (L0 included). Shared by buildPyramidCOGWSI (downsample)
 // and cropToCOGWSI.
-func buildPyramidFromRasterCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality int) error {
+func buildPyramidFromRasterCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, outTile int) error {
 	currentRaster := l0
 	currentW, currentH := l0W, l0H
 	for outLvl := 0; outLvl < nLevels; outLvl++ {
-		if err := encodeAndWriteLevelCOGWSI(ctx, w, currentRaster, currentW, currentH, quality, outLvl == 0); err != nil {
+		if err := encodeAndWriteLevelCOGWSI(ctx, w, currentRaster, currentW, currentH, quality, outTile, outLvl == 0); err != nil {
 			return fmt.Errorf("level %d: %w", outLvl, err)
 		}
 		if outLvl < nLevels-1 {
@@ -1094,10 +1096,10 @@ func buildPyramidFromRasterCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, l
 // and writes them row-major into a cogwsiwriter level handle.
 // cogwsiwriter.WriteTile enforces strict row-major order, so we encode and
 // write sequentially in (ty, tx) order.
-func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, raster []byte, levelW, levelH, quality int, isL0 bool) error {
+func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, raster []byte, levelW, levelH, quality, outTile int, isL0 bool) error {
 	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
-		TileWidth:   outputTileSize,
-		TileHeight:  outputTileSize,
+		TileWidth:   outTile,
+		TileHeight:  outTile,
 		PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: map[string]string{"q": fmt.Sprintf("%d", quality)}})
 	if err != nil {
@@ -1109,8 +1111,8 @@ func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, rast
 	spec := cogwsiwriter.LevelSpec{
 		ImageWidth:      uint32(levelW),
 		ImageHeight:     uint32(levelH),
-		TileWidth:       outputTileSize,
-		TileHeight:      outputTileSize,
+		TileWidth:       uint32(outTile),
+		TileHeight:      uint32(outTile),
 		Compression:     tiff.CompressionJPEG,
 		Photometric:     codec.PhotometricYCbCr, // JPEG tiles are YCbCr
 		SamplesPerPixel: 3,
@@ -1123,8 +1125,8 @@ func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, rast
 		return fmt.Errorf("AddLevel: %w", err)
 	}
 
-	tilesX := (levelW + outputTileSize - 1) / outputTileSize
-	tilesY := (levelH + outputTileSize - 1) / outputTileSize
+	tilesX := (levelW + outTile - 1) / outTile
+	tilesY := (levelH + outTile - 1) / outTile
 
 	for ty := 0; ty < tilesY; ty++ {
 		for tx := 0; tx < tilesX; tx++ {
@@ -1133,11 +1135,11 @@ func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, rast
 				return ctx.Err()
 			default:
 			}
-			raw, err := extractTileFromRaster(raster, levelW, levelH, tx, ty)
+			raw, err := extractTileFromRaster(raster, levelW, levelH, tx, ty, outTile)
 			if err != nil {
 				return fmt.Errorf("extract tile (%d,%d): %w", tx, ty, err)
 			}
-			compressed, err := enc.EncodeTile(raw, outputTileSize, outputTileSize, nil)
+			compressed, err := enc.EncodeTile(raw, outTile, outTile, nil)
 			if err != nil {
 				return fmt.Errorf("encode tile (%d,%d): %w", tx, ty, err)
 			}
