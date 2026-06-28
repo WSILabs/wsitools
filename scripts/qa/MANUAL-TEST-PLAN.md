@@ -109,11 +109,11 @@ with `--big`, the round-trip of `425248_JPEG.iris`. CI also runs this.
   JPEG-2000 in TIFF/SVS *are* standard and read everywhere.)
 - **DZI / SZI / IFE**: not readable by OpenSlide or Bio-Formats (see §3 for their
   validators).
-- **`b_bif.bif` in OpenSlide**: OpenSlide's Ventana reader rejects our synthesized
-  `TileJointInfo Direction="LEFT"/"UP"` ("Bad direction attribute"). Our BIF is
-  read correctly by **Bio-Formats / QuPath / opentile** (and round-trips
-  pixel-identical); `--to bif` is experimental. Known interop gap with OpenSlide's
-  BIF reader specifically — not a general defect.
+- **`b_bif.bif` in OpenSlide**: OpenSlide errors with "Bad direction attribute".
+  This is a **known OpenSlide-side limitation** — its Ventana reader does not
+  honor the `TileJointInfo Direction` attribute. Our BIF is correct and is read
+  fine by **Bio-Formats / QuPath / opentile** (round-trips pixel-identical).
+  Don't treat the OpenSlide error as a wsitools defect; use those readers for BIF.
 
 ## 5. Pixel-equivalence spot checks (optional, exact)
 
