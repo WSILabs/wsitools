@@ -12,7 +12,12 @@ before a release.
 ## 0. Workflow
 
 ```sh
-# 1. Generate the output matrix (builds wsitools from the repo).
+# 0. Build the binary once — only when the code changes (skip if you already have
+#    one; point WSITOOLS at it instead).
+scripts/qa/build.sh                      # -> /tmp/wsitools-qa/_bin/wsitools
+#    or: WSITOOLS=/path/to/wsitools (used by all steps below)
+
+# 1. Generate the output matrix (reuses the binary above — does NOT recompile).
 scripts/qa/run-matrix.sh                 # add --big to also drive NDPI + IFE/Iris sources
 #    -> /tmp/wsitools-qa/cases/*  + manifest.tsv  (override with OUT=/path)
 

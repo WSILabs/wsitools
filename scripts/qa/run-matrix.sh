@@ -11,8 +11,11 @@
 # Usage:
 #   scripts/qa/run-matrix.sh [--big] [--clean]
 #
+# This script does NOT build wsitools — run scripts/qa/build.sh first (only when
+# the code changes), or point WSITOOLS at your own binary.
+#
 # Env overrides:
-#   WSITOOLS=/path/to/wsitools   use a prebuilt binary (else built from this repo)
+#   WSITOOLS=/path/to/wsitools   binary to use (else $OUT/_bin/wsitools, else PATH)
 #   SRC=/path/to/sample_files    source fixtures (default: ./sample_files)
 #   OUT=/path/to/outdir          output dir   (default: /tmp/wsitools-qa)
 #
@@ -35,16 +38,21 @@ for a in "$@"; do
   esac
 done
 
-# ---- resolve the wsitools binary -------------------------------------------
+# ---- resolve the wsitools binary (does NOT build — see build.sh) -----------
 if [[ -n "${WSITOOLS:-}" ]]; then
   BIN="$WSITOOLS"
+elif [[ -x "$OUT/_bin/wsitools" ]]; then
+  BIN="$OUT/_bin/wsitools"          # produced by scripts/qa/build.sh
+elif command -v wsitools >/dev/null 2>&1; then
+  BIN="$(command -v wsitools)"      # wsitools on PATH
 else
-  BIN="$OUT/_bin/wsitools"
-  mkdir -p "$OUT/_bin"
-  echo ">> building wsitools from $ROOT ..."
-  ( cd "$ROOT" && go build -o "$BIN" ./cmd/wsitools ) || { echo "build failed"; exit 1; }
+  echo "no wsitools binary found." >&2
+  echo "  build one:    scripts/qa/build.sh" >&2
+  echo "  or point at:  WSITOOLS=/path/to/wsitools scripts/qa/run-matrix.sh" >&2
+  exit 1
 fi
-echo ">> wsitools: $BIN ($($BIN version 2>/dev/null | head -1))"
+[[ -x "$BIN" ]] || { echo "wsitools not executable: $BIN" >&2; exit 1; }
+echo ">> wsitools: $BIN ($("$BIN" version 2>/dev/null | head -1))"
 echo ">> sources:  $SRC"
 echo ">> output:   $OUT"
 
