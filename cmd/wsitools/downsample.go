@@ -151,7 +151,9 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		"", // bigtiff: "" means auto (downsample has no --bigtiff flag)
 		dsForce,
 		false, // noAssociated: downsample always passes through associated images
-		"jpeg",
+		// downsample only downsamples — preserve the source codec (jpeg/jpeg2000);
+		// use convert to change codec. Falls back to jpeg for un-encodable sources.
+		preservedSourceCodec(input),
 		// qualityStr: downsample is jpeg-only, so bridge the int flag (default 85,
 		// the jpeg codec default) directly to the encoder's knob resolution. This is
 		// what makes `downsample --quality N` reach the encoder (the emitters resolve

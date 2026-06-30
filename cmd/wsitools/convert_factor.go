@@ -108,12 +108,14 @@ func dispatchDownsampleByTarget(
 // set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi, ome-tiff.
 func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time) error {
 	// Parse common flags shared by all targets.
+	// --factor only scales — when the user gives no --codec, preserve the source
+	// codec (jpeg/jpeg2000) rather than forcing jpeg.
+	cn := cvCodec
+	if cn == "" {
+		cn = preservedSourceCodec(input)
+	}
 	var knobs map[string]string
 	if cvQuality == "" {
-		cn := cvCodec
-		if cn == "" {
-			cn = "jpeg"
-		}
 		knobs = codecDefaultKnobs(cn)
 	} else {
 		var qerr error
@@ -128,10 +130,6 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 		workers = runtime.NumCPU()
 	}
 
-	cn := cvCodec
-	if cn == "" {
-		cn = "jpeg"
-	}
 	return dispatchDownsampleByTarget(
 		cmd.Context(),
 		target,

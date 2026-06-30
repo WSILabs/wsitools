@@ -13,6 +13,7 @@ import (
 	opentile "github.com/wsilabs/opentile-go"
 	_ "github.com/wsilabs/opentile-go/formats/all"
 	"github.com/wsilabs/wsitools/internal/downscale"
+	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
@@ -193,6 +194,15 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	qualityStrForResolve := qualityStr
 	if qualityStrForResolve == "" && quality != 0 {
 		qualityStrForResolve = strconv.Itoa(quality)
+	}
+	// crop only crops — it preserves the source codec (to change codec, use
+	// convert). When the source codec has a wsitools encoder (jpeg/jpeg2000/…),
+	// re-encode in the SAME codec; only fall back to the jpeg default when it has
+	// none (LZW / uncompressed / Deflate ImageScope exports).
+	if codecName == "" {
+		if c, cerr := reencodeCodecFor(source.CompressionOf(srcL0.Compression), ""); cerr == nil {
+			codecName = c
+		}
 	}
 	fac, knobs, resolvedCodec, err := resolveTransformCodec(codecName, qualityStrForResolve)
 	if err != nil {

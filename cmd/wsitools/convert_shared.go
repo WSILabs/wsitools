@@ -9,6 +9,27 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
+// preservedSourceCodec returns the source's own codec name when it has a
+// wsitools encoder, so a single-axis transform (downsample / --factor / crop,
+// which don't expose --codec) keeps the source codec instead of forcing JPEG.
+// Falls back to "jpeg" for source codecs with no encoder (LZW / uncompressed /
+// Deflate). Opening errors also fall back to "jpeg" (the caller re-opens and
+// surfaces a real error).
+func preservedSourceCodec(input string) string {
+	src, err := source.Open(input)
+	if err != nil {
+		return "jpeg"
+	}
+	defer src.Close()
+	if len(src.Levels()) == 0 {
+		return "jpeg"
+	}
+	if c, err := reencodeCodecFor(src.Levels()[0].Compression(), ""); err == nil {
+		return c
+	}
+	return "jpeg"
+}
+
 // sourceJPEGSubsampling returns the chroma-subsampling knob ("444"/"422"/"440"/
 // "420") matching the source L0's JPEG tiles, or "" if the source isn't JPEG or
 // can't be sampled. Lets a JPEG re-encode honor the source subsampling instead

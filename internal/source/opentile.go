@@ -196,6 +196,11 @@ func (a *opentileAssociated) Source() (opentile.AssociatedEncoding, bool) {
 	return a.a.Encoding()
 }
 
+// CompressionOf maps an opentile compression to the source.Compression vocab.
+// Exposed so callers holding a raw *opentile.Slide (e.g. crop) can resolve the
+// source codec without re-opening via source.Open.
+func CompressionOf(c opentile.Compression) Compression { return mapOpentileCompression(c) }
+
 func mapOpentileCompression(c opentile.Compression) Compression {
 	switch c {
 	case opentile.CompressionJPEG:
