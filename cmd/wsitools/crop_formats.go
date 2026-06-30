@@ -12,12 +12,25 @@ import (
 	"github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/derivedsource"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
+	"github.com/wsilabs/wsitools/internal/retile"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
+
+// engineLevelsForCrop returns the engine LevelSpec chain for a crop output L0 of
+// outW×outH. A crop preserves the source resolution (only the extent changes), so
+// it preserves the SOURCE pyramid's inter-level ratios + count (select-octave)
+// when the source is octave-aligned, falling back to a full octave pyramid
+// otherwise.
+func engineLevelsForCrop(slide *opentile.Slide, outW, outH, tile int) []retile.LevelSpec {
+	if levels, ok := selectOctaveLevelsFor(srcLevelDimsFromSlide(slide), outW, outH, tile); ok {
+		return levels
+	}
+	return octaveLevelSpecsFor(opentile.Size{W: outW, H: outH}, tile)
+}
 
 // scaleMPPMag scales resolution metadata for a downsample by `factor`: MPP grows,
 // magnification shrinks. factor 1 is the identity (plain crop preserves
@@ -159,7 +172,7 @@ func cropToTIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, engineLevelsForCrop(p.src, p.outW, p.outH, p.outTile), p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -279,7 +292,7 @@ func cropToSVS(p cropEmitParams) error {
 				return addCropThumbnailStripped(wtr, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, wtr, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, wtr, rect, opentile.Size{W: p.outW, H: p.outH}, engineLevelsForCrop(p.src, p.outW, p.outH, p.outTile), p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -374,7 +387,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 				return addCropThumbnailStripped(w, jpegBytes, tw, th)
 			}
 		}
-		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
+		if err := buildEnginePyramid(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, engineLevelsForCrop(p.src, p.outW, p.outH, p.outTile), p.outTile, p.fac, p.knobs, p.workers, postL0Hook); err != nil {
 			return fmt.Errorf("build pyramid: %w", err)
 		}
 	}
@@ -463,7 +476,7 @@ func cropToCOGWSI(p cropEmitParams) error {
 		}
 	} else {
 		rect := opentile.Region{Origin: opentile.Point{X: p.ex, Y: p.ey}, Size: opentile.Size{W: p.l0W, H: p.l0H}}
-		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, p.outTile, p.fac, p.knobs, p.workers); err != nil {
+		if err := buildEnginePyramidCOGWSI(p.ctx, p.src, w, rect, opentile.Size{W: p.outW, H: p.outH}, engineLevelsForCrop(p.src, p.outW, p.outH, p.outTile), p.outTile, p.fac, p.knobs, p.workers); err != nil {
 			aborted = true
 			return fmt.Errorf("build pyramid: %w", err)
 		}
