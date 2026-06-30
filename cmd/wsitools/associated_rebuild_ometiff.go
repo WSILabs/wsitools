@@ -127,7 +127,7 @@ func runAssociatedRemoveForOMETIFF(typ, input, outPath string, fl removeFlags) e
 	if err := rebuildOMETIFF(src, outPath, omeEditPlan{remove: typ}, fl.fsync); err != nil {
 		return err
 	}
-	if !fl.quiet {
+	if !flagQuiet {
 		fmt.Printf("wsitools: removed %s: %s -> %s\n", typ, input, outPath)
 	}
 	return nil
@@ -192,7 +192,7 @@ func runAssociatedReplaceForOMETIFF(typ, input, outPath string, fl replaceFlags)
 	if err := rebuildOMETIFF(src, outPath, omeEditPlan{replace: typ, spec: spec}, fl.fsync); err != nil {
 		return err
 	}
-	if !fl.quiet {
+	if !flagQuiet {
 		verb := "replaced"
 		if existing == nil {
 			verb = "added"

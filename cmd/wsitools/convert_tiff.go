@@ -230,7 +230,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 			"size", formatBytes(stat.Size()),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
-		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+		infof("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }
@@ -425,7 +425,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			"size", formatBytes(stat.Size()),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
-		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+		infof("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }

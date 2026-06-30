@@ -366,7 +366,7 @@ func downsampleToSVS(
 	if fi, err := os.Stat(output); err == nil {
 		outSizeStr = formatBytes(fi.Size())
 	}
-	fmt.Printf("wrote %s (%s)\n", output, outSizeStr)
+	infof("wrote %s (%s)\n", output, outSizeStr)
 	return nil
 }
 
@@ -543,7 +543,7 @@ func downsampleToTIFF(
 	if fi, err := os.Stat(output); err == nil {
 		outSizeStr = formatBytes(fi.Size())
 	}
-	fmt.Printf("wrote %s (%s)\n", output, outSizeStr)
+	infof("wrote %s (%s)\n", output, outSizeStr)
 	return nil
 }
 
@@ -716,7 +716,7 @@ func downsampleToCOGWSI(
 	if fi, err := os.Stat(output); err == nil {
 		outSizeStr = formatBytes(fi.Size())
 	}
-	fmt.Printf("wrote %s (%s)\n", output, outSizeStr)
+	infof("wrote %s (%s)\n", output, outSizeStr)
 	return nil
 }
 
@@ -918,7 +918,7 @@ func downsampleToOMETIFF(
 	if fi, err := os.Stat(output); err == nil {
 		outSizeStr = formatBytes(fi.Size())
 	}
-	fmt.Printf("wrote %s (%s)\n", output, outSizeStr)
+	infof("wrote %s (%s)\n", output, outSizeStr)
 	return nil
 }
 
@@ -1009,7 +1009,7 @@ func downsampleToDICOM(ctx context.Context, input, output string, factor, target
 	}, output, force); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s\n", output)
+	infof("wrote %s\n", output)
 	return nil
 }
 

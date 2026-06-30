@@ -83,7 +83,7 @@ func init() {
 	// errors only.
 	rootCmd.SilenceErrors = true
 
-	rootCmd.PersistentFlags().BoolVar(&flagQuiet, "quiet", false, "suppress progress bar")
+	rootCmd.PersistentFlags().BoolVarP(&flagQuiet, "quiet", "q", false, "suppress progress bar and success/info output")
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "enable per-level summaries on stderr")
 	rootCmd.PersistentFlags().StringVar(&flagLogLevel, "log-level", "info", "debug|info|warn|error")
 	rootCmd.PersistentFlags().StringVar(&flagLogFormat, "log-format", "text", "text|json")
@@ -142,6 +142,17 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
+	}
+}
+
+// infof prints an informational / success line to stdout, suppressed by the
+// global --quiet flag. Use it for every "wrote …" / progress-summary line so
+// --quiet behaves uniformly across commands. Errors are never routed through
+// here — they always print (via main's "error:" line or the command's own
+// stderr) regardless of --quiet.
+func infof(format string, a ...any) {
+	if !flagQuiet {
+		fmt.Printf(format, a...)
 	}
 }
 

@@ -86,7 +86,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 			return lerr
 		}
 		tileSize, overlap = res.tileSize, res.overlap
-		fmt.Printf("lossless: base tiles copied verbatim (tile-size %d, overlap 0); edges + lower levels regenerated\n", tileSize)
+		infof("lossless: base tiles copied verbatim (tile-size %d, overlap 0); edges + lower levels regenerated\n", tileSize)
 	}
 	cfg := dzi.Config{
 		Name: name, Width: outW, Height: outH,
@@ -105,7 +105,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err := w.Close(); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s + %s_files/ (%s)\n", manifestPath, base, time.Since(start).Round(time.Millisecond))
+	infof("wrote %s + %s_files/ (%s)\n", manifestPath, base, time.Since(start).Round(time.Millisecond))
 	return nil
 }
 

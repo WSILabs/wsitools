@@ -67,7 +67,7 @@ func reportWrote(output string, start time.Time) {
 	if fi, err := os.Stat(output); err == nil {
 		sz = formatBytes(fi.Size())
 	}
-	fmt.Printf("wrote %s (%s) in %s\n", output, sz, time.Since(start).Round(time.Millisecond))
+	infof("wrote %s (%s) in %s\n", output, sz, time.Since(start).Round(time.Millisecond))
 }
 
 // cropEmitParams carries everything a per-format crop emitter needs. The
@@ -568,7 +568,7 @@ func cropToDICOM(p cropEmitParams) error {
 		}, p.output, p.force); err != nil {
 			return err
 		}
-		fmt.Printf("wrote %s\n", p.output)
+		infof("wrote %s\n", p.output)
 		return nil
 	}
 

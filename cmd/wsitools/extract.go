@@ -91,7 +91,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(extractOutput, bytesIn, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", extractOutput, err)
 		}
-		fmt.Printf("wrote %s (%s)\n", extractOutput, formatBytes(int64(len(bytesIn))))
+		infof("wrote %s (%s)\n", extractOutput, formatBytes(int64(len(bytesIn))))
 		return nil
 	}
 
@@ -119,7 +119,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	}
 	stat, _ := os.Stat(extractOutput)
 	if stat != nil {
-		fmt.Printf("wrote %s (%s)\n", extractOutput, formatBytes(stat.Size()))
+		infof("wrote %s (%s)\n", extractOutput, formatBytes(stat.Size()))
 	}
 	return nil
 }

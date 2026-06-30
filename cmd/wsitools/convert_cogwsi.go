@@ -113,7 +113,7 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 			"size", formatBytes(stat.Size()),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
-		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+		infof("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }
