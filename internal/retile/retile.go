@@ -21,6 +21,10 @@ type Spec struct {
 	Encoder   TileEncoder
 	Sink      TileSink
 	Workers   int
+	// OnTileWritten, if non-nil, is called once after each tile is written to the
+	// sink (from the single sink-drain goroutine, so calls are serialized). The
+	// CLI uses it to advance a progress bar without coupling the engine to a UI.
+	OnTileWritten func()
 }
 
 // Run executes the pass: ScaledStrips → level-builder chain (2× box descent) →
@@ -78,7 +82,7 @@ func Run(ctx context.Context, spec Spec) error {
 	sinkWG.Add(1)
 	go func() {
 		defer sinkWG.Done()
-		sinkDrainer(writeJobs, spec.Sink, &sinkErr)
+		sinkDrainer(writeJobs, spec.Sink, &sinkErr, spec.OnTileWritten)
 	}()
 
 	// workers is always > 0 here (normalized to NumCPU above).

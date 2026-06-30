@@ -161,10 +161,13 @@ func runConvertIFE(cmd *cobra.Command, input string, start time.Time) error {
 	if outL0 == srcRegion.Size {
 		kernel = resample.Nearest // identity (crop only, no downscale)
 	}
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
 	runErr := retile.Run(cmd.Context(), retile.Spec{
 		Slide: slide, SrcRegion: srcRegion, OutL0: outL0, Levels: levels,
 		Kernel: kernel, Encoder: &codecTileEncoder{enc: enc, tileW: 256, tileH: 256}, Sink: ifeSink{w}, Workers: cvWorkers,
+		OnTileWritten: bar.Increment,
 	})
+	bar.Wait()
 	if runErr != nil {
 		w.Abort()
 		return fmt.Errorf("retile: %w", runErr)

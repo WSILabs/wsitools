@@ -28,7 +28,7 @@ func TestWritePyramidRowMajorAndOpens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WritePyramid(f, levels, ov, IScanMeta{Magnification: 20, ScanRes: 0.499}); err != nil {
+	if err := WritePyramid(f, levels, ov, IScanMeta{Magnification: 20, ScanRes: 0.499}, nil); err != nil {
 		f.Close()
 		t.Fatalf("WritePyramid: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestWritePyramidRowMajorAndOpens(t *testing.T) {
 func TestWritePyramidRejectsBadOverview(t *testing.T) {
 	levels := []PyramidLevel{{Src: fakeLevel{}, Mag: 40}}
 	var w bufAt
-	err := WritePyramid(&w, levels, Overview{W: 4, H: 4, RGB: []byte{1, 2, 3}}, IScanMeta{})
+	err := WritePyramid(&w, levels, Overview{W: 4, H: 4, RGB: []byte{1, 2, 3}}, IScanMeta{}, nil)
 	if err == nil {
 		t.Fatal("expected error for mismatched overview RGB length")
 	}
@@ -75,7 +75,7 @@ func TestWritePyramidRejectsBadOverview(t *testing.T) {
 
 func TestWritePyramidRejectsNoLevels(t *testing.T) {
 	var w bufAt
-	if err := WritePyramid(&w, nil, Overview{}, IScanMeta{}); err == nil {
+	if err := WritePyramid(&w, nil, Overview{}, IScanMeta{}, nil); err == nil {
 		t.Fatal("expected error for zero levels")
 	}
 }

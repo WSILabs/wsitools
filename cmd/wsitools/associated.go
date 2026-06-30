@@ -40,7 +40,6 @@ type assocCommonFlags struct {
 	inPlace   bool
 	overwrite bool
 	fsync     bool
-	quiet     bool
 }
 
 type removeFlags struct{ assocCommonFlags }
@@ -82,7 +81,7 @@ func gateFormat(src source.Source) error {
 
 // resolveAssocOutput resolves the final output path.
 //   - inPlace: returns input (Splice writes a sibling temp then renames over it).
-//   - out=="": derive "<stem>_relabeled<ext>" next to input (numbered suffix if exists, unless overwrite).
+//   - out=="": derive "<stem>_edited<ext>" next to input (numbered suffix if exists, unless overwrite).
 //   - out!="": use it; error if exists and !overwrite.
 //   - error if inPlace && out!="" ; error if resolved == input (unless inPlace).
 func resolveAssocOutput(input, out string, inPlace, overwrite bool) (string, error) {
@@ -107,7 +106,7 @@ func resolveAssocOutput(input, out string, inPlace, overwrite bool) (string, err
 			return "", fmt.Errorf("abs out: %w", err)
 		}
 		if _, err := os.Stat(absOut); err == nil && !overwrite {
-			return "", fmt.Errorf("output file already exists: %s (use --overwrite)", absOut)
+			return "", fmt.Errorf("output file already exists: %s (use --force)", absOut)
 		}
 		resolved = absOut
 	}
@@ -124,7 +123,7 @@ func deriveAssocPath(absInput string, overwrite bool) string {
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
 
-	first := filepath.Join(dir, stem+"_relabeled"+ext)
+	first := filepath.Join(dir, stem+"_edited"+ext)
 	if overwrite {
 		return first
 	}
@@ -132,7 +131,7 @@ func deriveAssocPath(absInput string, overwrite bool) string {
 		return first
 	}
 	for i := 1; ; i++ {
-		candidate := filepath.Join(dir, fmt.Sprintf("%s_relabeled_%d%s", stem, i, ext))
+		candidate := filepath.Join(dir, fmt.Sprintf("%s_edited_%d%s", stem, i, ext))
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate
 		}
@@ -227,7 +226,7 @@ func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 			if rerr != nil {
 				return rerr
 			}
-			if !fl.quiet {
+			if !flagQuiet {
 				fmt.Printf("wsitools: removed %s: %s -> %s\n", typ, input, outPath)
 			}
 			return nil
@@ -235,7 +234,7 @@ func runAssociatedRemoveFor(typ, input, outPath string, fl removeFlags) error {
 		return err
 	}
 
-	if !fl.quiet {
+	if !flagQuiet {
 		fmt.Printf("wsitools: removed %s: %s -> %s\n", typ, input, outPath)
 	}
 	return nil
@@ -375,7 +374,7 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 			if rerr != nil {
 				return rerr
 			}
-			if !fl.quiet {
+			if !flagQuiet {
 				fmt.Printf("wsitools: %s %s: %s -> %s\n", verb, typ, input, outPath)
 			}
 			return nil
@@ -383,7 +382,7 @@ func runAssociatedReplaceFor(typ, input, outPath string, fl replaceFlags) error 
 		return err
 	}
 
-	if !fl.quiet {
+	if !flagQuiet {
 		fmt.Printf("wsitools: %s %s: %s -> %s\n", verb, typ, input, outPath)
 	}
 	return nil
@@ -518,7 +517,7 @@ func newAssocTypeCmd(typ string) *cobra.Command {
 	replaceCmd.Flags().StringVar(&rpFlags.resize, "resize", "fit", "resize mode: fit|stretch|none")
 	replaceCmd.Flags().StringVar(&rpFlags.bgHex, "bg", "F5F5E6", "letterbox background color (RRGGBB hex)")
 	replaceCmd.Flags().StringVar(&rpFlags.labelDims, "label-dims", "", "target dimensions WxH when adding a new image")
-	replaceCmd.Flags().BoolVar(&rpFlags.force, "force", false, "bypass aspect-ratio guard")
+	replaceCmd.Flags().BoolVar(&rpFlags.force, "allow-aspect-mismatch", false, "allow a replacement image whose aspect ratio differs from the original (bypasses the aspect-ratio guard)")
 	_ = replaceCmd.MarkFlagRequired("image")
 
 	parent.AddCommand(removeCmd, replaceCmd)
@@ -526,9 +525,8 @@ func newAssocTypeCmd(typ string) *cobra.Command {
 }
 
 func bindCommonFlags(cmd *cobra.Command, fl *assocCommonFlags) {
-	cmd.Flags().StringVarP(&fl.output, "output", "o", "", "output file path (default: <stem>_relabeled<ext>)")
+	cmd.Flags().StringVarP(&fl.output, "output", "o", "", "output file path (default: <stem>_edited<ext>)")
 	cmd.Flags().BoolVar(&fl.inPlace, "in-place", false, "edit the slide in place")
-	cmd.Flags().BoolVar(&fl.overwrite, "overwrite", false, "overwrite output if it exists")
+	cmd.Flags().BoolVarP(&fl.overwrite, "force", "f", false, "overwrite output if it exists")
 	cmd.Flags().BoolVar(&fl.fsync, "fsync", true, "fsync the output before rename")
-	cmd.Flags().BoolVarP(&fl.quiet, "quiet", "q", false, "suppress success output")
 }

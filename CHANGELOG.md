@@ -4,6 +4,41 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Added
+
+- **`extract --force` / `-f`** — overwrite an existing output file (matches the
+  other file-writing commands; previously `extract` silently overwrote, now it
+  errors unless `--force` is given).
+- **Universal progress bars.** Every write path now shows a tile-progress bar,
+  not just `downsample` / `crop` / `convert --factor`. Added to all `convert`
+  targets (svs/tiff/ome-tiff/cog-wsi tile-copy + transcode, dzi/szi, dicom, ife,
+  bif), `transcode`, and `crop --lossless`. The bar is driven by a per-tile hook
+  in the retile engine (`retile.Spec.OnTileWritten`) for the engine paths and by
+  direct counters in the verbatim/manual-copy loops. It is suppressed by
+  `--quiet` and **auto-suppressed when stderr is not a terminal** (piped/CI), so
+  it never leaks escape-codes into logs.
+
+### Changed
+
+- **Consistent CLI error/usage output across all commands.** Errors are no longer
+  double-printed (cobra's `Error:` line is silenced at the root; `main` prints a
+  single `error: <msg>`), and the usage menu is now shown uniformly on
+  argument/flag errors (previously `crop` and `downsample` suppressed it) and
+  uniformly omitted on runtime errors. Exit codes are unchanged.
+- **Harmonized flags on the associated-image edit commands** (`label`/`macro`/
+  `overview`/`thumbnail` × `remove`/`replace`) with the rest of the CLI (breaking,
+  pre-1.0):
+  - Overwrite the output with `-f`/`--force` (was `--overwrite`, now removed) —
+    matching `convert`/`crop`/`downsample`/`region`/`extract`.
+  - The `replace` aspect-ratio-guard bypass moved from `--force` to
+    `--allow-aspect-mismatch`, so `--force` never means two different things.
+  - Removed the per-command `-q`/`--quiet` (which shadowed the global flag with a
+    different meaning). `--quiet` is now a single global flag that gained a `-q`
+    short form and **uniformly suppresses progress *and* success/info output**
+    (the `wrote …` / `wsitools: …` lines) across every command.
+  - The default output filename suffix is `<stem>_edited<ext>` (was `_relabeled`,
+    which was misleading for non-label edits).
+
 ## [0.24.2] - 2026-06-28
 
 ### Fixed

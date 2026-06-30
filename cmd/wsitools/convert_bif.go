@@ -119,11 +119,20 @@ func runConvertBIF(cmd *cobra.Command, input string, start time.Time) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", tmp, err)
 	}
-	if err := bifwriter.WritePyramid(f, plevels, ov, meta); err != nil {
+	var totalTiles int64
+	for _, pl := range plevels {
+		cols := (pl.Src.SizeW() + pl.Src.TileW() - 1) / pl.Src.TileW()
+		rows := (pl.Src.SizeH() + pl.Src.TileH() - 1) / pl.Src.TileH()
+		totalTiles += int64(cols) * int64(rows)
+	}
+	bar := newTileProgress("copying", totalTiles)
+	if err := bifwriter.WritePyramid(f, plevels, ov, meta, bar.Increment); err != nil {
 		f.Close()
 		os.Remove(tmp)
+		bar.Wait()
 		return fmt.Errorf("write bif: %w", err)
 	}
+	bar.Wait()
 	if err := f.Sync(); err != nil {
 		f.Close()
 		os.Remove(tmp)

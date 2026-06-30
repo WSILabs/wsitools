@@ -144,7 +144,7 @@ func writeDICOMSingle(src source.Source, start time.Time) error {
 		slog.Info("convert complete",
 			"output", cvOutput, "size", formatBytes(stat.Size()),
 			"level", cvDICOMLevel, "elapsed", time.Since(start).Round(time.Millisecond))
-		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+		infof("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }
@@ -201,6 +201,6 @@ func writeDICOMPyramid(src source.Source, start time.Time) error {
 	slog.Info("convert complete",
 		"output", cvOutput, "instances", n, "size", formatBytes(total),
 		"elapsed", time.Since(start).Round(time.Millisecond))
-	fmt.Printf("wrote %s (%d instances, %s, %s)\n", cvOutput, n, formatBytes(total), time.Since(start).Round(time.Millisecond))
+	infof("wrote %s (%d instances, %s, %s)\n", cvOutput, n, formatBytes(total), time.Since(start).Round(time.Millisecond))
 	return nil
 }

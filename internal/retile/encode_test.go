@@ -31,6 +31,37 @@ func (s *captureSink) WriteTile(level, col, row int, encoded []byte) error {
 	return nil
 }
 
+// failOnceSink fails the first WriteTile, then succeeds — to verify onTile is
+// only called for SUCCESSFUL writes.
+type failOnceSink struct{ failed bool }
+
+func (s *failOnceSink) WriteTile(level, col, row int, encoded []byte) error {
+	if !s.failed {
+		s.failed = true
+		return fmt.Errorf("boom")
+	}
+	return nil
+}
+
+func TestSinkDrainerOnTileHook(t *testing.T) {
+	// 3 jobs; the sink fails the first write. onTile must fire only for the 2
+	// successful writes.
+	writes := make(chan writeJob, 3)
+	for i := 0; i < 3; i++ {
+		writes <- writeJob{level: 0, col: i, row: 0, body: []byte{byte(i)}}
+	}
+	close(writes)
+	var firstErr error
+	var n int
+	sinkDrainer(writes, &failOnceSink{}, &firstErr, func() { n++ })
+	if firstErr == nil {
+		t.Fatal("expected the first write to error")
+	}
+	if n != 2 {
+		t.Errorf("onTile called %d times, want 2 (only successful writes)", n)
+	}
+}
+
 // nthErrorEncoder returns an error on the nth EncodeTile call (1-based).
 type nthErrorEncoder struct {
 	mu  sync.Mutex
@@ -95,7 +126,7 @@ func TestEncoderWorkerAndSinkRoundTrip(t *testing.T) {
 
 	sink := &captureSink{}
 	var firstErr error
-	sinkDrainer(writes, sink, &firstErr)
+	sinkDrainer(writes, sink, &firstErr, nil)
 	if firstErr != nil {
 		t.Fatalf("sink error: %v", firstErr)
 	}

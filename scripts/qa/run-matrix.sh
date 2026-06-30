@@ -151,19 +151,19 @@ run f-dcm-dcm    crossfmt "DICOM --factor 2 -> dicom" "$DICOM" "$C/f_dicom2dicom
 echo; echo "== G. associated-image editing + extraction =="
 # Produce a replacement image from a source that has a label.
 if [[ -e "$SVS_MULTI" ]]; then
-  "$BIN" extract --type label --format png -o "$OUT/_assets/label.png" "$SVS_MULTI" >/dev/null 2>&1 || true
+  "$BIN" extract --type label --format png -f -o "$OUT/_assets/label.png" "$SVS_MULTI" >/dev/null 2>&1 || true
 fi
 REPL="$OUT/_assets/label.png"
-run g-lbl-rm   associated "label remove (svs)"   "$SVS_MULTI" "$C/g_label_removed.svs"   -- "$BIN" label remove   -o "$C/g_label_removed.svs"   --overwrite "$SVS_MULTI"
+run g-lbl-rm   associated "label remove (svs)"   "$SVS_MULTI" "$C/g_label_removed.svs"   -- "$BIN" label remove   -o "$C/g_label_removed.svs"   -f "$SVS_MULTI"
 if [[ -e "$REPL" ]]; then
-  run g-lbl-rep associated "label replace (svs)"  "$SVS_MULTI" "$C/g_label_replaced.svs"  -- "$BIN" label replace  --image "$REPL" -o "$C/g_label_replaced.svs"  --overwrite "$SVS_MULTI"
-  run g-mac-rep associated "macro replace (svs)"  "$SVS_MULTI" "$C/g_macro_replaced.svs"  -- "$BIN" macro replace  --image "$REPL" -o "$C/g_macro_replaced.svs"  --overwrite "$SVS_MULTI"
+  run g-lbl-rep associated "label replace (svs)"  "$SVS_MULTI" "$C/g_label_replaced.svs"  -- "$BIN" label replace  --image "$REPL" -o "$C/g_label_replaced.svs"  -f "$SVS_MULTI"
+  run g-mac-rep associated "macro replace (svs)"  "$SVS_MULTI" "$C/g_macro_replaced.svs"  -- "$BIN" macro replace  --image "$REPL" -o "$C/g_macro_replaced.svs"  -f "$SVS_MULTI"
 fi
-run g-ovr-rm   associated "overview remove (svs)" "$SVS_MULTI" "$C/g_overview_removed.svs" -- "$BIN" overview remove -o "$C/g_overview_removed.svs" --overwrite "$SVS_MULTI"
+run g-ovr-rm   associated "overview remove (svs)" "$SVS_MULTI" "$C/g_overview_removed.svs" -- "$BIN" overview remove -o "$C/g_overview_removed.svs" -f "$SVS_MULTI"
 # Extraction of each associated type the source actually carries (CMU-1 has
 # thumbnail/label/overview, no macro).
 for t in label overview thumbnail; do
-  run "g-ext-$t" associated "extract $t -> png" "$SVS_MULTI" "$OUT/_assets/extracted_$t.png" -- "$BIN" extract --type "$t" --format png -o "$OUT/_assets/extracted_$t.png" "$SVS_MULTI"
+  run "g-ext-$t" associated "extract $t -> png" "$SVS_MULTI" "$OUT/_assets/extracted_$t.png" -- "$BIN" extract --type "$t" --format png -f -o "$OUT/_assets/extracted_$t.png" "$SVS_MULTI"
 done
 
 echo

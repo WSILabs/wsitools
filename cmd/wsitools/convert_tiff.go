@@ -230,7 +230,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 			"size", formatBytes(stat.Size()),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
-		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+		infof("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }
@@ -425,7 +425,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			"size", formatBytes(stat.Size()),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
-		fmt.Printf("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
+		infof("wrote %s (%s, %s)\n", cvOutput, formatBytes(stat.Size()), time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }
@@ -493,8 +493,16 @@ func parseQualityKnobs(quality string) (map[string]string, error) {
 }
 
 func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string, plan omeEditPlan, omeSynthetic bool, slide *opentile.Slide) error {
+	var totalTiles int64
 	for _, lvl := range src.Levels() {
-		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers, container, srcImageDesc); err != nil {
+		g := lvl.Grid()
+		totalTiles += int64(g.X) * int64(g.Y)
+	}
+	bar := newTileProgress("encoding", totalTiles)
+	defer bar.Wait()
+
+	for _, lvl := range src.Levels() {
+		if err := transcodeLevel(ctx, lvl, w, fac, knobs, workers, container, srcImageDesc, bar); err != nil {
 			return fmt.Errorf("level %d: %w", lvl.Index(), err)
 		}
 		if _, err := emitSVSThumbnailAtL0(src, w, lvl.Index(), container, omeSynthetic, plan, slide); err != nil {
@@ -504,7 +512,7 @@ func transcodePyramid(ctx context.Context, src source.Source, w *streamwriter.Wr
 	return nil
 }
 
-func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string) error {
+func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Writer, fac codec.EncoderFactory, knobs map[string]string, workers int, container, srcImageDesc string, bar *progressBar) error {
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: lvl.TileSize().X, TileHeight: lvl.TileSize().Y,
 		PixelFormat: codec.PixelFormatRGB8,
@@ -568,6 +576,7 @@ func transcodeLevel(ctx context.Context, lvl source.Level, w *streamwriter.Write
 				drainErr <- err
 				return
 			}
+			bar.Increment()
 		}
 	}()
 
@@ -750,6 +759,14 @@ func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0D
 			jpegPhoto = jpegTilePhotometric(probe[:n])
 		}
 	}
+	var totalTiles int64
+	for _, lvl := range levels {
+		g := lvl.Grid()
+		totalTiles += int64(g.X) * int64(g.Y)
+	}
+	bar := newTileProgress("copying", totalTiles)
+	defer bar.Wait()
+
 	// Tile-copy: emit levels in source order (L0 first).
 	for _, lvl := range levels {
 		photometric := uint16(codec.PhotometricRGB)
@@ -824,6 +841,7 @@ func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0D
 					<-drainErr
 					return fmt.Errorf("write tile L%d(%d,%d): %w", lvl.Index(), tx, ty, err)
 				}
+				bar.Increment()
 			}
 		}
 		// Signal end of input; wait for the concurrent drain to finish

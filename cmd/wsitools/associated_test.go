@@ -37,8 +37,8 @@ func TestResolveAssocOutputDerivesName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(got, "slide_relabeled.svs") {
-		t.Errorf("derived = %q, want .../slide_relabeled.svs", got)
+	if !strings.HasSuffix(got, "slide_edited.svs") {
+		t.Errorf("derived = %q, want .../slide_edited.svs", got)
 	}
 }
 

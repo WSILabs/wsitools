@@ -86,7 +86,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 			return lerr
 		}
 		tileSize, overlap = res.tileSize, res.overlap
-		fmt.Printf("lossless: base tiles copied verbatim (tile-size %d, overlap 0); edges + lower levels regenerated\n", tileSize)
+		infof("lossless: base tiles copied verbatim (tile-size %d, overlap 0); edges + lower levels regenerated\n", tileSize)
 	}
 	cfg := dzi.Config{
 		Name: name, Width: outW, Height: outH,
@@ -105,7 +105,7 @@ func runConvertDZI(cmd *cobra.Command, input string, start time.Time) error {
 	if err := w.Close(); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s + %s_files/ (%s)\n", manifestPath, base, time.Since(start).Round(time.Millisecond))
+	infof("wrote %s + %s_files/ (%s)\n", manifestPath, base, time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
@@ -162,16 +162,20 @@ func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, c
 		}
 	}
 
-	return retile.Run(ctx, retile.Spec{
-		Slide:     slide,
-		SrcRegion: srcRegion,
-		OutL0:     opentile.Size{W: cfg.Width, H: cfg.Height},
-		Levels:    levels,
-		Kernel:    kernel,
-		Encoder:   enc,
-		Sink:      sink,
-		Workers:   cvWorkers,
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
+	runErr := retile.Run(ctx, retile.Spec{
+		Slide:         slide,
+		SrcRegion:     srcRegion,
+		OutL0:         opentile.Size{W: cfg.Width, H: cfg.Height},
+		Levels:        levels,
+		Kernel:        kernel,
+		Encoder:       enc,
+		Sink:          sink,
+		Workers:       cvWorkers,
+		OnTileWritten: bar.Increment,
 	})
+	bar.Wait()
+	return runErr
 }
 
 // dziOctaveCount returns the number of DZI levels (native down to 1×1).

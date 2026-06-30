@@ -52,10 +52,9 @@ With --lossless, the crop is snapped to the L0 tile grid and the full-resolution
 tiles are copied verbatim (byte-identical); the output is a tile-aligned superset
 of the requested rect (up to ~255px larger per edge), and the command prints the
 effective snapped rect when the input is not already tile-aligned.`,
-	Args:          cobra.ExactArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: false,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true // past arg parsing: runtime errors shouldn't dump the flag wall
 		x, y, w, h, err := resolveRectValues(cmd, cropRect, cropX, cropY, cropW, cropH)
 		if err != nil {
 			return err
@@ -220,7 +219,7 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if lossless {
 		ex, ey, ew, eh, stx0, sty0, outTilesX, outTilesY = snapRectToTiles(x, y, w, h, srcL0.TileSize.W, srcL0.TileSize.H, baseW, baseH)
 		if ex != x || ey != y || ew != w || eh != h {
-			fmt.Printf("lossless: snapped crop to %d,%d %dx%d (tile-aligned)\n", ex, ey, ew, eh)
+			infof("lossless: snapped crop to %d,%d %dx%d (tile-aligned)\n", ex, ey, ew, eh)
 		}
 	}
 	// The raster L0 is only needed by the lossless rebuild (lower levels +

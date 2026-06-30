@@ -201,7 +201,7 @@ func runAssociatedRemoveForCOGWSI(typ, input, outPath string, fl removeFlags) er
 	if err := rebuildCOGWSI(src, outPath, assocEditPlan{remove: typ}, fl.fsync); err != nil {
 		return err
 	}
-	if !fl.quiet {
+	if !flagQuiet {
 		fmt.Printf("wsitools: removed %s: %s -> %s\n", typ, input, outPath)
 	}
 	return nil
@@ -254,7 +254,7 @@ func runAssociatedReplaceForCOGWSI(typ, input, outPath string, fl replaceFlags) 
 	if err := rebuildCOGWSI(src, outPath, assocEditPlan{replace: typ, spec: spec}, fl.fsync); err != nil {
 		return err
 	}
-	if !fl.quiet {
+	if !flagQuiet {
 		verb := "replaced"
 		if existing == nil {
 			verb = "added"
