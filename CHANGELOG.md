@@ -4,6 +4,20 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Added
+
+- **`extract --force` / `-f`** — overwrite an existing output file (matches the
+  other file-writing commands; previously `extract` silently overwrote, now it
+  errors unless `--force` is given).
+
+### Changed
+
+- **Consistent CLI error/usage output across all commands.** Errors are no longer
+  double-printed (cobra's `Error:` line is silenced at the root; `main` prints a
+  single `error: <msg>`), and the usage menu is now shown uniformly on
+  argument/flag errors (previously `crop` and `downsample` suppressed it) and
+  uniformly omitted on runtime errors. Exit codes are unchanged.
+
 ## [0.24.2] - 2026-06-28
 
 ### Fixed

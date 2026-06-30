@@ -19,6 +19,7 @@ var (
 	extractType   string
 	extractOutput string
 	extractFormat string
+	extractForce  bool
 )
 
 var extractCmd = &cobra.Command{
@@ -41,6 +42,7 @@ func init() {
 	extractCmd.Flags().StringVar(&extractType, "type", "", "associated-image type (label|macro|thumbnail|overview)")
 	extractCmd.Flags().StringVarP(&extractOutput, "output", "o", "", "output file path")
 	extractCmd.Flags().StringVar(&extractFormat, "format", "png", "output format: png|jpeg")
+	extractCmd.Flags().BoolVarP(&extractForce, "force", "f", false, "overwrite output if it exists")
 	_ = extractCmd.MarkFlagRequired("type")
 	_ = extractCmd.MarkFlagRequired("output")
 	rootCmd.AddCommand(extractCmd)
@@ -52,6 +54,11 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 	if extractFormat != "png" && extractFormat != "jpeg" {
 		return fmt.Errorf("--format must be png or jpeg, got %q", extractFormat)
+	}
+	if !extractForce {
+		if _, err := os.Stat(extractOutput); err == nil {
+			return fmt.Errorf("output %s already exists (use --force)", extractOutput)
+		}
 	}
 
 	src, err := source.Open(path)
