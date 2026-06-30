@@ -9,6 +9,14 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 - **`extract --force` / `-f`** — overwrite an existing output file (matches the
   other file-writing commands; previously `extract` silently overwrote, now it
   errors unless `--force` is given).
+- **Universal progress bars.** Every write path now shows a tile-progress bar,
+  not just `downsample` / `crop` / `convert --factor`. Added to all `convert`
+  targets (svs/tiff/ome-tiff/cog-wsi tile-copy + transcode, dzi/szi, dicom, ife,
+  bif), `transcode`, and `crop --lossless`. The bar is driven by a per-tile hook
+  in the retile engine (`retile.Spec.OnTileWritten`) for the engine paths and by
+  direct counters in the verbatim/manual-copy loops. It is suppressed by
+  `--quiet` and **auto-suppressed when stderr is not a terminal** (piped/CI), so
+  it never leaks escape-codes into logs.
 
 ### Changed
 

@@ -64,15 +64,17 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 	}
 
 	sink := newCogwsiSink(handles, levels)
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
 	runErr := retile.Run(ctx, retile.Spec{
-		Slide:     slide,
-		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
-		OutL0:     outL0,
-		Levels:    levels,
-		Kernel:    resample.Nearest, // identity scale: ScaledStrips only stitches
-		Encoder:   &codecTileEncoder{enc: enc, tileW: tile, tileH: tile},
-		Sink:      sink,
-		Workers:   workers,
+		Slide:         slide,
+		SrcRegion:     opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
+		OutL0:         outL0,
+		Levels:        levels,
+		Kernel:        resample.Nearest, // identity scale: ScaledStrips only stitches
+		Encoder:       &codecTileEncoder{enc: enc, tileW: tile, tileH: tile},
+		Sink:          sink,
+		Workers:       workers,
+		OnTileWritten: bar.Increment,
 	})
 	// finish() must run unconditionally to drain/join the sink even when Run
 	// errored mid-stream; otherwise the streamwriter drain goroutines leak.
@@ -80,6 +82,7 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 	if ferr := sink.finish(); ferr != nil && runErr == nil {
 		runErr = ferr
 	}
+	bar.Wait()
 	if runErr != nil {
 		return runErr
 	}
@@ -147,15 +150,17 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 	}
 
 	sink := newStreamwriterSink(handles)
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
 	runErr := retile.Run(ctx, retile.Spec{
-		Slide:     slide,
-		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
-		OutL0:     outL0,
-		Levels:    levels,
-		Kernel:    resample.Nearest,
-		Encoder:   &codecTileEncoder{enc: enc, tileW: tile, tileH: tile},
-		Sink:      sink,
-		Workers:   workers,
+		Slide:         slide,
+		SrcRegion:     opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
+		OutL0:         outL0,
+		Levels:        levels,
+		Kernel:        resample.Nearest,
+		Encoder:       &codecTileEncoder{enc: enc, tileW: tile, tileH: tile},
+		Sink:          sink,
+		Workers:       workers,
+		OnTileWritten: bar.Increment,
 	})
 	// finish() must run unconditionally to drain/join the per-level drain
 	// goroutines even when Run errored mid-stream; otherwise they leak (each is
@@ -163,6 +168,7 @@ func convertStitchedTIFF(ctx context.Context, slide *opentile.Slide, src source.
 	if ferr := sink.finish(); ferr != nil && runErr == nil {
 		runErr = ferr
 	}
+	bar.Wait()
 	if runErr != nil {
 		return runErr
 	}
@@ -255,19 +261,22 @@ func convertTranscodeTIFF(ctx context.Context, slide *opentile.Slide, src source
 	}
 
 	sink := newStreamwriterSink(handles)
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
 	runErr := retile.Run(ctx, retile.Spec{
-		Slide:     slide,
-		SrcRegion: opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
-		OutL0:     l0.Size, // identity: transcode is same geometry
-		Levels:    levels,  // FULL octave chain (emit + intermediate)
-		Kernel:    resample.Nearest,
-		Encoder:   &codecTileEncoder{enc: enc, tileW: levels[0].TileW, tileH: levels[0].TileH},
-		Sink:      sink,
-		Workers:   workers,
+		Slide:         slide,
+		SrcRegion:     opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
+		OutL0:         l0.Size, // identity: transcode is same geometry
+		Levels:        levels,  // FULL octave chain (emit + intermediate)
+		Kernel:        resample.Nearest,
+		Encoder:       &codecTileEncoder{enc: enc, tileW: levels[0].TileW, tileH: levels[0].TileH},
+		Sink:          sink,
+		Workers:       workers,
+		OnTileWritten: bar.Increment,
 	})
 	if ferr := sink.finish(); ferr != nil && runErr == nil {
 		runErr = ferr
 	}
+	bar.Wait()
 	if runErr != nil {
 		return runErr
 	}

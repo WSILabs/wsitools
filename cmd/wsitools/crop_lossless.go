@@ -95,6 +95,8 @@ func writeLosslessL0(w *streamwriter.Writer, srcL0 *opentile.Level, stx0, sty0, 
 	// Scratch buffer reused across the sequential submit loop; each tile's bytes
 	// are copied into a fresh slice before WriteTile, since the reorder buffer
 	// holds the slice for the deferred (concurrent) write.
+	bar := newTileProgress("copying", int64(outTilesX)*int64(outTilesY))
+	defer bar.Wait()
 	scratch := make([]byte, srcL0.TileBodyMaxSize())
 	var submitErr error
 	for oy := 0; oy < outTilesY && submitErr == nil; oy++ {
@@ -110,6 +112,7 @@ func writeLosslessL0(w *streamwriter.Writer, srcL0 *opentile.Level, stx0, sty0, 
 				submitErr = err
 				break
 			}
+			bar.Increment()
 		}
 	}
 	lh.CloseInput()
@@ -142,6 +145,8 @@ func writeLosslessL0COGWSI(w *cogwsiwriter.Writer, srcL0 *opentile.Level, stx0, 
 	if err != nil {
 		return fmt.Errorf("AddLevel: %w", err)
 	}
+	bar := newTileProgress("copying", int64(outTilesX)*int64(outTilesY))
+	defer bar.Wait()
 	scratch := make([]byte, srcL0.TileBodyMaxSize())
 	for oy := 0; oy < outTilesY; oy++ {
 		for ox := 0; ox < outTilesX; ox++ {
@@ -154,6 +159,7 @@ func writeLosslessL0COGWSI(w *cogwsiwriter.Writer, srcL0 *opentile.Level, stx0, 
 			if err := h.WriteTile(uint32(ox), uint32(oy), body); err != nil {
 				return fmt.Errorf("write tile (%d,%d): %w", ox, oy, err)
 			}
+			bar.Increment()
 		}
 	}
 	return nil

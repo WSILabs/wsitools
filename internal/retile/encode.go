@@ -54,12 +54,16 @@ func encoderWorker(ctx context.Context, jobs <-chan encodeJob, out chan<- writeJ
 
 // sinkDrainer pulls writeJobs and calls sink.WriteTile serially. Stores the
 // first error in *firstErr; subsequent errors are dropped.
-func sinkDrainer(jobs <-chan writeJob, sink TileSink, firstErr *error) {
+func sinkDrainer(jobs <-chan writeJob, sink TileSink, firstErr *error, onTile func()) {
 	for job := range jobs {
 		if err := sink.WriteTile(job.level, job.col, job.row, job.body); err != nil {
 			if *firstErr == nil {
 				*firstErr = err
 			}
+			continue
+		}
+		if onTile != nil {
+			onTile()
 		}
 	}
 }

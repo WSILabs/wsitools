@@ -162,16 +162,20 @@ func emitDZIPyramid(ctx context.Context, slide *opentile.Slide, w dziTileSink, c
 		}
 	}
 
-	return retile.Run(ctx, retile.Spec{
-		Slide:     slide,
-		SrcRegion: srcRegion,
-		OutL0:     opentile.Size{W: cfg.Width, H: cfg.Height},
-		Levels:    levels,
-		Kernel:    kernel,
-		Encoder:   enc,
-		Sink:      sink,
-		Workers:   cvWorkers,
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
+	runErr := retile.Run(ctx, retile.Spec{
+		Slide:         slide,
+		SrcRegion:     srcRegion,
+		OutL0:         opentile.Size{W: cfg.Width, H: cfg.Height},
+		Levels:        levels,
+		Kernel:        kernel,
+		Encoder:       enc,
+		Sink:          sink,
+		Workers:       cvWorkers,
+		OnTileWritten: bar.Increment,
 	})
+	bar.Wait()
+	return runErr
 }
 
 // dziOctaveCount returns the number of DZI levels (native down to 1×1).

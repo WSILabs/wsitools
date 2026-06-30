@@ -32,7 +32,10 @@ type Overview struct {
 // Layout: header | IFD0 | ext0 | IFD1 | ext1 | … | IFDn | extn | overview |
 // L0 tiles | L1 tiles | … . Tile data is read once and streamed to its computed
 // offset (no whole-pyramid buffering).
-func WritePyramid(out io.WriterAt, levels []PyramidLevel, ov Overview, meta IScanMeta) error {
+// onTile, if non-nil, is called once per tile written (used to drive a progress
+// bar). It is called from the single writing goroutine, so it need not be
+// concurrency-safe.
+func WritePyramid(out io.WriterAt, levels []PyramidLevel, ov Overview, meta IScanMeta, onTile func()) error {
 	if len(levels) == 0 {
 		return fmt.Errorf("bifwriter: no pyramid levels")
 	}
@@ -114,6 +117,9 @@ func WritePyramid(out io.WriterAt, levels []PyramidLevel, ov Overview, meta ISca
 					return fmt.Errorf("bifwriter: write level %d tile (%d,%d): %w", i, col, row, err)
 				}
 				cur += uint64(nb)
+				if onTile != nil {
+					onTile()
+				}
 			}
 		}
 	}

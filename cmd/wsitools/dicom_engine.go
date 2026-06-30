@@ -47,10 +47,13 @@ func runDICOMEngine(ctx context.Context, slide *opentile.Slide, srcRegion openti
 	if outL0 == srcRegion.Size {
 		kernel = resample.Nearest // identity (crop)
 	}
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
 	runErr := retile.Run(ctx, retile.Spec{
 		Slide: slide, SrcRegion: srcRegion, OutL0: outL0, Levels: levels,
 		Kernel: kernel, Encoder: enc, Sink: sink, Workers: workers,
+		OnTileWritten: bar.Increment,
 	})
+	bar.Wait()
 	if runErr != nil {
 		sink.remove()
 		_ = os.RemoveAll(spoolDir)
