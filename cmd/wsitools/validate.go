@@ -170,10 +170,9 @@ func init() {
 
 func runValidate(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
-	// Silence cobra's own "Error: ..." printing: on the exit-2 path the report
-	// is the output (the errValidationFailed sentinel must not surface as text),
-	// and on the operational-error path main.go prints "error: ..." itself.
-	cmd.SilenceErrors = true
+	// Cobra's "Error: ..." print is silenced at the root (main owns error output).
+	// The exit-2 validation-failure path returns the errValidationFailed sentinel,
+	// which main.go maps to exit 2 without printing an "error:" line.
 	path := args[0]
 
 	// ValidateFile bypasses internal/source on purpose: an open/parse failure

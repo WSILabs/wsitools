@@ -75,6 +75,14 @@ Run 'wsitools <command> --help' for command-specific flags and examples.`,
 }
 
 func init() {
+	// main() owns error output (it prints a single "error: <msg>" line and sets
+	// the exit code). Silence cobra's own "Error: <msg>" print on the root so it
+	// isn't duplicated for every subcommand. SilenceUsage stays false here so an
+	// arg/flag-parse error still prints the usage menu; each command sets
+	// cmd.SilenceUsage=true inside its RunE to suppress the flag wall on runtime
+	// errors only.
+	rootCmd.SilenceErrors = true
+
 	rootCmd.PersistentFlags().BoolVar(&flagQuiet, "quiet", false, "suppress progress bar")
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "enable per-level summaries on stderr")
 	rootCmd.PersistentFlags().StringVar(&flagLogLevel, "log-level", "info", "debug|info|warn|error")

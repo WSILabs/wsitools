@@ -85,10 +85,8 @@ Examples:
 
   # 40x → 10x at higher quality, 8 workers
   wsitools downsample --factor 4 --quality 95 --workers 8 -o out.svs in.svs`,
-	Args:          cobra.ExactArgs(1),
-	RunE:          runDownsample,
-	SilenceUsage:  true,
-	SilenceErrors: false,
+	Args: cobra.ExactArgs(1),
+	RunE: runDownsample,
 }
 
 func init() {
@@ -107,6 +105,7 @@ func init() {
 }
 
 func runDownsample(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true // past arg parsing: runtime errors shouldn't dump the flag wall
 	input := args[0]
 	start := time.Now()
 
