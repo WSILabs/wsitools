@@ -1041,6 +1041,7 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 // `levels` is the full engine chain (may contain Intermediate octaves for a
 // select-octave pyramid); only non-intermediate levels become output IFDs.
 func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, levels []retile.LevelSpec, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
+	knobs = withSourceSubsampling(knobs, fac.Name(), slide) // honor source chroma subsampling
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})

@@ -3,9 +3,61 @@ package main
 import (
 	"fmt"
 
+	opentile "github.com/wsilabs/opentile-go"
+	qualityjpeg "github.com/wsilabs/wsitools/cmd/wsitools/quality/jpeg"
 	"github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/source"
 )
+
+// sourceJPEGSubsampling returns the chroma-subsampling knob ("444"/"422"/"440"/
+// "420") matching the source L0's JPEG tiles, or "" if the source isn't JPEG or
+// can't be sampled. Lets a JPEG re-encode honor the source subsampling instead
+// of forcing 4:2:0.
+func sourceJPEGSubsampling(slide *opentile.Slide) string {
+	lvls := slide.Pyramid(0).Levels
+	if len(lvls) == 0 {
+		return ""
+	}
+	b, err := lvls[0].Tile(0, 0)
+	if err != nil {
+		return ""
+	}
+	h, v, ok := qualityjpeg.LumaSampling(b)
+	if !ok {
+		return ""
+	}
+	switch {
+	case h == 1 && v == 1:
+		return "444"
+	case h == 2 && v == 1:
+		return "422"
+	case h == 1 && v == 2:
+		return "440"
+	case h == 2 && v == 2:
+		return "420"
+	}
+	return ""
+}
+
+// withSourceSubsampling returns knobs (a copy) with the "subsampling" knob set
+// from the source L0 when the output codec is JPEG and the user hasn't set it —
+// so a re-encode matches the source's chroma subsampling. A no-op for non-JPEG
+// output or a non-JPEG / unsampleable source.
+func withSourceSubsampling(knobs map[string]string, facName string, slide *opentile.Slide) map[string]string {
+	if facName != "jpeg" || knobs["subsampling"] != "" {
+		return knobs
+	}
+	ss := sourceJPEGSubsampling(slide)
+	if ss == "" {
+		return knobs
+	}
+	out := make(map[string]string, len(knobs)+1)
+	for k, v := range knobs {
+		out[k] = v
+	}
+	out["subsampling"] = ss
+	return out
+}
 
 // resolveTileSize returns the output tile edge: the user's --tile-size when >0,
 // else the source level-0 tile width, else 256 when the source has no usable

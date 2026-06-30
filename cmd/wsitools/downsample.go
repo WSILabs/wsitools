@@ -253,6 +253,7 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 // source's sparse level ratios. Only the non-intermediate levels become output
 // IFDs; the engine still computes the intermediates to feed the box descent.
 func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, levels []retile.LevelSpec, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
+	knobs = withSourceSubsampling(knobs, fac.Name(), slide) // honor source chroma subsampling
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})

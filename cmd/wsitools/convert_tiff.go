@@ -276,6 +276,10 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	}
 	defer src.Close()
 
+	// Honor the source chroma subsampling on a JPEG re-encode (else forces 4:2:0).
+	// Done before the YCbCrSubSampling tag is derived (below) so tag + data agree.
+	knobs = withSourceSubsampling(knobs, fac.Name(), slide)
+
 	// container arg from --to; resolveContainer maps it to the canonical name.
 	resolvedContainer := resolveContainer(src.Format(), codecName, container)
 	bigtiffMode := resolveBigTIFFMode(cvBigTIFFFlag, src)
