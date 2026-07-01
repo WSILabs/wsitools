@@ -410,9 +410,9 @@ func (w *Writer) addL0Metadata(b *tiff.EntryBuilder) {
 	if w.imageDepth > 0 {
 		b.AddLong(tiff.TagImageDepth, []uint32{w.imageDepth})
 	}
-	if len(w.ycbcrSubSampling) == 2 {
-		b.AddShort(tiff.TagYCbCrSubSampling, w.ycbcrSubSampling)
-	}
+	// NOTE: YCbCrSubSampling(530) is emitted PER-LEVEL in buildLevelEntries (a
+	// genuine Aperio SVS tags every pyramid level, and libtiff/OpenSlide warn on
+	// any JPEG-YCbCr level whose 530 tag doesn't match the tile's SOF), not here.
 }
 
 // formatTIFFDateTime formats t as TIFF 6.0's "YYYY:MM:DD HH:MM:SS".

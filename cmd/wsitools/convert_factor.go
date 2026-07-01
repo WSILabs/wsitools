@@ -307,6 +307,7 @@ func downsampleToSVS(
 		MPPY:             outMPP,
 		Magnification:    outMag,
 		ICCProfile:       src.ICCProfile(),
+		YCbCrSubSampling: engineYCbCrSubSampling(fac, knobs, src),
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
@@ -508,6 +509,7 @@ func downsampleToTIFF(
 		MPPY:             mppY,
 		Magnification:    mag,
 		ICCProfile:       src.ICCProfile(),
+		YCbCrSubSampling: engineYCbCrSubSampling(fac, knobs, src),
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
@@ -876,6 +878,7 @@ func downsampleToOMETIFF(
 		MPPY:                 mppY,
 		Magnification:        mag,
 		ICCProfile:           src.ICCProfile(),
+		YCbCrSubSampling:     engineYCbCrSubSampling(omeFac, omeKnobs, src),
 		SubResolutionPyramid: true,
 		SampleFormat:         1,
 	})

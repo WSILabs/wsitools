@@ -11,6 +11,23 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
+// engineYCbCrSubSampling returns the YCbCrSubSampling(530) tag value [h,v] that
+// matches what the engine re-encode will produce for `slide`: the source's own
+// subsampling for JPEG output (which buildEnginePyramid injects into the
+// encoder). nil for non-JPEG output (RGB tiles carry no such tag). Lets the
+// crop/downsample/--factor streamwriters emit a tag that agrees with the encoded
+// tiles, instead of leaving it absent (defaulting to 4:2:0) so readers must
+// auto-correct from the JPEG SOF and log a warning.
+func engineYCbCrSubSampling(fac codec.EncoderFactory, knobs map[string]string, slide *opentile.Slide) []uint16 {
+	if fac.Name() != "jpeg" {
+		return nil
+	}
+	if sub, ok := encoderChromaSubsampling(fac, withSourceSubsampling(knobs, fac.Name(), slide)); ok {
+		return sub
+	}
+	return nil
+}
+
 // sourceQualityEstimate returns the estimated quality (0–100) of the source L0's
 // tiles, or 0 if unknown (lossless source, no inspector, or unreadable). Used to
 // let a re-encode honor a source whose quality exceeds our default.
