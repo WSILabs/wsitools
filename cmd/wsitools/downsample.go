@@ -245,10 +245,12 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
 	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
-	// A downsample rebuilds the pyramid at a reduced L0; a full octave chain is
-	// the current behavior (preserving the source's sparse ratios under a
-	// resolution change is a separate, nuanced heuristic).
+	// Preserve the source's inter-level ratios when the factor aligns with a
+	// source octave (reduced L0 = an existing source level); else full octave.
 	levels := octaveLevelSpecsFor(outL0, outTile)
+	if dl, ok := downsampleSelectOctaveLevels(srcLevelDimsFromSlide(src), outL0.W, outL0.H, outTile, factor); ok {
+		levels = dl
+	}
 	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, levels, outTile, fac, knobs, workers, postL0Hook)
 }
 

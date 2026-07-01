@@ -13,6 +13,10 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
     `1×/4×/16×/32×` source cropped to `1×/2×/4×/8×/16×/32×/64×` now stays
     `1×/4×/16×/32×`), via a select-octave chain that also handles inconsistent
     ratios (e.g. Grundium's 4×-then-2×).
+  - **downsample / `--factor`** now preserve the source level ratios when the
+    factor aligns with a source octave (e.g. downsampling a 4×-stepped source by
+    4 keeps 4× steps instead of rebuilding a dense full-octave pyramid); a
+    non-aligned factor falls back to full octave.
   - **crop / downsample / `--factor`** now preserve the **source codec** instead
     of forcing JPEG (a JPEG2000 SVS stays JPEG2000). These verbs are single-axis
     (use `convert` to change codec); they fall back to JPEG only for source

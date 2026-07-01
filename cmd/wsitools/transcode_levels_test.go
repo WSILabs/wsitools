@@ -170,3 +170,44 @@ func TestSelectOctaveLevelsFor_NonOctaveFallsBack(t *testing.T) {
 		t.Error("ok=true, want false for non-octave-aligned source")
 	}
 }
+
+// TestDownsampleSelectOctaveLevels_Aligned: downsampling a 1x/4x/16x/32x source
+// by 4 (an aligned octave) preserves the source ratios (1x/4x/8x of the reduced
+// L0), not a full octave.
+func TestDownsampleSelectOctaveLevels_Aligned(t *testing.T) {
+	src := []srcLevelDims{
+		{16000, 16000, 256, 256}, // 1x   octave 0
+		{4000, 4000, 256, 256},   // 4x   octave 2
+		{1000, 1000, 256, 256},   // 16x  octave 4
+		{500, 500, 256, 256},     // 32x  octave 5
+	}
+	// downsample by 4 → reduced L0 = 4000x4000 (source octave 2).
+	levels, ok := downsampleSelectOctaveLevels(src, 4000, 4000, 256, 4)
+	if !ok {
+		t.Fatal("ok=false, want true (factor 4 aligns with octave 2)")
+	}
+	got := emitDims(levels)
+	// source octaves {2,4,5} re-based by f=2 → {0,2,3} → 4000, 1000, 500.
+	want := [][2]int{{4000, 4000}, {1000, 1000}, {500, 500}}
+	if len(got) != len(want) {
+		t.Fatalf("emitted %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("level %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestDownsampleSelectOctaveLevels_NonAlignedFallsBack: downsampling that same
+// 4x-stepped source by 2 (no 2x source level) is non-aligned → fall back.
+func TestDownsampleSelectOctaveLevels_NonAlignedFallsBack(t *testing.T) {
+	src := []srcLevelDims{
+		{16000, 16000, 256, 256}, // octave 0
+		{4000, 4000, 256, 256},   // octave 2
+		{1000, 1000, 256, 256},   // octave 4
+	}
+	if _, ok := downsampleSelectOctaveLevels(src, 8000, 8000, 256, 2); ok {
+		t.Error("ok=true, want false (factor 2 not aligned to a source octave)")
+	}
+}

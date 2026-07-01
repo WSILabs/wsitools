@@ -149,6 +149,53 @@ func selectOctaveLevelsFor(src []srcLevelDims, outW, outH, tile int) ([]retile.L
 	return levels, true
 }
 
+// downsampleSelectOctaveLevels builds a select-octave chain for a DOWNSAMPLE (or
+// --factor) to a reduced output L0 = source/factor, preserving the source's
+// inter-level ratios when the factor ALIGNS with a source octave (i.e. the
+// reduced L0 coincides with an existing source level). It emits at the source
+// octaves at or below the downsample octave, re-based onto the reduced L0. e.g.
+// a 1×/4×/16×/32× source downsampled by 4 → 1×/4×/8× (source ratios preserved,
+// not a fresh full-octave pyramid). Returns ok=false when the source isn't
+// octave-aligned, or the factor doesn't land on a source level (non-aligned, e.g.
+// downsampling a 4×-only source by 2) — the caller then uses a full octave chain.
+func downsampleSelectOctaveLevels(src []srcLevelDims, outW, outH, tile, factor int) ([]retile.LevelSpec, bool) {
+	if tile <= 0 || factor < 1 {
+		return nil, false
+	}
+	octaves, deepest, ok := sourceOctaveSet(src)
+	if !ok {
+		return nil, false
+	}
+	f := int(math.Round(math.Log2(float64(factor))))
+	if f < 0 || (1<<f) != factor {
+		return nil, false // factor not a clean power of 2
+	}
+	if !octaves[f] {
+		return nil, false // reduced L0 doesn't align with a source level
+	}
+	deepestOut := deepest - f
+	levels := make([]retile.LevelSpec, 0, deepestOut+1)
+	emitIdx := 0
+	for j := 0; j <= deepestOut; j++ {
+		w := ceilHalve(outW, j)
+		h := ceilHalve(outH, j)
+		if octaves[j+f] { // source has a level at this (re-based) octave
+			levels = append(levels, retile.LevelSpec{
+				Index: emitIdx, Width: w, Height: h,
+				Cols: (w + tile - 1) / tile, Rows: (h + tile - 1) / tile,
+				TileW: tile, TileH: tile, Overlap: 0, Intermediate: false,
+			})
+			emitIdx++
+		} else {
+			levels = append(levels, retile.LevelSpec{
+				Index: -1, Width: w, Height: h,
+				Cols: 0, Rows: 0, TileW: tile, TileH: tile, Overlap: 0, Intermediate: true,
+			})
+		}
+	}
+	return levels, true
+}
+
 // ceilHalve halves v (ceil) n times: ceilHalve(v,0)=v.
 func ceilHalve(v, n int) int {
 	for i := 0; i < n; i++ {

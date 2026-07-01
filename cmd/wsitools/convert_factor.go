@@ -1032,7 +1032,11 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
 	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
-	levels := octaveLevelSpecsFor(outL0, outTile) // --factor reduces L0 → full octave (same as downsample)
+	// Preserve source ratios when the factor aligns with a source octave; else full octave.
+	levels := octaveLevelSpecsFor(outL0, outTile)
+	if dl, ok := downsampleSelectOctaveLevels(srcLevelDimsFromSlide(src), outL0.W, outL0.H, outTile, factor); ok {
+		levels = dl
+	}
 	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, levels, outTile, fac, knobs, workers)
 }
 
