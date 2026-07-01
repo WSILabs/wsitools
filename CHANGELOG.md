@@ -4,6 +4,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-06-30
+
 ### Fixed
 
 - **Honor the source pyramid, codec, and chroma subsampling on transform
