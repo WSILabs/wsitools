@@ -34,6 +34,8 @@ type IFDRecord struct {
 	TileWidth        uint64 // tag 322 (0 if not tiled)
 	TileHeight       uint64 // tag 323 (0 if not tiled)
 	Compression      uint64 // tag 259
+	BitsPerSample    uint64 // tag 258 (first channel; 0 if absent → default 1 per TIFF, but WSI is 8)
+	SamplesPerPixel  uint64 // tag 277 (0 if absent → default 1 per TIFF)
 	NewSubfileType   uint64 // tag 254
 	ImageDescription string // tag 270 (truncated to 200 chars)
 
@@ -253,9 +255,17 @@ func readIFDFull(f *os.File, bo binary.ByteOrder, bigTIFF bool, off int64, captu
 			if v, err := readValue(); err == nil {
 				rec.Height = readUint(bo, typ, v)
 			}
+		case 258: // BitsPerSample (array; first channel)
+			if v, err := readValue(); err == nil {
+				rec.BitsPerSample = readUint(bo, typ, v)
+			}
 		case 259: // Compression
 			if v, err := readValue(); err == nil {
 				rec.Compression = readUint(bo, typ, v)
+			}
+		case 277: // SamplesPerPixel
+			if v, err := readValue(); err == nil {
+				rec.SamplesPerPixel = readUint(bo, typ, v)
 			}
 		case 270: // ImageDescription
 			if v, err := readValue(); err == nil {

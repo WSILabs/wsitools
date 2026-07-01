@@ -34,6 +34,15 @@ func TestWalkIFDs_SVS(t *testing.T) {
 	if first.TileWidth == 0 || first.TileHeight == 0 {
 		t.Errorf("IFD 0 should be tiled: %+v", first)
 	}
+	// BitsPerSample(258)/SamplesPerPixel(277) must be extracted — the transform
+	// entry guard (assertRGB8Source) relies on these to reject non-8-bit / non-RGB
+	// sources instead of silently mis-tagging them. A genuine SVS is 8-bit RGB.
+	if first.BitsPerSample != 8 {
+		t.Errorf("IFD 0 BitsPerSample = %d, want 8", first.BitsPerSample)
+	}
+	if first.SamplesPerPixel != 3 {
+		t.Errorf("IFD 0 SamplesPerPixel = %d, want 3", first.SamplesPerPixel)
+	}
 }
 
 func TestWalkIFDs_BigTIFF(t *testing.T) {

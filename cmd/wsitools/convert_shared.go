@@ -11,6 +11,27 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
+// assertRGB8Source rejects a source whose base image isn't 8-bit with 1
+// (grayscale) or 3 (RGB) samples/pixel, so a transform errors clearly instead of
+// silently mis-tagging it (every writer hardcodes 8-bit RGB, and the verbatim
+// tile-copy path would emit the source's real >8-bit / multichannel tiles under
+// an 8-bit-RGB header). A non-TIFF source (DICOM / IFE — no IFD to read, and
+// opentile normalizes their decode to 8-bit RGB) or an unreadable IFD is skipped.
+func assertRGB8Source(input string) error {
+	recs, err := source.WalkIFDs(input)
+	if err != nil || len(recs) == 0 {
+		return nil
+	}
+	l0 := recs[0] // first top-level IFD = the base image for TIFF-family WSI
+	if l0.BitsPerSample != 0 && l0.BitsPerSample != 8 {
+		return fmt.Errorf("source is %d-bit (BitsPerSample=%d); wsitools transforms support only 8-bit sources — 16-bit / high-depth WSI is not yet supported", l0.BitsPerSample, l0.BitsPerSample)
+	}
+	if l0.SamplesPerPixel != 0 && l0.SamplesPerPixel != 1 && l0.SamplesPerPixel != 3 {
+		return fmt.Errorf("source has %d samples/pixel; wsitools transforms support 1 (grayscale) or 3 (RGB) — %d-channel sources are not yet supported", l0.SamplesPerPixel, l0.SamplesPerPixel)
+	}
+	return nil
+}
+
 // engineYCbCrSubSampling returns the YCbCrSubSampling(530) tag value [h,v] that
 // matches what the engine re-encode will produce for `slide`: the source's own
 // subsampling for JPEG output (which buildEnginePyramid injects into the
