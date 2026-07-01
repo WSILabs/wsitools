@@ -137,6 +137,7 @@ func cropToTIFF(p cropEmitParams) error {
 		MPPY:             mppY,
 		Magnification:    mag,
 		ICCProfile:       p.src.ICCProfile(),
+		YCbCrSubSampling: engineYCbCrSubSampling(p.fac, p.knobs, p.src),
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
@@ -234,6 +235,7 @@ func cropToSVS(p cropEmitParams) error {
 		MPPY:             outMPP,
 		Magnification:    outMag,
 		ICCProfile:       p.src.ICCProfile(),
+		YCbCrSubSampling: engineYCbCrSubSampling(p.fac, p.knobs, p.src),
 	})
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
@@ -350,6 +352,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 		MPPY:                 mppY,
 		Magnification:        mag,
 		ICCProfile:           p.src.ICCProfile(),
+		YCbCrSubSampling:     engineYCbCrSubSampling(p.fac, p.knobs, p.src),
 		SubResolutionPyramid: true,
 		SampleFormat:         1,
 	})
@@ -440,9 +443,9 @@ func cropToCOGWSI(p cropEmitParams) error {
 		ToolsVersion: Version,
 		DefaultOrder: p.order,
 		Metadata: cogwsiwriter.Metadata{
-			MPPX:            mppX,
-			MPPY:            mppY,
-			Magnification:   mag,
+			MPPX:             mppX,
+			MPPY:             mppY,
+			Magnification:    mag,
 			ICCProfile:      p.src.ICCProfile(),
 			SourceFormat:    string(p.src.Format()),
 			SourceImageDesc: fmt.Sprintf("wsitools/%s crop source=%s", Version, p.src.Format()),

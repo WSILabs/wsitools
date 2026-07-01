@@ -27,7 +27,7 @@ var (
 
 	cvTileSize   int
 	cvDZIOverlap int
-	cvDZIFormat   string
+	cvDZIFormat  string
 
 	cvLossless bool
 
@@ -105,6 +105,10 @@ func runConvert(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	input := args[0]
 	start := time.Now()
+
+	if err := assertRGB8Source(input); err != nil {
+		return err
+	}
 
 	if cvFactor != 1 || cvTargetMag != 0 {
 		if cvFactor != 1 && !isValidFactor(cvFactor) {

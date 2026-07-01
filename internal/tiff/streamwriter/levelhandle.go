@@ -196,6 +196,13 @@ func (w *Writer) buildLevelEntries(entry *imageEntry, isL0 bool) (*tiff.EntryBui
 	b.AddShort(tiff.TagCompression, []uint16{s.Compression})
 	b.AddShort(tiff.TagPhotometricInterpretation, []uint16{s.Photometric})
 	b.AddShort(tiff.TagSamplesPerPixel, []uint16{s.SamplesPerPixel})
+	// YCbCrSubSampling(530) on EVERY pyramid level — matching genuine Aperio — so
+	// no level's tag mismatches its tile SOF (which makes libtiff/OpenSlide log an
+	// auto-correction warning). Only set for JPEG output (SVS also carries it by
+	// Aperio convention when a tile is RGB-tagged), so no photometric gate here.
+	if len(w.ycbcrSubSampling) == 2 {
+		b.AddShort(tiff.TagYCbCrSubSampling, w.ycbcrSubSampling)
+	}
 	if w.sampleFormat != 0 {
 		b.AddShort(tiff.TagSampleFormat, []uint16{w.sampleFormat})
 	}

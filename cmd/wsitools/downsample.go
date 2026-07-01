@@ -110,6 +110,10 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 	input := args[0]
 	start := time.Now()
 
+	if err := assertRGB8Source(input); err != nil {
+		return err
+	}
+
 	slog.Info("starting downsample",
 		"input", input,
 		"output", dsOutput,

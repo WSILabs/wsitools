@@ -4,6 +4,26 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`YCbCrSubSampling` (tag 530) now emitted on every pyramid level of engine
+  transform paths** (crop / downsample / `--factor`), matching genuine Aperio and
+  the tiles' actual JPEG SOF subsampling. Previously the tag was absent on these
+  paths, so a non-4:2:0 output (e.g. a 4:4:4 source preserved by the subsampling
+  fix) made libtiff/OpenSlide auto-correct from the SOF and log a warning on each
+  level. The tag is set only for JPEG output, per-level (moved from L0-only in
+  streamwriter to `buildLevelEntries`).
+
+### Added
+
+- **Non-RGB8 source guard.** `convert`, `crop`, and `downsample` now error
+  clearly when the source's base image isn't 8-bit with 1 (grayscale) or 3 (RGB)
+  samples/pixel, instead of silently mis-tagging it — every writer emits an
+  8-bit-RGB header, and the verbatim tile-copy path would otherwise pass a
+  source's real >8-bit / multichannel tiles through under that header. Non-TIFF
+  sources (DICOM / IFE, which opentile normalizes to 8-bit RGB on decode) and
+  unreadable IFDs are skipped.
+
 ## [0.25.0] - 2026-06-30
 
 ### Fixed

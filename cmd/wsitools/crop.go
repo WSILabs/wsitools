@@ -144,6 +144,9 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if _, err := os.Stat(input); err != nil {
 		return fmt.Errorf("input: %w", err)
 	}
+	if err := assertRGB8Source(input); err != nil {
+		return err
+	}
 	if !force {
 		if _, err := os.Stat(output); err == nil {
 			return fmt.Errorf("output exists (use --force to overwrite): %s", output)
