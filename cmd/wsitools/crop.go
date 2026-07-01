@@ -208,6 +208,11 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	if err != nil {
 		return err
 	}
+	// Quality floor: when the user gave no --quality (quality == 0), the default
+	// is a floor — honor a source whose own quality is higher.
+	if quality == 0 {
+		knobs = withSourceQualityFloor(knobs, src)
+	}
 
 	// SVS guard: SVS emitters support jpeg and jpeg2000 only (Aperio format
 	// constraint). Reject any other explicit --codec so the user gets a clear

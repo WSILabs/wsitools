@@ -279,6 +279,11 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 	// Honor the source chroma subsampling on a JPEG re-encode (else forces 4:2:0).
 	// Done before the YCbCrSubSampling tag is derived (below) so tag + data agree.
 	knobs = withSourceSubsampling(knobs, fac.Name(), slide)
+	// Quality floor: when no --quality was given, our default is a floor — honor a
+	// source whose own quality is higher (cvQuality=="" ⇒ using the default).
+	if cvQuality == "" {
+		knobs = withSourceQualityFloor(knobs, slide)
+	}
 
 	// container arg from --to; resolveContainer maps it to the canonical name.
 	resolvedContainer := resolveContainer(src.Format(), codecName, container)

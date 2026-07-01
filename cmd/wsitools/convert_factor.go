@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,6 +118,10 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 	var knobs map[string]string
 	if cvQuality == "" {
 		knobs = codecDefaultKnobs(cn)
+		// Quality floor: no --quality → default is a floor; honor a higher-quality source.
+		if q := sourceQualityEstimateFor(input); q > qFromKnobs(knobs) {
+			knobs["q"] = strconv.Itoa(q)
+		}
 	} else {
 		var qerr error
 		knobs, qerr = parseQualityKnobs(cvQuality)

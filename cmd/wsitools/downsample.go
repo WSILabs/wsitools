@@ -125,6 +125,13 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open source: %w", err)
 	}
 	srcFormat := string(src.Format())
+	// Quality floor: with no explicit --quality, the default is a floor — honor a
+	// source whose own quality is higher.
+	if !cmd.Flags().Changed("quality") {
+		if q := sourceQualityEstimate(src); q > dsQuality {
+			dsQuality = q
+		}
+	}
 	src.Close()
 
 	target, ok := downsampleTargetForFormat(srcFormat)

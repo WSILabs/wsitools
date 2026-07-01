@@ -20,6 +20,12 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   - **crop / downsample / `--factor` / `convert --codec`** now preserve the
     **source JPEG chroma subsampling** (4:4:4 / 4:2:2 stay; previously forced
     4:2:0). `convert --codec` also emits a matching `YCbCrSubSampling` tag.
+  - **Re-encode quality is now a floor, not a fixed default.** When no
+    `--quality` is given, the default (85) is treated as a floor: a source whose
+    own estimated quality is higher is honored (a Q95 slide re-encodes at ~Q95,
+    not 85), so a transform never needlessly degrades a high-quality source. An
+    explicit `--quality` still wins. Applies to crop / downsample / `--factor` /
+    `convert`.
 
 ### Added
 

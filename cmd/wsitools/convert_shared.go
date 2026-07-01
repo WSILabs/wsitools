@@ -2,12 +2,70 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 
 	opentile "github.com/wsilabs/opentile-go"
+	"github.com/wsilabs/wsitools/cmd/wsitools/quality"
 	qualityjpeg "github.com/wsilabs/wsitools/cmd/wsitools/quality/jpeg"
 	"github.com/wsilabs/wsitools/internal/codec"
 	"github.com/wsilabs/wsitools/internal/source"
 )
+
+// sourceQualityEstimate returns the estimated quality (0–100) of the source L0's
+// tiles, or 0 if unknown (lossless source, no inspector, or unreadable). Used to
+// let a re-encode honor a source whose quality exceeds our default.
+func sourceQualityEstimate(slide *opentile.Slide) int {
+	lvls := slide.Pyramid(0).Levels
+	if len(lvls) == 0 {
+		return 0
+	}
+	l0 := lvls[0]
+	insp, ok := quality.For(l0.Compression)
+	if !ok {
+		return 0
+	}
+	b, err := l0.Tile(0, 0)
+	if err != nil {
+		return 0
+	}
+	info, err := insp.Inspect(b)
+	if err != nil {
+		return 0
+	}
+	return info.QualityEstimate
+}
+
+// sourceQualityEstimateFor opens input just to estimate its L0 quality (for the
+// downsample / --factor paths, which don't hold the slide when resolving knobs).
+func sourceQualityEstimateFor(input string) int {
+	sl, err := opentile.OpenFile(input)
+	if err != nil {
+		return 0
+	}
+	defer sl.Close()
+	return sourceQualityEstimate(sl)
+}
+
+// withSourceQualityFloor treats the resolved "q" knob as a FLOOR: if the source's
+// own estimated quality is higher, raise "q" to it so re-encoding a high-quality
+// slide doesn't needlessly degrade it. Never lowers "q". Caller gates this on the
+// user NOT having set --quality explicitly.
+func withSourceQualityFloor(knobs map[string]string, slide *opentile.Slide) map[string]string {
+	cur, err := strconv.Atoi(knobs["q"])
+	if err != nil {
+		return knobs
+	}
+	srcQ := sourceQualityEstimate(slide)
+	if srcQ <= cur {
+		return knobs
+	}
+	out := make(map[string]string, len(knobs))
+	for k, v := range knobs {
+		out[k] = v
+	}
+	out["q"] = strconv.Itoa(srcQ)
+	return out
+}
 
 // preservedSourceCodec returns the source's own codec name when it has a
 // wsitools encoder, so a single-axis transform (downsample / --factor / crop,
