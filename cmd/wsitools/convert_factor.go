@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	codec "github.com/wsilabs/wsitools/internal/codec"
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/dicomwriter"
+	"github.com/wsilabs/wsitools/internal/retile"
 	"github.com/wsilabs/wsitools/internal/source"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/cogwsiwriter"
@@ -107,13 +109,19 @@ func dispatchDownsampleByTarget(
 // set (factor != 1 or targetMag != 0). Supported targets: svs, tiff, cog-wsi, ome-tiff.
 func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time) error {
 	// Parse common flags shared by all targets.
+	// --factor only scales — when the user gives no --codec, preserve the source
+	// codec (jpeg/jpeg2000) rather than forcing jpeg.
+	cn := cvCodec
+	if cn == "" {
+		cn = preservedSourceCodec(input)
+	}
 	var knobs map[string]string
 	if cvQuality == "" {
-		cn := cvCodec
-		if cn == "" {
-			cn = "jpeg"
-		}
 		knobs = codecDefaultKnobs(cn)
+		// Quality floor: no --quality → default is a floor; honor a higher-quality source.
+		if q := sourceQualityEstimateFor(input); q > qFromKnobs(knobs) {
+			knobs["q"] = strconv.Itoa(q)
+		}
 	} else {
 		var qerr error
 		knobs, qerr = parseQualityKnobs(cvQuality)
@@ -127,10 +135,6 @@ func runConvertFactor(cmd *cobra.Command, input, target string, start time.Time)
 		workers = runtime.NumCPU()
 	}
 
-	cn := cvCodec
-	if cn == "" {
-		cn = "jpeg"
-	}
 	return dispatchDownsampleByTarget(
 		cmd.Context(),
 		target,
@@ -1028,7 +1032,8 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
 	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
-	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, outTile, fac, knobs, workers)
+	levels := octaveLevelSpecsFor(outL0, outTile) // --factor reduces L0 → full octave (same as downsample)
+	return buildEnginePyramidCOGWSI(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, levels, outTile, fac, knobs, workers)
 }
 
 // buildEnginePyramidCOGWSI streams srcRegion through the retile engine into a
@@ -1036,9 +1041,10 @@ func buildPyramidCOGWSI(ctx context.Context, src *opentile.Slide, w *cogwsiwrite
 // by fac+knobs; Compression is derived from enc.TIFFCompressionTag(). It mirrors
 // buildEnginePyramid but targets COG-WSI (no postL0Hook; no SVS thumbnail IFD).
 // Shared by downsample (full-L0 region) and crop (rect region, identity).
-func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
-	levels := octaveLevelSpecsFor(outL0, outTile)
-
+// `levels` is the full engine chain (may contain Intermediate octaves for a
+// select-octave pyramid); only non-intermediate levels become output IFDs.
+func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cogwsiwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, levels []retile.LevelSpec, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int) error {
+	knobs = withSourceSubsampling(knobs, fac.Name(), slide) // honor source chroma subsampling
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})
@@ -1047,23 +1053,30 @@ func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cog
 	}
 	defer enc.Close()
 
-	handles := make([]*cogwsiwriter.LevelHandle, len(levels))
-	for i := range levels {
+	var emitted []retile.LevelSpec
+	for _, ls := range levels {
+		if !ls.Intermediate {
+			emitted = append(emitted, ls)
+		}
+	}
+
+	handles := make([]*cogwsiwriter.LevelHandle, len(emitted))
+	for e := range emitted {
 		h, err := w.AddLevel(cogwsiwriter.LevelSpec{
-			ImageWidth: uint32(levels[i].Width), ImageHeight: uint32(levels[i].Height),
+			ImageWidth: uint32(emitted[e].Width), ImageHeight: uint32(emitted[e].Height),
 			TileWidth: uint32(outTile), TileHeight: uint32(outTile),
 			Compression: enc.TIFFCompressionTag(), Photometric: enc.TIFFPhotometric(),
 			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
 			JPEGTables: enc.LevelHeader(),
-			IsL0:       i == 0,
+			IsL0:       e == 0,
 		})
 		if err != nil {
-			return fmt.Errorf("add level %d: %w", i, err)
+			return fmt.Errorf("add level %d: %w", e, err)
 		}
-		handles[i] = h
+		handles[e] = h
 	}
 
-	sink := newCogwsiSink(handles, levels)
+	sink := newCogwsiSink(handles, emitted)
 	return runEngineRetile(ctx, slide, srcRegion, outL0, levels, &codecTileEncoder{enc: enc, tileW: outTile, tileH: outTile}, sink, workers)
 }
 

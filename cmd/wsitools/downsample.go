@@ -39,6 +39,7 @@ import (
 	jpegcodec "github.com/wsilabs/wsitools/internal/codec/jpeg"
 	"github.com/wsilabs/wsitools/internal/downscale"
 	"github.com/wsilabs/wsitools/internal/pipeline"
+	"github.com/wsilabs/wsitools/internal/retile"
 	"github.com/wsilabs/wsitools/internal/tiff"
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
@@ -124,6 +125,13 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open source: %w", err)
 	}
 	srcFormat := string(src.Format())
+	// Quality floor: with no explicit --quality, the default is a floor — honor a
+	// source whose own quality is higher.
+	if !cmd.Flags().Changed("quality") {
+		if q := sourceQualityEstimate(src); q > dsQuality {
+			dsQuality = q
+		}
+	}
 	src.Close()
 
 	target, ok := downsampleTargetForFormat(srcFormat)
@@ -150,7 +158,9 @@ func runDownsample(cmd *cobra.Command, args []string) error {
 		"", // bigtiff: "" means auto (downsample has no --bigtiff flag)
 		dsForce,
 		false, // noAssociated: downsample always passes through associated images
-		"jpeg",
+		// downsample only downsamples — preserve the source codec (jpeg/jpeg2000);
+		// use convert to change codec. Falls back to jpeg for un-encodable sources.
+		preservedSourceCodec(input),
 		// qualityStr: downsample is jpeg-only, so bridge the int flag (default 85,
 		// the jpeg codec default) directly to the encoder's knob resolution. This is
 		// what makes `downsample --quality N` reach the encoder (the emitters resolve
@@ -235,7 +245,11 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 		return fmt.Errorf("output L0 dimensions degenerate: %dx%d (factor %d too large)", outL0.W, outL0.H, factor)
 	}
 	outTile := resolveTileSize(srcL0.TileSize.W, cvTileSize)
-	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, outTile, fac, knobs, workers, postL0Hook)
+	// A downsample rebuilds the pyramid at a reduced L0; a full octave chain is
+	// the current behavior (preserving the source's sparse ratios under a
+	// resolution change is a separate, nuanced heuristic).
+	levels := octaveLevelSpecsFor(outL0, outTile)
+	return buildEnginePyramid(ctx, src, w, opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcSize}, outL0, levels, outTile, fac, knobs, workers, postL0Hook)
 }
 
 // buildEnginePyramid builds a streamwriter pyramid by streaming srcRegion
@@ -243,9 +257,12 @@ func buildPyramid(ctx context.Context, src *opentile.Slide, w *streamwriter.Writ
 // selected by fac+knobs; Compression is derived from enc.TIFFCompressionTag().
 // postL0Hook runs after L0's AddLevel, before L1 (the thumbnail-IFD interleave).
 // Shared by downsample (full-L0 region, outL0=L0/factor) and crop (rect region, identity).
-func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
-	levels := octaveLevelSpecsFor(outL0, outTile)
-
+// `levels` is the full engine level chain (finest-first). It MAY contain
+// Intermediate (non-emitting) octaves — a select-octave chain that preserves a
+// source's sparse level ratios. Only the non-intermediate levels become output
+// IFDs; the engine still computes the intermediates to feed the box descent.
+func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwriter.Writer, srcRegion opentile.Region, outL0 opentile.Size, levels []retile.LevelSpec, outTile int, fac codec.EncoderFactory, knobs map[string]string, workers int, postL0Hook func() error) error {
+	knobs = withSourceSubsampling(knobs, fac.Name(), slide) // honor source chroma subsampling
 	enc, err := fac.NewEncoder(codec.LevelGeometry{
 		TileWidth: outTile, TileHeight: outTile, PixelFormat: codec.PixelFormatRGB8,
 	}, codec.Quality{Knobs: knobs})
@@ -255,10 +272,17 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 	defer enc.Close()
 	tables := enc.LevelHeader()
 
-	specFor := func(i int) streamwriter.LevelSpec {
+	var emitted []retile.LevelSpec
+	for _, ls := range levels {
+		if !ls.Intermediate {
+			emitted = append(emitted, ls)
+		}
+	}
+
+	specFor := func(ls retile.LevelSpec) streamwriter.LevelSpec {
 		return streamwriter.LevelSpec{
-			ImageWidth:      uint32(levels[i].Width),
-			ImageHeight:     uint32(levels[i].Height),
+			ImageWidth:      uint32(ls.Width),
+			ImageHeight:     uint32(ls.Height),
 			TileWidth:       uint32(outTile),
 			TileHeight:      uint32(outTile),
 			Compression:     enc.TIFFCompressionTag(),
@@ -271,8 +295,8 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 		}
 	}
 
-	handles := make([]*streamwriter.LevelHandle, len(levels))
-	h0, err := w.AddLevel(specFor(0))
+	handles := make([]*streamwriter.LevelHandle, len(emitted))
+	h0, err := w.AddLevel(specFor(emitted[0]))
 	if err != nil {
 		return fmt.Errorf("add level 0: %w", err)
 	}
@@ -283,12 +307,12 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 			return fmt.Errorf("post-L0 hook: %w", err)
 		}
 	}
-	for i := 1; i < len(levels); i++ {
-		h, err := w.AddLevel(specFor(i))
+	for e := 1; e < len(emitted); e++ {
+		h, err := w.AddLevel(specFor(emitted[e]))
 		if err != nil {
-			return fmt.Errorf("add level %d: %w", i, err)
+			return fmt.Errorf("add level %d: %w", e, err)
 		}
-		handles[i] = h
+		handles[e] = h
 	}
 
 	sink := newStreamwriterSink(handles)

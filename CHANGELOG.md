@@ -4,6 +4,29 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Honor the source pyramid, codec, and chroma subsampling on transform
+  (don't impose defaults).** Several transform paths re-encoded with hardcoded
+  defaults instead of matching the source:
+  - **crop** now preserves the **source pyramid level ratios + count** (a CMU-2
+    `1×/4×/16×/32×` source cropped to `1×/2×/4×/8×/16×/32×/64×` now stays
+    `1×/4×/16×/32×`), via a select-octave chain that also handles inconsistent
+    ratios (e.g. Grundium's 4×-then-2×).
+  - **crop / downsample / `--factor`** now preserve the **source codec** instead
+    of forcing JPEG (a JPEG2000 SVS stays JPEG2000). These verbs are single-axis
+    (use `convert` to change codec); they fall back to JPEG only for source
+    codecs with no encoder (LZW / uncompressed / Deflate).
+  - **crop / downsample / `--factor` / `convert --codec`** now preserve the
+    **source JPEG chroma subsampling** (4:4:4 / 4:2:2 stay; previously forced
+    4:2:0). `convert --codec` also emits a matching `YCbCrSubSampling` tag.
+  - **Re-encode quality is now a floor, not a fixed default.** When no
+    `--quality` is given, the default (85) is treated as a floor: a source whose
+    own estimated quality is higher is honored (a Q95 slide re-encodes at ~Q95,
+    not 85), so a transform never needlessly degrades a high-quality source. An
+    explicit `--quality` still wins. Applies to crop / downsample / `--factor` /
+    `convert`.
+
 ### Added
 
 - **`extract --force` / `-f`** — overwrite an existing output file (matches the

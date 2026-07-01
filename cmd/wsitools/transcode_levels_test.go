@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/wsilabs/wsitools/internal/retile"
+)
 
 func TestTranscodeOctaveLevels_PowerOfTwo(t *testing.T) {
 	// L0 46000×40000 (tile 256), L1 = /4 (octave 2), L2 = /16 (octave 4).
@@ -93,5 +97,76 @@ func TestTranscodeOctaveLevels_RealSVSOddHeight(t *testing.T) {
 	}
 	if levels[2].Height != 8229 || levels[4].Height != 2058 {
 		t.Errorf("box-derived H = [%d,%d], want [8229,2058] (ceil-halve, not source 8228/2057)", levels[2].Height, levels[4].Height)
+	}
+}
+
+func emitDims(levels []retile.LevelSpec) [][2]int {
+	var out [][2]int
+	for _, l := range levels {
+		if !l.Intermediate {
+			out = append(out, [2]int{l.Width, l.Height})
+		}
+	}
+	return out
+}
+
+// TestSelectOctaveLevelsFor_PreservesSourceRatios: a standard 4× source (octaves
+// 0,2,4) maps onto a crop L0 as 3 emitted levels at 1×/4×/16×, with the 2×/8×
+// octaves marked intermediate.
+func TestSelectOctaveLevelsFor_PreservesSourceRatios(t *testing.T) {
+	src := []srcLevelDims{
+		{16000, 16000, 256, 256}, // 1×
+		{4000, 4000, 256, 256},   // 4×  (octave 2)
+		{1000, 1000, 256, 256},   // 16× (octave 4)
+	}
+	levels, ok := selectOctaveLevelsFor(src, 8000, 8000, 256)
+	if !ok {
+		t.Fatal("ok=false, want true for octave-aligned source")
+	}
+	got := emitDims(levels)
+	want := [][2]int{{8000, 8000}, {2000, 2000}, {500, 500}} // 1×, 4×, 16× of the 8000 crop L0
+	if len(got) != len(want) {
+		t.Fatalf("emitted %d levels (%v), want %d (%v)", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("emit level %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestSelectOctaveLevelsFor_InconsistentRatios: Grundium-style 4× then 2× steps
+// (octaves 0,2,3) must be preserved, not normalized to a uniform octave.
+func TestSelectOctaveLevelsFor_InconsistentRatios(t *testing.T) {
+	src := []srcLevelDims{
+		{16000, 16000, 256, 256}, // 1×
+		{4000, 4000, 256, 256},   // 4×  (octave 2)
+		{2000, 2000, 256, 256},   // 8×  (octave 3)
+	}
+	levels, ok := selectOctaveLevelsFor(src, 16000, 16000, 256)
+	if !ok {
+		t.Fatal("ok=false, want true")
+	}
+	got := emitDims(levels)
+	want := [][2]int{{16000, 16000}, {4000, 4000}, {2000, 2000}} // 1×, 4×, 8×
+	if len(got) != len(want) {
+		t.Fatalf("emitted %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("emit level %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestSelectOctaveLevelsFor_NonOctaveFallsBack: a non-power-of-2 source ratio
+// yields ok=false so the caller uses a full octave pyramid.
+func TestSelectOctaveLevelsFor_NonOctaveFallsBack(t *testing.T) {
+	src := []srcLevelDims{
+		{16000, 16000, 256, 256},
+		{5000, 5000, 256, 256}, // ratio 3.2× — not octave-aligned
+	}
+	if _, ok := selectOctaveLevelsFor(src, 16000, 16000, 256); ok {
+		t.Error("ok=true, want false for non-octave-aligned source")
 	}
 }

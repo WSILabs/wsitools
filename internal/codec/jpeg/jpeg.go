@@ -22,6 +22,7 @@ package jpeg
 
 static int wsi_encode_vanilla(
     const unsigned char *rgb, int w, int h, int quality, int abbreviated,
+    int luma_h, int luma_v,
     unsigned char **outBuf, unsigned long *outSize) {
 
     struct jpeg_compress_struct cinfo;
@@ -39,6 +40,15 @@ static int wsi_encode_vanilla(
     cinfo.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cinfo);                // → YCbCr output, 4:2:0
     jpeg_set_quality(&cinfo, quality, TRUE);
+
+    // Chroma subsampling = ratio of luma to (1,1) chroma sampling factors:
+    // (2,2)=4:2:0, (2,1)=4:2:2, (1,1)=4:4:4. Lets a re-encode match the source.
+    cinfo.comp_info[0].h_samp_factor = luma_h;
+    cinfo.comp_info[0].v_samp_factor = luma_v;
+    cinfo.comp_info[1].h_samp_factor = 1;
+    cinfo.comp_info[1].v_samp_factor = 1;
+    cinfo.comp_info[2].h_samp_factor = 1;
+    cinfo.comp_info[2].v_samp_factor = 1;
 
     if (abbreviated) {
         jpeg_suppress_tables(&cinfo, TRUE);
@@ -104,17 +114,32 @@ func (Factory) NewEncoder(g codec.LevelGeometry, q codec.Quality) (codec.Encoder
 }
 
 type Encoder struct {
-	geometry codec.LevelGeometry
-	quality  int
-	tables   []byte
+	geometry     codec.LevelGeometry
+	quality      int
+	lumaH, lumaV int // chroma subsampling via luma sampling factors (default 2,2 = 4:2:0)
+	tables       []byte
 }
 
 func New(g codec.LevelGeometry, q codec.Quality) (*Encoder, error) {
-	e := &Encoder{geometry: g, quality: 85}
+	e := &Encoder{geometry: g, quality: 85, lumaH: 2, lumaV: 2}
 	if v, ok := q.Knobs["q"]; ok {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
 			e.quality = n
 		}
+	}
+	// Optional "subsampling" knob (444 / 422 / 420) lets a re-encode match the
+	// source's chroma subsampling instead of forcing 4:2:0.
+	switch q.Knobs["subsampling"] {
+	case "444":
+		e.lumaH, e.lumaV = 1, 1
+	case "422":
+		e.lumaH, e.lumaV = 2, 1
+	case "440":
+		e.lumaH, e.lumaV = 1, 2
+	case "420", "":
+		e.lumaH, e.lumaV = 2, 2
+	default:
+		return nil, fmt.Errorf("codec/jpeg: unknown subsampling %q (want 444|422|440|420)", q.Knobs["subsampling"])
 	}
 	if err := e.computeTables(); err != nil {
 		return nil, err
@@ -178,6 +203,7 @@ func (e *Encoder) encodeRaw(rgb []byte, w, h int, abbreviated bool) ([]byte, err
 		(*C.uchar)(unsafe.Pointer(&rgb[0])),
 		C.int(w), C.int(h),
 		C.int(e.quality), abbr,
+		C.int(e.lumaH), C.int(e.lumaV),
 		&outBuf, &outSize,
 	)
 	runtime.KeepAlive(rgb)
