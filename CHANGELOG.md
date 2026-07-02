@@ -4,6 +4,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-07-01
+
 ### Fixed
 
 - **`YCbCrSubSampling` (tag 530) now emitted on every pyramid level of engine
