@@ -1091,11 +1091,11 @@ func buildEnginePyramidCOGWSI(ctx context.Context, slide *opentile.Slide, w *cog
 // cogwsiwriter pyramid, box-halving between levels via halveRaster. nLevels is
 // the total level count (L0 included). Shared by buildPyramidCOGWSI (downsample)
 // and cropToCOGWSI.
-func buildPyramidFromRasterCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, outTile int) error {
+func buildPyramidFromRasterCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, outTile int, subsampling string) error {
 	currentRaster := l0
 	currentW, currentH := l0W, l0H
 	for outLvl := 0; outLvl < nLevels; outLvl++ {
-		if err := encodeAndWriteLevelCOGWSI(ctx, w, currentRaster, currentW, currentH, quality, outTile, outLvl == 0); err != nil {
+		if err := encodeAndWriteLevelCOGWSI(ctx, w, currentRaster, currentW, currentH, quality, outTile, outLvl == 0, subsampling); err != nil {
 			return fmt.Errorf("level %d: %w", outLvl, err)
 		}
 		if outLvl < nLevels-1 {
@@ -1116,12 +1116,18 @@ func buildPyramidFromRasterCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, l
 // and writes them row-major into a cogwsiwriter level handle.
 // cogwsiwriter.WriteTile enforces strict row-major order, so we encode and
 // write sequentially in (ty, tx) order.
-func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, raster []byte, levelW, levelH, quality, outTile int, isL0 bool) error {
+func encodeAndWriteLevelCOGWSI(ctx context.Context, w *cogwsiwriter.Writer, raster []byte, levelW, levelH, quality, outTile int, isL0 bool, subsampling string) error {
+	// Honor the source chroma subsampling so raster-built levels match the verbatim
+	// L0 and the YCbCrSubSampling tag (see encodeAndWriteLevel).
+	knobs := map[string]string{"q": fmt.Sprintf("%d", quality)}
+	if subsampling != "" {
+		knobs["subsampling"] = subsampling
+	}
 	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
 		TileWidth:   outTile,
 		TileHeight:  outTile,
 		PixelFormat: codec.PixelFormatRGB8,
-	}, codec.Quality{Knobs: map[string]string{"q": fmt.Sprintf("%d", quality)}})
+	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)
 	}

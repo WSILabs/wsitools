@@ -329,7 +329,7 @@ func buildEnginePyramid(ctx context.Context, slide *opentile.Slide, w *streamwri
 // JPEG pyramid via the streamwriter, box-halving between levels. nLevels is the
 // total number of pyramid levels to emit (L0 included). postL0Hook runs
 // immediately after L0 (used to interleave the thumbnail IFD). bar may be nil.
-func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, workers, outTile int, postL0Hook func() error) error {
+func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []byte, l0W, l0H, nLevels, quality, workers, outTile int, subsampling string, postL0Hook func() error) error {
 	// Total tile count across all output levels for the progress bar.
 	var totalTiles int64
 	{
@@ -371,7 +371,7 @@ func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []by
 		tiles := countTilesForLevel(currentW, currentH, outTile)
 		slog.Debug("encoding level", "level", outLvl, "w", currentW, "h", currentH, "tiles", tiles)
 
-		if err := encodeAndWriteLevel(ctx, w, currentRaster, currentW, currentH, quality, workers, outTile, bar); err != nil {
+		if err := encodeAndWriteLevel(ctx, w, currentRaster, currentW, currentH, quality, workers, outTile, subsampling, bar); err != nil {
 			if progress != nil {
 				progress.Wait()
 			}
@@ -454,12 +454,19 @@ func cropRaster(src []byte, srcW, srcH, dstW, dstH int) []byte {
 // JPEG tiles and writes them via a streamwriter LevelHandle. All pyramid IFDs
 // use NewSubfileType=0 — opentile-go's SVS classifier rejects pyramid levels
 // with the reduced bit set. bar may be nil when --quiet is set.
-func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []byte, levelW, levelH, quality, workers, outTile int, bar *mpb.Bar) error {
+func encodeAndWriteLevel(ctx context.Context, w *streamwriter.Writer, raster []byte, levelW, levelH, quality, workers, outTile int, subsampling string, bar *mpb.Bar) error {
+	// Honor the source chroma subsampling (e.g. keep a 4:4:4 source 4:4:4 instead
+	// of forcing the encoder default 4:2:0) so these raster-built levels match the
+	// verbatim L0 and the YCbCrSubSampling tag — mirrors buildEnginePyramid.
+	knobs := map[string]string{"q": strconv.Itoa(quality)}
+	if subsampling != "" {
+		knobs["subsampling"] = subsampling
+	}
 	enc, err := jpegcodec.Factory{}.NewEncoder(codec.LevelGeometry{
 		TileWidth:   outTile,
 		TileHeight:  outTile,
 		PixelFormat: codec.PixelFormatRGB8,
-	}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+	}, codec.Quality{Knobs: knobs})
 	if err != nil {
 		return fmt.Errorf("new encoder: %w", err)
 	}
