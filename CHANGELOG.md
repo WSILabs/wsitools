@@ -6,6 +6,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **`crop --lossless` of a non-JPEG source no longer produces a mixed-codec
+  pyramid** (wsitools#28). Lossless crop copies L0 verbatim (source codec) but
+  re-encodes the reduced levels via the raster encoder, which hardcoded JPEG — so
+  a JPEG 2000 slide cropped losslessly became `jpeg2000` at L0 but `jpeg` below
+  it. The raster reduced-level encoders (`encodeAndWriteLevel` / `…COGWSI`) are
+  now codec-agnostic (they take an encoder factory and use its
+  Compression/Photometric/level-header), so a JP2K source yields a uniform JP2K
+  pyramid. JPEG sources are unchanged (chroma subsampling still honored).
+
 - **`convert --to szi` output is readable again** (wsitools#26). The SZI writer
   emitted a `scan-properties.xml` rooted at `<scan-properties>` with attribute-style
   property names, but the real Sakura/PathoZoom format (and opentile-go's reader)

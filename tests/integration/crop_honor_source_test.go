@@ -70,6 +70,36 @@ func TestCropPreservesSourceLevelRatios(t *testing.T) {
 	}
 }
 
+// TestCropLosslessUniformCodec guards wsitools#28: lossless crop of a non-JPEG
+// source used to produce a mixed-codec pyramid (L0 verbatim jpeg2000, reduced
+// levels re-encoded to jpeg) because the raster reduced-level encoder hardcoded
+// JPEG. Every level must now share the source codec.
+func TestCropLosslessUniformCodec(t *testing.T) {
+	src := filepath.Join(testdir(t), "svs", "JP2K-33003-1.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	bin := buildOnce(t)
+	out := filepath.Join(t.TempDir(), "crop.svs")
+	if o, err := runCLI(bin, "crop", "--lossless", "--x", "1000", "--y", "1000", "--w", "4096", "--h", "4096", "-f", "-o", out, src); err != nil {
+		t.Fatalf("lossless crop: %v\n%s", err, o)
+	}
+	sl, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer sl.Close()
+	lv := sl.Levels()
+	if len(lv) < 2 {
+		t.Fatalf("expected a multi-level pyramid, got %d", len(lv))
+	}
+	for i, l := range lv {
+		if l.Compression != opentile.CompressionJP2K {
+			t.Errorf("level %d codec = %v, want JP2K (uniform with the verbatim L0, not a mixed pyramid)", i, l.Compression)
+		}
+	}
+}
+
 // tileQuality inspects the L0 tile's estimated JPEG quality via the same
 // estimator `info` uses.
 func tileQuality(t *testing.T, path string) int {
