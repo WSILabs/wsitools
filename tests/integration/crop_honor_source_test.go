@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	opentile "github.com/wsilabs/opentile-go"
 	_ "github.com/wsilabs/opentile-go/formats/all"
 	"github.com/wsilabs/wsitools/cmd/wsitools/quality"
-	_ "github.com/wsilabs/wsitools/cmd/wsitools/quality/jpeg"
+	qualityjpeg "github.com/wsilabs/wsitools/cmd/wsitools/quality/jpeg"
 )
 
 // TestCropPreservesSourceCodec: crop only crops, so it must keep the source
@@ -92,6 +93,71 @@ func tileQuality(t *testing.T, path string) int {
 		t.Fatalf("inspect: %v", err)
 	}
 	return info.QualityEstimate
+}
+
+// jpegSubsampling reads a JPEG tile's chroma subsampling from its SOF marker.
+func jpegSubsampling(t *testing.T, tile []byte) string {
+	t.Helper()
+	h, v, ok := qualityjpeg.LumaSampling(tile)
+	if !ok {
+		t.Fatalf("not a decodable JPEG tile (no SOF)")
+	}
+	switch {
+	case h == 1 && v == 1:
+		return "4:4:4"
+	case h == 2 && v == 1:
+		return "4:2:2"
+	case h == 1 && v == 2:
+		return "4:4:0"
+	case h == 2 && v == 2:
+		return "4:2:0"
+	}
+	return fmt.Sprintf("%dx%d", h, v)
+}
+
+// TestCropLosslessSubsamplingConsistent: a lossless crop copies L0 verbatim but
+// re-encodes the reduced levels (raster path). Those levels must HONOR the source
+// chroma subsampling (match L0) rather than fall back to the encoder default
+// 4:2:0 — otherwise the pyramid is internally inconsistent AND the
+// YCbCrSubSampling tag (derived from the source) contradicts the actual bytes.
+// Regression for the CMU-2 (4:4:4) lossless-crop bug: L0 was 4:4:4 but every
+// reduced level came out 4:2:0 while the tag claimed 4:4:4.
+func TestCropLosslessSubsamplingConsistent(t *testing.T) {
+	src := filepath.Join(testdir(t), "svs", "CMU-2.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	bin := buildOnce(t)
+	out := filepath.Join(t.TempDir(), "crop.svs")
+	if o, err := runCLI(bin, "crop", "--lossless", "--x", "10000", "--y", "5000", "--w", "8192", "--h", "8192", "-f", "-o", out, src); err != nil {
+		t.Fatalf("lossless crop: %v\n%s", err, o)
+	}
+	sl, err := opentile.OpenFile(out)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer sl.Close()
+	lv := sl.Levels()
+	if len(lv) < 2 {
+		t.Fatalf("expected a multi-level pyramid, got %d level(s)", len(lv))
+	}
+	b0, err := lv[0].Tile(0, 0)
+	if err != nil {
+		t.Fatalf("L0 tile: %v", err)
+	}
+	l0ss := jpegSubsampling(t, b0)
+	if l0ss != "4:4:4" {
+		t.Fatalf("L0 subsampling = %s, want 4:4:4 (CMU-2 is 4:4:4, copied verbatim)", l0ss)
+	}
+	for i := 1; i < len(lv); i++ {
+		b, err := lv[i].Tile(0, 0)
+		if err != nil {
+			t.Fatalf("level %d tile: %v", i, err)
+		}
+		if ss := jpegSubsampling(t, b); ss != l0ss {
+			t.Errorf("level %d subsampling = %s, want %s (reduced levels must honor the source, not default to 4:2:0)", i, ss, l0ss)
+		}
+	}
 }
 
 // TestCropQualityFloorHonorsHigherSource: the default quality is a floor. A

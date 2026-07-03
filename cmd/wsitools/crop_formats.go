@@ -157,7 +157,7 @@ func cropToTIFF(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, sourceJPEGSubsampling(p.src), nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -278,7 +278,7 @@ func cropToSVS(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, wtr, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, wtr, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, sourceJPEGSubsampling(p.src), nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -374,7 +374,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, sourceJPEGSubsampling(p.src), nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -443,9 +443,9 @@ func cropToCOGWSI(p cropEmitParams) error {
 		ToolsVersion: Version,
 		DefaultOrder: p.order,
 		Metadata: cogwsiwriter.Metadata{
-			MPPX:             mppX,
-			MPPY:             mppY,
-			Magnification:    mag,
+			MPPX:            mppX,
+			MPPY:            mppY,
+			Magnification:   mag,
 			ICCProfile:      p.src.ICCProfile(),
 			SourceFormat:    string(p.src.Format()),
 			SourceImageDesc: fmt.Sprintf("wsitools/%s crop source=%s", Version, p.src.Format()),
@@ -472,7 +472,7 @@ func cropToCOGWSI(p cropEmitParams) error {
 				aborted = true
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.outTile); err != nil {
+			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.outTile, sourceJPEGSubsampling(p.src)); err != nil {
 				aborted = true
 				return fmt.Errorf("build pyramid: %w", err)
 			}

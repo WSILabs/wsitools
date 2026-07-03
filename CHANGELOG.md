@@ -14,6 +14,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   truncated/corrupt tile in ~17% of runs ("Premature end of JPEG file"). The
   append is now serialized. (Race-detector-verified; the output was valid-size but
   had one corrupt tile, so it could slip through casual inspection.)
+- **Lossless crop now honors the source chroma subsampling on its re-encoded
+  pyramid levels.** `crop --lossless` copies L0 verbatim but rebuilds the reduced
+  levels via the raster encoder, which hard-defaulted to 4:2:0. On a 4:4:4 (or
+  4:2:2) source that produced an internally inconsistent pyramid — a 4:4:4 base
+  with 4:2:0 reduced levels — and, worse, a `YCbCrSubSampling` tag that (derived
+  from the source) claimed 4:4:4 while the bytes were 4:2:0. The raster path
+  (`buildPyramidFromRaster` / `…COGWSI`) now threads the source subsampling into
+  the encoder, matching `buildEnginePyramid` (used by lossy crop / downsample /
+  `--factor`, which were already correct). A 4:2:0 source still stays 4:2:0.
 
 - **`convert --to cog-wsi` now honors `--codec`.** It previously ignored
   `--codec` (and `--quality` / `--tile-size`) entirely and always tile-copied the
