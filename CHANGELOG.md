@@ -6,6 +6,16 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **`convert --to szi` output is readable again** (wsitools#26). The SZI writer
+  emitted a `scan-properties.xml` rooted at `<scan-properties>` with attribute-style
+  property names, but the real Sakura/PathoZoom format (and opentile-go's reader)
+  expects `<image xmlns=…><properties><property><name>/<value></property>` — so
+  every szi output failed to reopen ("expected element type <image> but have
+  <scan-properties>"). The writer now emits the correct root/structure and the
+  reader's property names (VendorName / ScannerName / ObjectiveMagnification /
+  MicronsPerPixel{X,Y} / ScannerSerialNo / TimeStart / SoftwareName), which also
+  makes the source MPP/magnification/identity round-trip into the szi.
+
 - **Data race fixed in the streaming pyramid writer — could corrupt output.**
   `downsample` and `convert --to svs|tiff|ome-tiff` (multi-level, engine-backed)
   drained one goroutine per pyramid level, each writing tile bodies through the
