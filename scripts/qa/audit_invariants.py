@@ -133,11 +133,12 @@ def check_metadata_sanity(case: Case, out_info: dict) -> list[Finding]:
     return findings
 
 
-def check_metadata_consistency(case: Case, out_info: dict, out_ifd_dims: list) -> list[Finding]:
+def check_metadata_consistency(case: Case, out_info: dict, out_ifd_dims: dict) -> list[Finding]:
+    """out_ifd_dims: {level_index: (w,h)} from dump-ifds. info.levels[i] must match
+    the dump-ifds IFD with level_index i (aligned by level number, not position)."""
     findings: list[Finding] = []
-    levels = out_info.get("levels") or []
-    for i, lv in enumerate(levels):
-        if i < len(out_ifd_dims):
+    for i, lv in enumerate(out_info.get("levels") or []):
+        if i in out_ifd_dims:
             iw, ih = out_ifd_dims[i]
             if (lv["width"], lv["height"]) != (iw, ih):
                 findings.append(Finding(case.id, "metadata-consistency", "info-matches-dumpifds-dims",

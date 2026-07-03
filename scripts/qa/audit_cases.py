@@ -45,7 +45,10 @@ def enumerate_cases(fixtures: str, big: bool) -> list[Case]:
         if not path:
             continue
         add(f"info-{fmt}", ["info", "--json", path], path, fmt, path, "read", "read")
-        add(f"dump-{fmt}", ["dump-ifds", "--json", path], path, fmt, path, "read", "read")
+        # dump-ifds is TIFF-dialect only; DICOM/IFE have no TIFF IFDs (erroring there
+        # is correct, not a discrepancy).
+        if fmt not in ("dicom", "ife"):
+            add(f"dump-{fmt}", ["dump-ifds", "--json", path], path, fmt, path, "read", "read")
         add(f"validate-{fmt}", ["validate", "--json", path], path, fmt, path, "read", "read")
         add(f"hash-{fmt}", ["hash", "--mode", "pixel", path], path, fmt, path, "read", "read")
 

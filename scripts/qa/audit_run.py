@@ -60,14 +60,17 @@ def _external_open(tool_argv: list[str], path: str, na_re) -> tuple[str, str]:
     return ("na", detail) if na_re.search(blob) else ("fail", detail)
 
 
-def _ifd_pyramid_dims(ifds: dict) -> list:
-    """Per pyramid-level IFD (width,height) from `dump-ifds --json`. Pyramid levels
-    have an integer level_index >= 0; associated IFDs do not."""
-    dims = []
+def _ifd_pyramid_dims(ifds: dict) -> dict:
+    """{level_index: (width,height)} for pyramid-level IFDs from `dump-ifds --json`.
+    Keyed by level_index (not file position) so it aligns with info.levels[] even
+    when the file interleaves the Aperio thumbnail-at-IFD1 — which wsitools tags
+    image_type='pyramid' with a level_index that duplicates a real level."""
+    dims: dict = {}
     for e in (ifds.get("ifds") or []):
-        li = e.get("level_index")
-        if isinstance(li, int) and li >= 0:
-            dims.append((e.get("width"), e.get("height")))
+        if e.get("image_type") == "pyramid":
+            li = e.get("level_index")
+            if isinstance(li, int) and li >= 0 and li not in dims:
+                dims[li] = (e.get("width"), e.get("height"))
     return dims
 
 

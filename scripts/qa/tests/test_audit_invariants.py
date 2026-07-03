@@ -105,9 +105,9 @@ def test_metadata_sanity_flags_implausible_magnification():
 
 def test_metadata_consistency_info_vs_dumpifds_dims():
     out = _info([_lvl(2000, 3000)])
-    f_ok = inv.check_metadata_consistency(_case(), out, [(2000, 3000)])
+    f_ok = inv.check_metadata_consistency(_case(), out, {0: (2000, 3000)})
     assert f_ok == []
-    f_bad = inv.check_metadata_consistency(_case(), out, [(2000, 9999)])
+    f_bad = inv.check_metadata_consistency(_case(), out, {0: (2000, 9999)})
     assert any(x.invariant == "info-matches-dumpifds-dims" for x in f_bad)
 
 
