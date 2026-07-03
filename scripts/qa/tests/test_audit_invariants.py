@@ -1,0 +1,54 @@
+from audit_model import Case
+import audit_invariants as inv
+
+
+def _case(**kw):
+    base = dict(id="c", cmd_argv=["convert"], input="in", input_format="svs",
+                output="out", output_container="tiff", transform_type="container-swap",
+                requested_codec=None, factor=1, rect=None, lossless=False,
+                expect_error=False, source_props={})
+    base.update(kw)
+    return Case(**base)
+
+
+def _info(levels, **md):
+    return {"format": "tiff", "metadata": md, "levels": levels, "associated_images": []}
+
+
+def _lvl(w, h, codec="jpeg", sub="4:4:4"):
+    return {"index": 0, "width": w, "height": h, "tile_width": 256, "tile_height": 256,
+            "compression": codec, "quality": {"codec": codec.upper(), "lossless": False,
+            "quality_estimate": 85, "chroma_subsampling": sub, "notes": ""}}
+
+
+def test_container_swap_preserves_l0_dims():
+    src = _info([_lvl(2000, 3000)])
+    ok = _info([_lvl(2000, 3000)])
+    bad = _info([_lvl(1000, 3000)])
+    assert inv.check_geometry(_case(), src, ok) == []
+    f = inv.check_geometry(_case(), src, bad)
+    assert len(f) == 1 and f[0].family == "geometry"
+
+
+def test_factor_scales_l0_dims_within_tolerance():
+    src = _info([_lvl(4000, 4000)])
+    out = _info([_lvl(1000, 1000)])  # factor 4
+    assert inv.check_geometry(_case(transform_type="factor", factor=4), src, out) == []
+    bad = _info([_lvl(2000, 2000)])  # only halved
+    assert len(inv.check_geometry(_case(transform_type="factor", factor=4), src, bad)) == 1
+
+
+def test_codec_must_match_requested():
+    src = _info([_lvl(100, 100, codec="jpeg")])
+    out = _info([_lvl(100, 100, codec="jpeg")])
+    c = _case(requested_codec="htj2k")
+    f = inv.check_codec(c, src, out)
+    assert len(f) == 1 and f[0].severity == "silent-wrong-output"
+
+
+def test_codec_uniform_across_levels():
+    src = _info([_lvl(100, 100)])
+    out = {"format": "tiff", "metadata": {}, "associated_images": [],
+           "levels": [_lvl(100, 100, codec="jpeg"), _lvl(50, 50, codec="jpeg2000")]}
+    f = inv.check_codec(_case(), src, out)
+    assert any(x.invariant == "codec-uniform" for x in f)
