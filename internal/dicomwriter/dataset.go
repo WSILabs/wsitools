@@ -82,6 +82,7 @@ type instanceSpec struct {
 
 	PixelSpacingX, PixelSpacingY float64 // mm
 	ImagedVolumeW, ImagedVolumeH float64 // mm
+	Magnification                float64 // objective lens power (0 if unknown)
 
 	ImageDescriptor // embedded codec/color (promotes TransferSyntax/Photometric/…)
 }
@@ -169,6 +170,12 @@ func assembleWSMDataset(src source.Source, uids UIDSet, spec instanceSpec) (dico
 			codeItem("414298005", "SCT", "Full Spectrum"),
 		}),
 	)
+	// Objective Lens Power (0048,0112) — the source magnification, so it survives
+	// the DICOM conversion (wsitools#30). Omitted when unknown.
+	if spec.Magnification > 0 {
+		opticalPathItem = append(opticalPathItem,
+			mk(tag.ObjectiveLensPower, []string{formatDS(spec.Magnification)}))
+	}
 
 	elems := []*dicom.Element{
 		// ---- File-meta (group 0002) ----

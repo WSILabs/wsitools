@@ -1119,7 +1119,11 @@ func buildProvenanceDesc(src source.Source, codecName string, md source.Metadata
 		fmt.Fprintf(&b, " scanner=%q", strings.TrimSpace(md.Make+" "+md.Model))
 	}
 	if !md.AcquisitionDateTime.IsZero() {
-		fmt.Fprintf(&b, " date=%s", md.AcquisitionDateTime.Format("2006-01-02"))
+		// Full RFC3339 timestamp (not date-only) so the acquisition TIME survives
+		// the round-trip. The standard 306 DateTime tag already carries the full
+		// "YYYY:MM:DD HH:MM:SS"; emitting a date-only provenance date here made
+		// opentile-go override it with a midnight time (wsitools#31).
+		fmt.Fprintf(&b, " date=%s", md.AcquisitionDateTime.UTC().Format(time.RFC3339))
 	}
 	return b.String()
 }

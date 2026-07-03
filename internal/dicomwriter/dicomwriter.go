@@ -155,6 +155,7 @@ func writeAssociated(w io.Writer, src source.Source, a source.AssociatedImage, s
 		ImageType:            imageType,
 		SpecimenLabelInImage: specimenLabel,
 		InstanceNumber:       instanceNumber,
+		Magnification:        md.Magnification,
 	}
 
 	var pd *dicom.Element
@@ -300,6 +301,7 @@ func writeInstance(w io.Writer, src source.Source, level int, shared sharedUIDs,
 		PixelSpacingY:        psY,
 		ImagedVolumeW:        imgW,
 		ImagedVolumeH:        imgH,
+		Magnification:        md.Magnification,
 		ImageDescriptor:      desc,
 	}
 
