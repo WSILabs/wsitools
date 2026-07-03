@@ -146,30 +146,47 @@ def check_metadata_consistency(case: Case, out_info: dict, out_ifd_dims: list) -
     return findings
 
 
-# Metadata fields that MUST be container-independent for the same source.
-_STABLE_MD = ["make", "model", "software", "datetime", "mpp", "mpp_x", "mpp_y", "magnification"]
+# Scale metadata should be preserved across ANY container (honor-source): losing
+# the source MPP/magnification is a real discrepancy regardless of container.
+_SCALE_MD = ["mpp", "mpp_x", "mpp_y", "magnification"]
+# Identity metadata is only expected verbatim in the TIFF family; bif synthesizes
+# Ventana identity, dicom rewrites model/software, dzi/szi/ife carry little — so
+# comparing their identity to the source produces format-legitimate noise.
+_IDENTITY_MD = ["make", "model", "software", "datetime"]
+_IDENTITY_CONTAINERS = {"svs", "tiff", "ome-tiff", "cog-wsi"}
+# Containers whose L0 pixel dims legitimately differ from the source.
+_DIMS_PADDING_CONTAINERS = {"bif"}  # DP-200 pads L0 to a tile multiple by design
 
 
-def check_cross_container(src_id: str, per_container: dict, repro: str) -> list[Finding]:
-    """per_container: {container_name: info_dict}. Flags any stable metadata field
-    (or L0 dims) that is not identical across all containers for one source."""
+def _has_value(v) -> bool:
+    return v not in (None, "", 0)
+
+
+def check_cross_container(src_id: str, src_info: dict, per_container: dict, repro: str) -> list[Finding]:
+    """Compare each container's output metadata to the SOURCE (not to an arbitrary
+    other container). Scale fields (mpp/magnification) must survive into every
+    container; identity fields are only checked for the TIFF family; L0 dims must
+    match the source except for containers that pad by design (bif)."""
     findings: list[Finding] = []
-    containers = sorted(per_container)
-    if len(containers) < 2:
-        return findings
-    ref_c = containers[0]
-    ref_md = per_container[ref_c].get("metadata") or {}
-    ref_l0 = (per_container[ref_c].get("levels") or [{}])[0]
-    for c in containers[1:]:
-        md = per_container[c].get("metadata") or {}
-        for fld in _STABLE_MD:
-            if md.get(fld) != ref_md.get(fld):
-                findings.append(Finding(f"{src_id}:{c}", "metadata-consistency", "cross-container-metadata",
-                    "metadata-inconsistency", f"{fld}={ref_md.get(fld)} (as in {ref_c})",
-                    f"{fld}={md.get(fld)} (in {c})", repro))
-        l0 = (per_container[c].get("levels") or [{}])[0]
-        if (l0.get("width"), l0.get("height")) != (ref_l0.get("width"), ref_l0.get("height")):
-            findings.append(Finding(f"{src_id}:{c}", "metadata-consistency", "cross-container-l0-dims",
-                "silent-wrong-output", f'{ref_l0.get("width")}x{ref_l0.get("height")} (in {ref_c})',
-                f'{l0.get("width")}x{l0.get("height")} (in {c})', repro))
+    src_md = src_info.get("metadata") or {}
+    src_l0 = (src_info.get("levels") or [{}])[0]
+    for c, info in sorted(per_container.items()):
+        md = info.get("metadata") or {}
+        for fld in _SCALE_MD:
+            sv, ov = src_md.get(fld), md.get(fld)
+            if _has_value(sv) and (not _has_value(ov) or abs(float(ov) - float(sv)) > 1e-4 * max(1.0, abs(float(sv)))):
+                findings.append(Finding(f"{src_id}:{c}", "metadata-consistency", "scale-metadata-preserved",
+                    "metadata-inconsistency", f"{fld}={sv} (source)", f"{fld}={ov} (in {c})", repro))
+        if c in _IDENTITY_CONTAINERS:
+            for fld in _IDENTITY_MD:
+                sv, ov = src_md.get(fld), md.get(fld)
+                if _has_value(sv) and ov != sv:
+                    findings.append(Finding(f"{src_id}:{c}", "metadata-consistency", "identity-metadata-preserved",
+                        "metadata-inconsistency", f"{fld}={sv} (source)", f"{fld}={ov} (in {c})", repro))
+        if c not in _DIMS_PADDING_CONTAINERS:
+            l0 = (info.get("levels") or [{}])[0]
+            if (l0.get("width"), l0.get("height")) != (src_l0.get("width"), src_l0.get("height")):
+                findings.append(Finding(f"{src_id}:{c}", "metadata-consistency", "cross-container-l0-dims",
+                    "silent-wrong-output", f'{src_l0.get("width")}x{src_l0.get("height")} (source)',
+                    f'{l0.get("width")}x{l0.get("height")} (in {c})', repro))
     return findings

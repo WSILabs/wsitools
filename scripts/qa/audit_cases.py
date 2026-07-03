@@ -70,18 +70,18 @@ def enumerate_cases(fixtures: str, big: bool) -> list[Case]:
         for n in (2, 4, 8):
             out = f"OUTDIR/factor_{role}_{n}.svs"
             add(f"factor-{role}-{n}", ["convert", "--to", "svs", "--factor", str(n), "-f", "-o", out, src],
-                src, "svs", out, "factor", factor=n)
+                src, "svs", out, "svs", "factor", factor=n)
             outd = f"OUTDIR/down_{role}_{n}.svs"
             add(f"down-{role}-{n}", ["downsample", "--factor", str(n), "-f", "-o", outd, src],
-                src, "svs", outd, "downsample", factor=n)
+                src, "svs", outd, "svs", "downsample", factor=n)
         rect = "4000,4000,8192,8192"
         add(f"crop-{role}", ["crop", "--x", "4000", "--y", "4000", "--w", "8192", "--h", "8192",
-            "-f", "-o", f"OUTDIR/crop_{role}.svs", src], src, "svs", f"OUTDIR/crop_{role}.svs", "crop", rect=rect)
+            "-f", "-o", f"OUTDIR/crop_{role}.svs", src], src, "svs", f"OUTDIR/crop_{role}.svs", "svs", "crop", rect=rect)
         add(f"cropll-{role}", ["crop", "--lossless", "--x", "4000", "--y", "4000", "--w", "8192", "--h", "8192",
             "-f", "-o", f"OUTDIR/cropll_{role}.svs", src], src, "svs", f"OUTDIR/cropll_{role}.svs",
-            "crop", rect=rect, lossless=True)
+            "svs", "crop", rect=rect, lossless=True)
         add(f"tilesize-{role}", ["convert", "--to", "tiff", "--codec", "jpeg", "--tile-size", "512",
-            "-f", "-o", f"OUTDIR/tile_{role}.tiff", src], src, "svs", f"OUTDIR/tile_{role}.tiff", "recodec", codec="jpeg")
+            "-f", "-o", f"OUTDIR/tile_{role}.tiff", src], src, "svs", f"OUTDIR/tile_{role}.tiff", "tiff", "recodec", codec="jpeg")
 
     # --- T3: cross-format -> svs ---
     for fmt, path in (("bif", read_inputs["bif"]), ("ome-tiff", read_inputs["ome-tiff"]),

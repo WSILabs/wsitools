@@ -111,16 +111,23 @@ def test_metadata_consistency_info_vs_dumpifds_dims():
     assert any(x.invariant == "info-matches-dumpifds-dims" for x in f_bad)
 
 
-def test_cross_container_metadata_must_agree():
+def test_cross_container_flags_scale_metadata_loss_vs_source():
+    src = _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20)
     per_container = {
         "svs": _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20),
-        "tiff": _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20),
-        "ome-tiff": _info([_lvl(2000, 3000)], make="Aperio", mpp=0.25, magnification=20),
+        "ome-tiff": _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=0),  # mag dropped
     }
-    f = inv.check_cross_container("cmu2", per_container, "wsitools convert ...")
-    assert any(x.invariant == "cross-container-metadata" and "mpp" in str(x.actual) for x in f)
+    f = inv.check_cross_container("cmu2", src, per_container, "repro")
+    assert any(x.invariant == "scale-metadata-preserved" and "magnification" in str(x.expected) for x in f)
+    # bif's synthesized identity is NOT flagged (identity checked only for TIFF family).
+    per2 = {"bif": _info([_lvl(2400, 3120)], make="Roche", mpp=0.5, magnification=20)}
+    f2 = inv.check_cross_container("cmu2", src, per2, "repro")
+    assert not any(x.invariant == "identity-metadata-preserved" for x in f2)
+    # bif's padded dims are NOT flagged either.
+    assert not any(x.invariant == "cross-container-l0-dims" for x in f2)
 
 
 def test_cross_container_agreement_is_clean():
+    src = _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20)
     per = {c: _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20) for c in ("svs", "tiff")}
-    assert inv.check_cross_container("cmu2", per, "repro") == []
+    assert inv.check_cross_container("cmu2", src, per, "repro") == []
