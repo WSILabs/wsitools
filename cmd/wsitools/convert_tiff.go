@@ -160,9 +160,9 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		if src.Format() == string(opentile.FormatOMETIFF) {
 			srcImageDesc = src.SourceImageDescription()
 		} else {
-			srcImageDesc = SyntheticOMEDescription(
+			srcImageDesc = SyntheticOMEDescriptionWithMag(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
-				md.MPP, md.MPP, "Image", srcSoft,
+				md.MPP, md.MPP, md.Magnification, "Image", srcSoft,
 				omeAssociatedSpecs(src, omeEditPlan{}),
 			)
 		}
@@ -348,9 +348,9 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 		if src.Format() == string(opentile.FormatOMETIFF) {
 			srcImageDesc = src.SourceImageDescription()
 		} else {
-			srcImageDesc = SyntheticOMEDescription(
+			srcImageDesc = SyntheticOMEDescriptionWithMag(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
-				md.MPP, md.MPP, "Image", srcSoft,
+				md.MPP, md.MPP, md.Magnification, "Image", srcSoft,
 				omeAssociatedSpecs(src, omeEditPlan{}),
 			)
 		}

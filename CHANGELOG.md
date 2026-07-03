@@ -6,6 +6,16 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **`convert --to ome-tiff` preserves magnification** (wsitools#27, partial). The
+  ome-tiff tile-copy and re-encode paths synthesized OME-XML without the
+  `<Instrument>/<Objective NominalMagnification>` block (only the `--factor`/crop
+  paths had it), so magnification was dropped (info reported 0). Both paths now
+  emit it via `SyntheticOMEDescriptionWithMag`, so the source magnification reads
+  back. (Identity fields — make/software/datetime — are still not carried in the
+  OME-XML; tracked in #27.)
+
+### Fixed
+
 - **`crop --lossless` of a non-JPEG source no longer produces a mixed-codec
   pyramid** (wsitools#28). Lossless crop copies L0 verbatim (source codec) but
   re-encodes the reduced levels via the raster encoder, which hardcoded JPEG — so
