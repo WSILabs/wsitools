@@ -8,20 +8,27 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"time"
 
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
+// The SZI scan-properties.xml document is rooted at <image> (NOT <scan-properties>)
+// with a <properties> list of <property><name>/<value> children, matching the real
+// Sakura/PathoZoom format (see sample_files/szi/CMU-1.szi) and opentile-go's reader.
+// Property NAMES must match the reader's mapping (VendorName / ScannerName /
+// ObjectiveMagnification / MicronsPerPixel{X,Y} / ScannerSerialNo / TimeStart /
+// SoftwareName) or the values won't round-trip.
 type propXML struct {
-	XMLName xml.Name `xml:"property"`
-	Name    string   `xml:"name,attr"`
-	Value   string   `xml:",chardata"`
+	Name  string `xml:"name"`
+	Value string `xml:"value"`
 }
 
-type scanPropsXML struct {
-	XMLName    xml.Name  `xml:"scan-properties"`
-	Properties []propXML `xml:"property"`
+type imageXML struct {
+	XMLName    xml.Name  `xml:"image"`
+	Xmlns      string    `xml:"xmlns,attr"`
+	Date       string    `xml:"date,attr,omitempty"`
+	Version    string    `xml:"version,attr"`
+	Properties []propXML `xml:"properties>property"`
 }
 
 // WriteScanProperties emits an SZI scan-properties.xml document from
@@ -30,22 +37,32 @@ func WriteScanProperties(w io.Writer, md source.Metadata) error {
 	if _, err := io.WriteString(w, xml.Header); err != nil {
 		return err
 	}
-	doc := scanPropsXML{}
+	doc := imageXML{Xmlns: "http://www.pathozoom.com/szi", Version: "1.0"}
+	if !md.AcquisitionDateTime.IsZero() {
+		doc.Date = md.AcquisitionDateTime.UTC().Format("2006-01-02")
+	}
 	add := func(name, val string) {
 		if val != "" {
 			doc.Properties = append(doc.Properties, propXML{Name: name, Value: val})
 		}
 	}
-	add("ScannerManufacturer", md.Make)
-	add("ScannerModel", md.Model)
+	num := func(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
+	add("VendorName", md.Make)
+	add("ScannerName", md.Model)
 	if md.Magnification != 0 {
-		add("Magnification", strconv.FormatFloat(md.Magnification, 'g', -1, 64))
+		add("ObjectiveMagnification", num(md.Magnification))
 	}
-	add("ScannerSerial", md.SerialNumber)
+	if md.MPPX != 0 {
+		add("MicronsPerPixelX", num(md.MPPX))
+	}
+	if md.MPPY != 0 {
+		add("MicronsPerPixelY", num(md.MPPY))
+	}
+	add("ScannerSerialNo", md.SerialNumber)
 	if !md.AcquisitionDateTime.IsZero() {
-		add("AcquisitionDateTime", md.AcquisitionDateTime.UTC().Format(time.RFC3339))
+		add("TimeStart", md.AcquisitionDateTime.UTC().Format("2006-01-02T15:04:05"))
 	}
-	add("ScannerSoftware", md.Software)
+	add("SoftwareName", md.Software)
 
 	enc := xml.NewEncoder(w)
 	enc.Indent("", "  ")
