@@ -33,3 +33,11 @@ def test_deep_transform_cases_generate_when_sources_present(tmp_path):
         assert c.transform_type and c.output_container
     # lossless crop cases are marked lossless
     assert any(c.transform_type == "crop" and c.lossless for c in cases)
+
+
+def test_associated_edit_cases_present(tmp_path):
+    (tmp_path / "svs").mkdir()
+    (tmp_path / "svs" / "CMU-1-Small-Region.svs").write_bytes(b"x")
+    cases = audit_cases.enumerate_cases(str(tmp_path), big=False)
+    edits = [c for c in cases if c.transform_type == "associated-edit"]
+    assert {c.cmd_argv[0] for c in edits} >= {"label", "thumbnail", "overview"}

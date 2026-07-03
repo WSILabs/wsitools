@@ -83,6 +83,15 @@ def enumerate_cases(fixtures: str, big: bool) -> list[Case]:
         add(f"tilesize-{role}", ["convert", "--to", "tiff", "--codec", "jpeg", "--tile-size", "512",
             "-f", "-o", f"OUTDIR/tile_{role}.tiff", src], src, "svs", f"OUTDIR/tile_{role}.tiff", "tiff", "recodec", codec="jpeg")
 
+    # --- Associated-image edits: remove each type the small SVS actually carries
+    # (CMU-1-Small-Region has label/thumbnail/overview but NO macro — removing an
+    # absent type is a correct error, not a discrepancy, so it is not enumerated). ---
+    if small:
+        for typ in ("label", "thumbnail", "overview"):
+            out = f"OUTDIR/assoc_rm_{typ}.svs"
+            add(f"assoc-rm-{typ}", [typ, "remove", "-f", "-o", out, small],
+                small, "svs", out, "svs", "associated-edit")
+
     # --- T3: cross-format -> svs ---
     for fmt, path in (("bif", read_inputs["bif"]), ("ome-tiff", read_inputs["ome-tiff"]),
                       ("cog-wsi", read_inputs["cog-wsi"]), ("dicom", read_inputs["dicom"])):

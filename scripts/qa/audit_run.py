@@ -111,6 +111,31 @@ def _cleanup(path: str) -> None:
         shutil.rmtree(sidecar, ignore_errors=True)
 
 
+def _pixel_hash(binp: str, path: str) -> str | None:
+    # Confirmed schema: {algorithm, mode, hex, path}; the digest is in "hex".
+    j = _wsi_json(binp, ["hash", "--mode", "pixel", "--json", path])
+    return j.get("hex") if j else None
+
+
+def roundtrip_check(fixtures: str, cases_dir, binp: str, emit) -> None:
+    """Lossless A -> tiff -> svs: the pixel hash must be identical. Uses the small SVS."""
+    src = os.path.join(fixtures, "svs", "CMU-1-Small-Region.svs")
+    if not os.path.exists(src):
+        return
+    h0 = _pixel_hash(binp, src)
+    mid = str(cases_dir / "rt_mid.tiff")
+    back = str(cases_dir / "rt_back.svs")
+    subprocess.run([binp, "convert", "--to", "tiff", "-f", "-o", mid, src], capture_output=True)
+    subprocess.run([binp, "convert", "--to", "svs", "-f", "-o", back, mid], capture_output=True)
+    h1 = _pixel_hash(binp, back)
+    if h0 and h1 and h0 != h1:
+        emit(Finding("roundtrip-svs-tiff-svs", "roundtrip", "lossless-pixel-identity",
+            "silent-wrong-output", f"pixel hash {h0}", h1,
+            "wsitools convert --to tiff … && convert --to svs …"))
+    _cleanup(mid)
+    _cleanup(back)
+
+
 def run(fixtures: str, outdir: str, binp: str, big: bool) -> None:
     out_root = Path(outdir)
     cases_dir = out_root / "cases"
@@ -185,6 +210,8 @@ def run(fixtures: str, outdir: str, binp: str, big: bool) -> None:
                     "Bio-Formats opens the output", detail, "wsitools " + " ".join(argv)))
 
         _cleanup(real_out)
+
+    roundtrip_check(fixtures, cases_dir, binp, emit)
 
     for src, per in swap_group.items():
         for f in inv.check_cross_container(Path(src).name, src_info_cache.get(src, {}), per, f"convert --to <c> {src}"):
