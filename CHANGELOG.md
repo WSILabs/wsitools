@@ -6,6 +6,18 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **`convert --to dicom` preserves magnification** (wsitools#30). The DICOM writer
+  never emitted `ObjectiveLensPower (0048,0112)`, so the source objective
+  magnification was lost (info reported 0). It's now written into the Optical Path
+  Sequence from the source metadata and reads back.
+- **`convert --to tiff` preserves the acquisition time** (wsitools#31). The
+  generic-tiff provenance ImageDescription carried a date-only `date=` field,
+  which opentile-go preferred over the full `306` DateTime tag — truncating the
+  acquisition time to midnight. The provenance now carries the full RFC3339
+  timestamp, so the time survives the round-trip.
+
+### Fixed
+
 - **`convert --to ome-tiff` preserves magnification** (wsitools#27, partial). The
   ome-tiff tile-copy and re-encode paths synthesized OME-XML without the
   `<Instrument>/<Objective NominalMagnification>` block (only the `--factor`/crop
