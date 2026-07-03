@@ -133,3 +133,14 @@ wsitools hash --mode pixel /tmp/wsitools-qa/cases/d_crop_lossless.svs   # same r
 wsitools region --level 0 --rect 2000,2000,1024,1024 -o /tmp/src.png  sample_files/svs/CMU-1.svs
 wsitools region --level 0 --rect 1000,1000,1024,1024 -o /tmp/out.png  /tmp/wsitools-qa/cases/d_crop.svs
 ```
+
+## Automated invariant audit (audit.sh)
+
+`scripts/qa/audit.sh [--big] [--clean]` runs a tiered matrix of CLI commands and
+auto-checks invariants (geometry, pyramid, codec, subsampling tag-vs-bytes,
+metadata sanity + cross-command/cross-container consistency) plus OpenSlide/
+Bio-Formats openability and a lossless round-trip. Outputs `report.md` under
+`$OUT` (default `/Volumes/Ext/tmp/wsitools-audit`); per-case outputs are deleted
+as it goes to bound disk. `--big` adds the NDPI/IFE sources. The invariant rules
+are unit-tested (`scripts/qa/tests/`, `python3 -m pytest`). Triage `report.md` by
+hand — the harness catalogues discrepancies, it does not file issues.
