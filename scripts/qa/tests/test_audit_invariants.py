@@ -52,3 +52,29 @@ def test_codec_uniform_across_levels():
            "levels": [_lvl(100, 100, codec="jpeg"), _lvl(50, 50, codec="jpeg2000")]}
     f = inv.check_codec(_case(), src, out)
     assert any(x.invariant == "codec-uniform" for x in f)
+
+
+def test_pyramid_dims_strictly_decreasing():
+    out = {"format": "tiff", "metadata": {}, "associated_images": [],
+           "levels": [_lvl(4000, 4000), _lvl(2000, 2000), _lvl(2000, 2000)]}
+    f = inv.check_pyramid(_case(), out)
+    assert any(x.invariant == "levels-monotonic" for x in f)
+
+
+def test_subsampling_tag_must_match_bytes():
+    # Uniform bytes (both 4:2:0) so ONLY the tag-vs-bytes rule can fire; L1's tag
+    # lies (claims 4:4:4 while the SOF bytes are 4:2:0) — the lossless-crop bug shape.
+    out = {"format": "svs", "metadata": {}, "associated_images": [],
+           "levels": [_lvl(4000, 4000, sub="4:2:0"), _lvl(2000, 2000, sub="4:2:0")]}
+    out_subtags = ["4:2:0", "4:4:4"]
+    f = inv.check_subsampling(_case(), out, out_subtags)
+    assert len(f) == 1 and f[0].invariant == "subsampling-tag-matches-bytes"
+    assert f[0].severity == "conformance"
+
+
+def test_subsampling_consistent_across_pyramid():
+    out = {"format": "svs", "metadata": {}, "associated_images": [],
+           "levels": [_lvl(4000, 4000, sub="4:4:4"), _lvl(2000, 2000, sub="4:2:0")]}
+    out_subtags = ["4:4:4", "4:2:0"]
+    f = inv.check_subsampling(_case(), out, out_subtags)
+    assert any(x.invariant == "subsampling-uniform" for x in f)

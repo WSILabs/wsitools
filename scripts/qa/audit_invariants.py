@@ -67,3 +67,33 @@ def _codec_matches(info_codec: str, requested: str) -> bool:
     Normalise both sides for comparison."""
     norm = lambda s: s.lower().replace("-", "").replace("_", "")
     return norm(info_codec) == norm(requested)
+
+
+def check_pyramid(case: Case, out_info: dict) -> list[Finding]:
+    findings: list[Finding] = []
+    levels = out_info.get("levels") or []
+    for i in range(1, len(levels)):
+        if levels[i]["width"] >= levels[i - 1]["width"] or levels[i]["height"] >= levels[i - 1]["height"]:
+            findings.append(Finding(case.id, "pyramid", "levels-monotonic", "silent-wrong-output",
+                "strictly decreasing level dims",
+                [(lv["width"], lv["height"]) for lv in levels], _repro(case)))
+            break
+    return findings
+
+
+def check_subsampling(case: Case, out_info: dict, out_subtags: list) -> list[Finding]:
+    findings: list[Finding] = []
+    levels = out_info.get("levels") or []
+    jpeg_levels = [(i, lv) for i, lv in enumerate(levels) if lv["compression"] == "jpeg"]
+    for i, lv in jpeg_levels:
+        bytes_sub = (lv.get("quality") or {}).get("chroma_subsampling")
+        tag_sub = out_subtags[i] if i < len(out_subtags) else None
+        if tag_sub is not None and bytes_sub is not None and tag_sub != bytes_sub:
+            findings.append(Finding(case.id, "subsampling", "subsampling-tag-matches-bytes",
+                "conformance", f"tag == bytes ({bytes_sub})", f"tag={tag_sub}, bytes={bytes_sub}", _repro(case)))
+    subs = {(lv.get("quality") or {}).get("chroma_subsampling") for _, lv in jpeg_levels}
+    subs.discard(None)
+    if len(subs) > 1:
+        findings.append(Finding(case.id, "subsampling", "subsampling-uniform", "silent-wrong-output",
+            "one subsampling across the pyramid", sorted(subs), _repro(case)))
+    return findings
