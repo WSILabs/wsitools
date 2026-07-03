@@ -29,6 +29,37 @@ def _wsi_json(binp: str, args: list[str]) -> dict | None:
         return None
 
 
+def _dicom_target(path: str) -> str:
+    """A DICOM output is a directory of .dcm; external readers open one instance."""
+    p = Path(path)
+    if p.is_dir():
+        dcm = sorted(p.glob("*.dcm"))
+        return str(dcm[0]) if dcm else path
+    return path
+
+
+# Open-error substrings the external readers emit for a container/codec they simply
+# don't support — an expected limitation (N/A), not a wsitools defect.
+_OS_NA = re.compile(r"unsupported tiff compression|compression support is not configured|"
+                    r"not a file that openslide can recognize|unsupported|cannot read", re.I)
+_BF_NA = re.compile(r"Unable to find TiffCompres|unsupported compression", re.I)
+
+
+def _external_open(tool_argv: list[str], path: str, na_re) -> tuple[str, str]:
+    """Run an external reader on path. Returns (result, detail) where result is
+    'ok' | 'na' (reader can't support this container/codec) | 'fail'."""
+    target = _dicom_target(path)
+    try:
+        p = subprocess.run([*tool_argv, target], capture_output=True, text=True, timeout=600)
+    except Exception as e:
+        return "na", f"skipped ({e})"
+    if p.returncode == 0:
+        return "ok", ""
+    blob = (p.stdout + p.stderr)
+    detail = blob.strip().splitlines()[-1] if blob.strip() else f"exit {p.returncode}"
+    return ("na", detail) if na_re.search(blob) else ("fail", detail)
+
+
 def _ifd_pyramid_dims(ifds: dict) -> list:
     """Per pyramid-level IFD (width,height) from `dump-ifds --json`. Pyramid levels
     have an integer level_index >= 0; associated IFDs do not."""
@@ -140,6 +171,18 @@ def run(fixtures: str, outdir: str, binp: str, big: bool) -> None:
 
         if c.transform_type == "container-swap":
             swap_group.setdefault(c.input, {})[c.output_container] = out_info
+
+        # External conformance oracle (readers that exist for this container).
+        if c.output_container in ("svs", "tiff", "cog-wsi", "dicom"):
+            res, detail = _external_open(["openslide-show-properties"], real_out, _OS_NA)
+            if res == "fail":
+                emit(Finding(c.id, "openability", "openslide-opens", "conformance",
+                    "OpenSlide opens the output", detail, "wsitools " + " ".join(argv)))
+        if c.output_container in ("tiff", "ome-tiff", "cog-wsi", "dicom"):
+            res, detail = _external_open(["showinf", "-nopix", "-no-upgrade"], real_out, _BF_NA)
+            if res == "fail":
+                emit(Finding(c.id, "openability", "bioformats-opens", "conformance",
+                    "Bio-Formats opens the output", detail, "wsitools " + " ".join(argv)))
 
         _cleanup(real_out)
 
