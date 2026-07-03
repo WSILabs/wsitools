@@ -91,6 +91,23 @@ jobs:
           WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
         run: go test -tags integration ./tests/integration/... -count=1 -timeout 30m
 
+      # cmd/wsitools CLI suite. Many cmd/wsitools tests shell out to a built
+      # ./bin/wsitools (via stripedBinary/findBinary) and t.Skip when it is
+      # absent. `go build ./...` (above) and the `go test ./... -race` step do
+      # NOT produce ./bin/wsitools, so those tests silently SKIPPED in CI —
+      # letting them rot (a stale assertion, a flake, or an outright broken test
+      # could sit red for weeks, invisible). Build the binary and run them here.
+      # No -race: the work happens in the subprocess (not instrumented), and the
+      # in-process race coverage — incl. TestStreamwriterSinkConcurrentDrainsNoRace
+      # — stays in the `go test ./... -race` step above. Generous timeout: this
+      # runs real conversions (see CLAUDE.md heavy-suite guidance).
+      - name: go test (cmd/wsitools CLI suite)
+        env:
+          WSI_TOOLS_TESTDIR: ${{ github.workspace }}/sample_files
+        run: |
+          go build -o bin/wsitools ./cmd/wsitools
+          go test -tags integration ./cmd/wsitools/ -count=1 -timeout 30m
+
       # DICOM conformance gate: convert fixtures (JPEG / JPEG 2000 / HTJ2K +
       # the A4b LZW→JPEG re-encode) to WSM and validate every emitted instance
       # with David Clunie's dciodvfy (dicom3tools). dciodvfy exits non-zero only
