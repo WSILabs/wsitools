@@ -89,6 +89,85 @@ func convertStitchedCOGWSI(ctx context.Context, slide *opentile.Slide, src sourc
 	return writeCOGWSIAssociated(w, src, plan)
 }
 
+// convertTranscodeCOGWSI re-encodes a non-overlapping source into a COG-WSI with
+// a new codec while preserving its pyramid structure (select-octave), mirroring
+// convertTranscodeTIFF. `levels` is the full octave chain from
+// transcodeOctaveLevels (finest-first); only non-Intermediate levels are emitted
+// (their Index is the contiguous emit position the engine sinks by).
+func convertTranscodeCOGWSI(ctx context.Context, slide *opentile.Slide, src source.Source, w *cogwsiwriter.Writer, plan assocEditPlan, workers int, codecName string, knobs map[string]string, levels []retile.LevelSpec) error {
+	l0 := slide.Pyramid(0).Levels[0]
+
+	// Honor --tile-size on emitted levels (intermediate levels keep their internal
+	// box-reduction geometry). No-op when cvTileSize == 0 (source tiling preserved).
+	if cvTileSize > 0 {
+		for i := range levels {
+			if levels[i].Intermediate {
+				continue
+			}
+			levels[i].TileW = cvTileSize
+			levels[i].TileH = cvTileSize
+			levels[i].Cols = (levels[i].Width + cvTileSize - 1) / cvTileSize
+			levels[i].Rows = (levels[i].Height + cvTileSize - 1) / cvTileSize
+		}
+	}
+
+	fac, err := codec.Lookup(codecName)
+	if err != nil {
+		return err
+	}
+	enc, err := fac.NewEncoder(codec.LevelGeometry{TileWidth: levels[0].TileW, TileHeight: levels[0].TileH, PixelFormat: codec.PixelFormatRGB8}, codec.Quality{Knobs: knobs})
+	if err != nil {
+		return err
+	}
+	defer enc.Close()
+
+	// Emitted levels (finest-first); their Index is the contiguous emit position.
+	var emitted []retile.LevelSpec
+	for _, ls := range levels {
+		if !ls.Intermediate {
+			emitted = append(emitted, ls)
+		}
+	}
+
+	handles := make([]*cogwsiwriter.LevelHandle, len(emitted))
+	for i, ls := range emitted {
+		h, err := w.AddLevel(cogwsiwriter.LevelSpec{
+			ImageWidth: uint32(ls.Width), ImageHeight: uint32(ls.Height),
+			TileWidth: uint32(ls.TileW), TileHeight: uint32(ls.TileH),
+			Compression: enc.TIFFCompressionTag(), Photometric: enc.TIFFPhotometric(),
+			SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8},
+			JPEGTables: enc.LevelHeader(),
+			IsL0:       i == 0,
+		})
+		if err != nil {
+			return fmt.Errorf("add level %d: %w", i, err)
+		}
+		handles[i] = h
+	}
+
+	sink := newCogwsiSink(handles, emitted)
+	bar := newTileProgress("encoding", sumLevelTiles(levels))
+	runErr := retile.Run(ctx, retile.Spec{
+		Slide:         slide,
+		SrcRegion:     opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: l0.Size},
+		OutL0:         l0.Size, // identity: transcode is same geometry
+		Levels:        levels,  // FULL octave chain (emit + intermediate)
+		Kernel:        resample.Nearest,
+		Encoder:       &codecTileEncoder{enc: enc, tileW: levels[0].TileW, tileH: levels[0].TileH},
+		Sink:          sink,
+		Workers:       workers,
+		OnTileWritten: bar.Increment,
+	})
+	if ferr := sink.finish(); ferr != nil && runErr == nil {
+		runErr = ferr
+	}
+	bar.Wait()
+	if runErr != nil {
+		return runErr
+	}
+	return writeCOGWSIAssociated(w, src, plan)
+}
+
 // convertStitchedTIFF re-tiles an overlapping source into an svs/tiff/ome-tiff
 // via the retile engine: decode L0 once (ScaledStrips composites the stitched
 // tiles), box-2× derive a floored octave pyramid, re-encode, feed the

@@ -20,6 +20,10 @@ func TestValidateCodec(t *testing.T) {
 		{"ome-tiff", "avif", true, false, true},
 		{"tiff", "jpegxl", false, true, false},
 		{"tiff", "jpegxl", true, false, true},
+		// cog-wsi jpegxl: valid bytes but opentile can't decode them yet
+		// (wsitools#24) → nonconformant, not conformant.
+		{"cog-wsi", "jpegxl", false, true, false},
+		{"cog-wsi", "jpegxl", true, false, true},
 		{"svs", "avif", false, true, false},
 		{"svs", "avif", true, false, true},
 		// unsupported → hard error regardless of --allow

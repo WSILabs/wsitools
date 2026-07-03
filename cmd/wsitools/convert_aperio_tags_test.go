@@ -50,9 +50,10 @@ func TestConvertSVSAperioTagsJPEG(t *testing.T) {
 }
 
 // TestConvertSVSAperioTagsReencodeJPEG: re-encoding to JPEG (--codec jpeg)
-// emits ImageDepth=1 and YCbCrSubSampling=[2,2] — our encoder is YCbCr
-// 4:2:0, so [2,2] is what the written tiles actually are (unlike tile-copy
-// of this fixture, whose source tiles are RGB/4:4:4 -> [1,1]).
+// emits ImageDepth=1 and a YCbCrSubSampling tag matching the actual encoded
+// tiles. Since the JPEG re-encode HONORS the source chroma subsampling
+// (withSourceSubsampling), and CMU-1-Small-Region's tiles are RGB/4:4:4, the
+// re-encoded tiles stay 4:4:4 -> [1,1] (the tag describes the bytes we write).
 func TestConvertSVSAperioTagsReencodeJPEG(t *testing.T) {
 	bin := stripedBinary(t)
 	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
@@ -65,8 +66,8 @@ func TestConvertSVSAperioTagsReencodeJPEG(t *testing.T) {
 	if !strings.Contains(ifd0, "ImageDepth") {
 		t.Errorf("L0 missing ImageDepth:\n%s", ifd0)
 	}
-	if !strings.Contains(ifd0, "YCbCrSubSampling") || !strings.Contains(ifd0, "[2, 2]") {
-		t.Errorf("L0 missing YCbCrSubSampling [2, 2]:\n%s", ifd0)
+	if !strings.Contains(ifd0, "YCbCrSubSampling") || !strings.Contains(ifd0, "[1, 1]") {
+		t.Errorf("L0 missing YCbCrSubSampling [1, 1] (re-encode honors source 4:4:4):\n%s", ifd0)
 	}
 }
 
