@@ -4,11 +4,75 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/wsilabs/wsitools/internal/tiff/streamwriter"
 )
+
+// TestStreamwriterSinkConcurrentDrainsNoRace guards the data race fixed by the
+// Writer.appendMu lock. newStreamwriterSink drains ONE goroutine PER LEVEL, and
+// each writes tile bodies through the shared Writer.appendBytes (off + f). With
+// >=2 levels those drains append concurrently; before the fix they raced on
+// Writer.off/f, splicing tile bodies and recording wrong offsets — a truncated
+// tile in ~17% of runs (and a DATA RACE on every `-race` run). This test creates
+// that exact >=2-level concurrent-drain condition so CI's `go test ./... -race`
+// catches any regression. (A single-level sink never triggered it, which is why
+// the existing tests missed it.)
+func TestStreamwriterSinkConcurrentDrainsNoRace(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "o.tif")
+	w, err := streamwriter.Create(out, streamwriter.Options{})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Two tiled levels → the sink spawns two concurrent drain goroutines.
+	specs := []streamwriter.LevelSpec{
+		{ImageWidth: 1024, ImageHeight: 1024, TileWidth: 256, TileHeight: 256, Compression: 1, Photometric: 2, SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8}},
+		{ImageWidth: 512, ImageHeight: 512, TileWidth: 256, TileHeight: 256, Compression: 1, Photometric: 2, SamplesPerPixel: 3, BitsPerSample: []uint16{8, 8, 8}},
+	}
+	var handles []*streamwriter.LevelHandle
+	for _, s := range specs {
+		h, err := w.AddLevel(s)
+		if err != nil {
+			t.Fatalf("addlevel: %v", err)
+		}
+		handles = append(handles, h)
+	}
+	sink := newStreamwriterSink(handles)
+
+	// Feed both levels concurrently to maximize drain interleaving.
+	grids := [][2]int{{4, 4}, {2, 2}} // cols,rows per level
+	var wg sync.WaitGroup
+	for lvl, g := range grids {
+		for row := 0; row < g[1]; row++ {
+			for col := 0; col < g[0]; col++ {
+				wg.Add(1)
+				go func(lvl, col, row int) {
+					defer wg.Done()
+					body := make([]byte, 64+(col+row)*8)
+					for i := range body {
+						body[i] = byte(lvl*100 + col*10 + row)
+					}
+					if err := sink.WriteTile(lvl, col, row, body); err != nil {
+						t.Errorf("WriteTile lvl%d (%d,%d): %v", lvl, col, row, err)
+					}
+				}(lvl, col, row)
+			}
+		}
+	}
+	wg.Wait()
+	if err := sink.finish(); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if st, err := os.Stat(out); err != nil || st.Size() == 0 {
+		t.Fatalf("output not finalized: stat=%v", err)
+	}
+}
 
 func TestStreamwriterSinkRoutesAndDrains(t *testing.T) {
 	dir := t.TempDir()
