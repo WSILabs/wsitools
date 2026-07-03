@@ -115,6 +115,23 @@ type cropEmitParams struct {
 	outTile      int
 }
 
+// rasterEncodeKnobs builds the codec knobs for the lossless-crop reduced-level
+// raster encoder: the resolved crop knobs (quality + any codec-specific knobs,
+// e.g. jpeg2000 reversible) plus — for a JPEG encoder only — the source chroma
+// subsampling so the raster levels match the verbatim L0's YCbCrSubSampling tag.
+func rasterEncodeKnobs(p cropEmitParams) map[string]string {
+	k := make(map[string]string, len(p.knobs)+1)
+	for kk, vv := range p.knobs {
+		k[kk] = vv
+	}
+	if p.fac != nil && p.fac.Name() == "jpeg" {
+		if ss := sourceJPEGSubsampling(p.src); ss != "" {
+			k["subsampling"] = ss
+		}
+	}
+	return k
+}
+
 func cropToTIFF(p cropEmitParams) error {
 	mppX, mppY, mag := cropSourceScale(p.input, p.src)
 	mppX, mppY, mag = scaleMPPMag(mppX, mppY, mag, p.factor)
@@ -157,7 +174,7 @@ func cropToTIFF(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, sourceJPEGSubsampling(p.src), nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.workers, p.outTile, p.fac, rasterEncodeKnobs(p), nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -278,7 +295,7 @@ func cropToSVS(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, wtr, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, sourceJPEGSubsampling(p.src), nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, wtr, l1, l1W, l1H, p.nLevels-1, p.workers, p.outTile, p.fac, rasterEncodeKnobs(p), nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -374,7 +391,7 @@ func cropToOMETIFF(p cropEmitParams) error {
 			if err != nil {
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.workers, p.outTile, sourceJPEGSubsampling(p.src), nil); err != nil {
+			if err := buildPyramidFromRaster(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.workers, p.outTile, p.fac, rasterEncodeKnobs(p), nil); err != nil {
 				return fmt.Errorf("build pyramid: %w", err)
 			}
 		}
@@ -472,7 +489,7 @@ func cropToCOGWSI(p cropEmitParams) error {
 				aborted = true
 				return fmt.Errorf("halve L0→L1: %w", err)
 			}
-			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.quality, p.outTile, sourceJPEGSubsampling(p.src)); err != nil {
+			if err := buildPyramidFromRasterCOGWSI(p.ctx, w, l1, l1W, l1H, p.nLevels-1, p.outTile, p.fac, rasterEncodeKnobs(p)); err != nil {
 				aborted = true
 				return fmt.Errorf("build pyramid: %w", err)
 			}
