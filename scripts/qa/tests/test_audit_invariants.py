@@ -109,3 +109,18 @@ def test_metadata_consistency_info_vs_dumpifds_dims():
     assert f_ok == []
     f_bad = inv.check_metadata_consistency(_case(), out, [(2000, 9999)])
     assert any(x.invariant == "info-matches-dumpifds-dims" for x in f_bad)
+
+
+def test_cross_container_metadata_must_agree():
+    per_container = {
+        "svs": _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20),
+        "tiff": _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20),
+        "ome-tiff": _info([_lvl(2000, 3000)], make="Aperio", mpp=0.25, magnification=20),
+    }
+    f = inv.check_cross_container("cmu2", per_container, "wsitools convert ...")
+    assert any(x.invariant == "cross-container-metadata" and "mpp" in str(x.actual) for x in f)
+
+
+def test_cross_container_agreement_is_clean():
+    per = {c: _info([_lvl(2000, 3000)], make="Aperio", mpp=0.5, magnification=20) for c in ("svs", "tiff")}
+    assert inv.check_cross_container("cmu2", per, "repro") == []
