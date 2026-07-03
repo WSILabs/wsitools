@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	opentile "github.com/wsilabs/opentile-go"
 )
 
 // B1: jpeg2000 is now a --codec re-encode target (OpenJPEG encoder). Lossless
@@ -30,8 +32,9 @@ func TestConvertTIFFJPEG2000LossyDecodable(t *testing.T) {
 		"--codec", "jpeg2000", "-o", out, in).CombinedOutput(); err != nil {
 		t.Fatalf("convert --codec jpeg2000 (lossy): %v\n%s", err, b)
 	}
-	// Lossy: pixels approximate, but the output must read back as a valid slide.
-	if b, err := exec.Command(findBinary(t), "info", out).CombinedOutput(); err != nil {
-		t.Fatalf("info on lossy jpeg2000 output: %v\n%s", err, b)
+	// Lossy: pixels approximate, but the output must read back as a valid slide
+	// AND actually store JPEG 2000 (not silently fall back to jpeg).
+	if _, codec := l0WidthAndCodec(t, out); codec != opentile.CompressionJP2K {
+		t.Errorf("lossy jpeg2000 output L0 codec = %v, want JP2K", codec)
 	}
 }
