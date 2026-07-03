@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/wsilabs/wsitools/internal/tiff"
@@ -35,7 +36,14 @@ type Writer struct {
 	tmpPath string
 	f       *os.File
 	bigtiff bool
-	off     int64 // current write offset (end of file)
+
+	// appendMu serializes appendBytes: the streamwriterSink drains one goroutine
+	// PER LEVEL concurrently, and each writes tile bodies through appendBytes,
+	// which mutates off + f. Without this lock those concurrent appends interleave
+	// (corrupt tile bodies + wrong offsets). All other f/off access (emitIFD,
+	// Close, patchOffset) runs single-threaded after the drains join in finish().
+	appendMu sync.Mutex
+	off      int64 // current write offset (end of file); guarded by appendMu during drains
 
 	imgs    []*imageEntry
 	handles map[*imageEntry]*LevelHandle // populated in AddLevel; used for synchronous drain
@@ -134,6 +142,10 @@ func Create(path string, opts Options) (*Writer, error) {
 
 // appendBytes appends p to the output file and returns the start offset.
 func (w *Writer) appendBytes(p []byte) (uint64, error) {
+	// Serialized: concurrent per-level drain goroutines (streamwriterSink) call
+	// this — an unsynchronized write here interleaves tile bodies and races off.
+	w.appendMu.Lock()
+	defer w.appendMu.Unlock()
 	off := uint64(w.off)
 	n, err := w.f.Write(p)
 	if err != nil {
