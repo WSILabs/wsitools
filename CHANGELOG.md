@@ -6,6 +6,15 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **Data race fixed in the streaming pyramid writer — could corrupt output.**
+  `downsample` and `convert --to svs|tiff|ome-tiff` (multi-level, engine-backed)
+  drained one goroutine per pyramid level, each writing tile bodies through the
+  shared streamwriter `appendBytes` with no synchronization. With ≥2 output levels
+  those writes interleaved, splicing a tile body and racing the file offset — a
+  truncated/corrupt tile in ~17% of runs ("Premature end of JPEG file"). The
+  append is now serialized. (Race-detector-verified; the output was valid-size but
+  had one corrupt tile, so it could slip through casual inspection.)
+
 - **`convert --to cog-wsi` now honors `--codec`.** It previously ignored
   `--codec` (and `--quality` / `--tile-size`) entirely and always tile-copied the
   source JPEG verbatim — so `--codec htj2k` silently produced a JPEG COG while
