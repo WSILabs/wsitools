@@ -4,6 +4,29 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`convert --to cog-wsi` now honors `--codec`.** It previously ignored
+  `--codec` (and `--quality` / `--tile-size`) entirely and always tile-copied the
+  source JPEG verbatim — so `--codec htj2k` silently produced a JPEG COG while
+  reporting success. It now re-encodes to the requested codec, preserving the
+  source pyramid structure (select-octave, matching `--to tiff|svs|ome-tiff`). A
+  plain convert with no `--codec` / `--tile-size` change still tile-copies verbatim
+  (including LZW / Deflate / uncompressed sources).
+- **`convert --to dicom --codec jpeg2000|htj2k` now works.** The plain (no
+  `--factor`) path hardcoded "only 'jpeg'" and rejected these DICOM transfer
+  syntaxes, even though the `--factor` derived path already produced them. Both now
+  route through the engine frame encoder. Codecs with no DICOM transfer syntax
+  (avif / png) remain cleanly rejected.
+
+### Changed
+
+- **`--to cog-wsi --codec jpegxl` now requires `--allow-nonconformant`.** wsitools
+  writes a valid JPEG-XL codestream, but opentile-go (v0.60.1) cannot decode
+  JPEG-XL-in-TIFF yet, so the output is not readable — the capability table now
+  classifies it non-conformant rather than emitting "valid" undecodable output.
+  Tracked in wsitools#24.
+
 ## [0.25.1] - 2026-07-01
 
 ### Fixed

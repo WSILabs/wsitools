@@ -48,18 +48,46 @@ func TestConvertDICOMRejectsExoticCodecWithoutFlag(t *testing.T) {
 	}
 }
 
-func TestConvertDICOMRejectsNonJPEGCodec(t *testing.T) {
+// convert --to dicom honors --codec jpeg2000 / htj2k (DICOM transfer syntaxes) by
+// re-encoding the pyramid through the engine, matching what --factor already did.
+// Regression: the plain path used to hardcode "only 'jpeg'" and reject them.
+func TestConvertDICOMReencodesJP2KAndHTJ2K(t *testing.T) {
+	bin := stripedBinary(t)
+	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture absent: %v", err)
+	}
+	for _, codec := range []string{"jpeg2000", "htj2k"} {
+		t.Run(codec, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "out")
+			if o, err := runBin(bin, "convert", "--to", "dicom", "--codec", codec, "-o", out, src); err != nil {
+				t.Fatalf("convert --to dicom --codec %s: %v\n%s", codec, err, o)
+			}
+			o, err := runBin(bin, "info", out)
+			if err != nil {
+				t.Fatalf("info on output: %v\n%s", err, o)
+			}
+			if !strings.Contains(string(o), codec) {
+				t.Errorf("--to dicom --codec %s did not store %s; info:\n%s", codec, codec, o)
+			}
+		})
+	}
+}
+
+// avif / png have no DICOM transfer syntax and are still rejected (at the
+// capability gate), with a clear error naming the supported codecs.
+func TestConvertDICOMRejectsCodecWithoutTransferSyntax(t *testing.T) {
 	bin := stripedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
 	}
 	out := filepath.Join(t.TempDir(), "out")
-	o, err := runBin(bin, "convert", "--to", "dicom", "--codec", "jpeg2000", "-o", out, src)
+	o, err := runBin(bin, "convert", "--to", "dicom", "--codec", "avif", "-o", out, src)
 	if err == nil {
-		t.Fatal("expected error for --codec jpeg2000 on --to dicom")
+		t.Fatal("expected error for --codec avif on --to dicom")
 	}
-	if !strings.Contains(string(o), "only 'jpeg'") {
-		t.Errorf("error should say only 'jpeg' is supported; got:\n%s", o)
+	if !strings.Contains(string(o), "not supported for --to dicom") {
+		t.Errorf("error should say avif is not supported for --to dicom; got:\n%s", o)
 	}
 }

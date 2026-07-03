@@ -35,7 +35,11 @@ func containerCapabilities(container string) containerCaps {
 		}
 	case "cog-wsi":
 		return containerCaps{
-			conformant: []string{"jpeg", "jpeg2000", "htj2k", "avif", "webp", "jpegxl"},
+			conformant: []string{"jpeg", "jpeg2000", "htj2k", "avif", "webp"},
+			// jpegxl bytes are valid (raw JXL codestream) but opentile-go v0.60.1
+			// cannot decode them yet — see wsitools#24. Keep it writable behind
+			// --allow-nonconformant, not silently emit "valid" undecodable output.
+			nonconformant: []string{"jpegxl"},
 		}
 	case "dicom":
 		return containerCaps{

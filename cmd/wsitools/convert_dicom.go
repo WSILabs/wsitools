@@ -49,17 +49,23 @@ func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 	}
 	defer src.Close()
 
-	// --tile-size forces a re-tile, which the verbatim/1:1 frame path can't do.
-	// Route through the engine at full resolution (factor 1) so frames are
-	// re-tiled to the requested size (Rows/Columns follow). The engine re-encodes
-	// to JPEG-baseline.
+	// Re-encode routing. Two triggers force a re-tile/re-encode through the engine
+	// (which owns the jpeg2000/htj2k DICOM frame encoders and can change tile size):
+	//   * --tile-size differs from the source tiling, or
+	//   * --codec selects a non-JPEG DICOM transfer syntax (jpeg2000 / htj2k).
+	// A plain --codec jpeg stays on the 1:1 derivedsource re-encode (preserves the
+	// source tiling); absent --codec is a verbatim frame-copy. The capability gate
+	// (validateCodec) has already rejected any codec outside {jpeg,jpeg2000,htj2k}.
 	srcL0 := slide.Levels()[0]
-	if cvTileSize > 0 && cvTileSize != srcL0.TileSize.W {
-		if cvCodec != "" && cvCodec != "jpeg" {
-			return fmt.Errorf("--codec %q is not supported for --to dicom (only 'jpeg')", cvCodec)
-		}
+	retileForTileSize := cvTileSize > 0 && cvTileSize != srcL0.TileSize.W
+	engineCodec := cvCodec == "jpeg2000" || cvCodec == "htj2k"
+	if retileForTileSize || engineCodec {
 		if cmd.Flags().Changed("level") {
-			return fmt.Errorf("--tile-size with --level is not supported for --to dicom; omit one")
+			return fmt.Errorf("--to dicom with --codec jpeg2000|htj2k or a differing --tile-size emits the full pyramid via the engine; --level is not supported there — omit --level")
+		}
+		codecName := cvCodec
+		if codecName == "" {
+			codecName = "jpeg"
 		}
 		quality, qerr := dicomReencodeQuality()
 		if qerr != nil {
@@ -69,7 +75,7 @@ func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 		if workers == 0 {
 			workers = runtime.NumCPU()
 		}
-		slog.Warn("re-tiling pyramid to JPEG-baseline (lossy) for --to dicom --tile-size", "tile", cvTileSize, "quality", quality)
+		slog.Warn("re-encoding pyramid via engine (lossy) for --to dicom", "codec", codecName, "quality", quality, "tile", cvTileSize)
 		md := src.Metadata()
 		assoc := src.Associated()
 		if cvNoAssociated {
@@ -77,21 +83,16 @@ func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 		}
 		srcRegion := opentile.Region{Origin: opentile.Point{X: 0, Y: 0}, Size: srcL0.Size}
 		return runDICOMEngine(cmd.Context(), slide, srcRegion, opentile.Size{W: srcL0.Size.W, H: srcL0.Size.H},
-			"jpeg", quality, workers, src.Format(), md, assoc,
+			codecName, quality, workers, src.Format(), md, assoc,
 			dicomwriter.Options{Associated: !cvNoAssociated, L0ImageType: []string{"DERIVED", "PRIMARY", "VOLUME", "NONE"}},
 			cvOutput, cvForce)
 	}
 
-	// --codec is the explicit opt-in to RE-ENCODE the pyramid (lossy) rather
-	// than frame-copy it verbatim — mirroring the TIFF family's --codec. Without
-	// it, a source whose tiles are not a DICOM transfer syntax is rejected by the
-	// writer (no silent codec assumptions). JPEG-baseline is the only re-encode
-	// target available for DICOM today (no JPEG 2000 / HTJ2K encoder).
+	// --codec jpeg: 1:1 re-encode to JPEG-baseline preserving source tiling.
+	// Absent --codec: verbatim frame-copy (a source whose tiles are not a DICOM
+	// transfer syntax is rejected by the writer — no silent codec assumptions).
 	emit := src
-	if cvCodec != "" {
-		if cvCodec != "jpeg" {
-			return fmt.Errorf("--codec %q is not supported for --to dicom (only 'jpeg'; omit --codec to frame-copy a JPEG/JPEG2000/HTJ2K/JPEG XL source verbatim)", cvCodec)
-		}
+	if cvCodec == "jpeg" {
 		quality, qerr := dicomReencodeQuality()
 		if qerr != nil {
 			return qerr
