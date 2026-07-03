@@ -78,3 +78,34 @@ def test_subsampling_consistent_across_pyramid():
     out_subtags = ["4:4:4", "4:2:0"]
     f = inv.check_subsampling(_case(), out, out_subtags)
     assert any(x.invariant == "subsampling-uniform" for x in f)
+
+
+def test_metadata_sanity_flags_negative_mpp():
+    # mpp == 0 means "unknown" (benign; metadata LOSS is a consistency check, not
+    # sanity). A NEGATIVE mpp is genuinely invalid and must be flagged.
+    out = _info([_lvl(100, 100)], mpp=-0.5, mpp_x=-0.5, mpp_y=-0.5, magnification=20)
+    f = inv.check_metadata_sanity(_case(), out)
+    assert any(x.invariant == "mpp-positive" for x in f)
+    # mpp == 0 (unknown) must NOT be flagged as insane.
+    clean = _info([_lvl(100, 100)], mpp=0, mpp_x=0, mpp_y=0, magnification=20)
+    assert not any(x.invariant == "mpp-positive" for x in inv.check_metadata_sanity(_case(), clean))
+
+
+def test_metadata_sanity_flags_anisotropic_mpp_disagreeing_with_mpp():
+    out = _info([_lvl(100, 100)], mpp=0.5, mpp_x=0.5, mpp_y=0.9, magnification=20)
+    f = inv.check_metadata_sanity(_case(), out)
+    assert any(x.invariant == "mpp-axes-consistent" for x in f)
+
+
+def test_metadata_sanity_flags_implausible_magnification():
+    out = _info([_lvl(100, 100)], mpp=0.5, mpp_x=0.5, mpp_y=0.5, magnification=9000)
+    f = inv.check_metadata_sanity(_case(), out)
+    assert any(x.invariant == "magnification-plausible" for x in f)
+
+
+def test_metadata_consistency_info_vs_dumpifds_dims():
+    out = _info([_lvl(2000, 3000)])
+    f_ok = inv.check_metadata_consistency(_case(), out, [(2000, 3000)])
+    assert f_ok == []
+    f_bad = inv.check_metadata_consistency(_case(), out, [(2000, 9999)])
+    assert any(x.invariant == "info-matches-dumpifds-dims" for x in f_bad)

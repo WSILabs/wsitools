@@ -97,3 +97,50 @@ def check_subsampling(case: Case, out_info: dict, out_subtags: list) -> list[Fin
         findings.append(Finding(case.id, "subsampling", "subsampling-uniform", "silent-wrong-output",
             "one subsampling across the pyramid", sorted(subs), _repro(case)))
     return findings
+
+
+def check_metadata_sanity(case: Case, out_info: dict) -> list[Finding]:
+    findings: list[Finding] = []
+    md = out_info.get("metadata") or {}
+    mpp, mx, my = md.get("mpp"), md.get("mpp_x"), md.get("mpp_y")
+    mag = md.get("magnification")
+
+    def add(inv_id, exp, act):
+        findings.append(Finding(case.id, "metadata-sanity", inv_id, "metadata-sanity", exp, act, _repro(case)))
+
+    for name, v in (("mpp", mpp), ("mpp_x", mx), ("mpp_y", my)):
+        if v is not None and v != 0 and v <= 0:
+            add("mpp-positive", f"{name} > 0", v)
+    if mpp is not None and mpp != 0 and mpp <= 0:
+        add("mpp-positive", "mpp > 0", mpp)
+    if mpp and mx and my and abs(mx - my) < 1e-9 and abs(mpp - mx) > 1e-6:
+        add("mpp-axes-consistent", f"mpp == mpp_x == mpp_y ({mx})", mpp)
+    if mx and my and mx > 0 and (max(mx, my) / min(mx, my)) > 1.5:
+        add("mpp-axes-consistent", "mpp_x ≈ mpp_y (isotropic expected)", f"{mx} vs {my}")
+    if mag is not None and mag != 0 and not (0.5 <= mag <= 160):
+        add("magnification-plausible", "0.5 ≤ magnification ≤ 160", mag)
+    for a in out_info.get("associated_images") or []:
+        if a.get("width", 0) <= 0 or a.get("height", 0) <= 0:
+            add("associated-dims-positive", f'{a.get("type")} > 0', f'{a.get("width")}x{a.get("height")}')
+    for lv in out_info.get("levels") or []:
+        if lv["width"] <= 0 or lv["height"] <= 0:
+            add("level-dims-positive", "level dims > 0", f'{lv["width"]}x{lv["height"]}')
+        if lv["tile_width"] <= 0 or lv["tile_height"] <= 0:
+            add("tile-dims-positive", "tile dims > 0", f'{lv["tile_width"]}x{lv["tile_height"]}')
+        q = (lv.get("quality") or {}).get("quality_estimate")
+        if q is not None and not (0 <= q <= 100):
+            add("quality-estimate-range", "0 ≤ quality_estimate ≤ 100", q)
+    return findings
+
+
+def check_metadata_consistency(case: Case, out_info: dict, out_ifd_dims: list) -> list[Finding]:
+    findings: list[Finding] = []
+    levels = out_info.get("levels") or []
+    for i, lv in enumerate(levels):
+        if i < len(out_ifd_dims):
+            iw, ih = out_ifd_dims[i]
+            if (lv["width"], lv["height"]) != (iw, ih):
+                findings.append(Finding(case.id, "metadata-consistency", "info-matches-dumpifds-dims",
+                    "metadata-inconsistency", f'info L{i} {lv["width"]}x{lv["height"]}',
+                    f"dump-ifds {iw}x{ih}", _repro(case)))
+    return findings
