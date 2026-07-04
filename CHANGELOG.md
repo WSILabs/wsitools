@@ -6,6 +6,16 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **`convert --to ome-tiff` carries the acquisition date and scanner identity**
+  (wsitools#27). The OME-XML now emits the primary `<Image><AcquisitionDate>` (so
+  the source acquisition time round-trips through opentile-go) and a standard
+  `<Instrument><Microscope Manufacturer/Model/SerialNumber>` block (read by
+  Bio-Formats / QuPath). Note: opentile-go's OME reader does not yet surface
+  make/model/serial from the typed `<Microscope>` element, so `info` still shows
+  them empty until that read-side change lands (filed upstream).
+
+### Fixed
+
 - **SZI `scan-properties.xml` now emits the spec-mandatory measurement fields.**
   Per the SZI format spec (v1.2 §3.4) `ImageWidth`, `ImageHeight`,
   `MicronsPerPixel`, `MicronsPerPixelX`, `MicronsPerPixelY` are mandatory (they let
