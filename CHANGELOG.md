@@ -6,6 +6,13 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ### Fixed
 
+- **SZI `scan-properties.xml` now emits the spec-mandatory measurement fields.**
+  Per the SZI format spec (v1.2 §3.4) `ImageWidth`, `ImageHeight`,
+  `MicronsPerPixel`, `MicronsPerPixelX`, `MicronsPerPixelY` are mandatory (they let
+  viewers add a measurement tool); the writer previously emitted only the per-axis
+  MPP. It now writes the L0 dimensions and the single (symmetric/averaged)
+  `MicronsPerPixel` too. Follows the wsitools#26 format fix.
+
 - **`convert --to dicom` preserves magnification** (wsitools#30). The DICOM writer
   never emitted `ObjectiveLensPower (0048,0112)`, so the source objective
   magnification was lost (info reported 0). It's now written into the Optical Path

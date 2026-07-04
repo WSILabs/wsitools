@@ -31,9 +31,13 @@ type imageXML struct {
 	Properties []propXML `xml:"properties>property"`
 }
 
-// WriteScanProperties emits an SZI scan-properties.xml document from
-// the given source Metadata. Empty/zero fields are omitted.
-func WriteScanProperties(w io.Writer, md source.Metadata) error {
+// WriteScanProperties emits an SZI scan-properties.xml document from the given
+// source Metadata and the L0 image dimensions (imgW×imgH pixels). Empty/zero
+// fields are omitted. Per the SZI spec (v1.2 §3.4) the mandatory fields are
+// ImageWidth, ImageHeight, MicronsPerPixel, MicronsPerPixelX, MicronsPerPixelY —
+// they let viewers add a measurement tool — so those are always emitted when
+// known.
+func WriteScanProperties(w io.Writer, md source.Metadata, imgW, imgH int) error {
 	if _, err := io.WriteString(w, xml.Header); err != nil {
 		return err
 	}
@@ -47,16 +51,33 @@ func WriteScanProperties(w io.Writer, md source.Metadata) error {
 		}
 	}
 	num := func(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
-	add("VendorName", md.Make)
-	add("ScannerName", md.Model)
-	if md.Magnification != 0 {
-		add("ObjectiveMagnification", num(md.Magnification))
+	// --- Mandatory measurement fields (SZI spec §3.4) ---
+	if imgW > 0 {
+		add("ImageWidth", strconv.Itoa(imgW))
+	}
+	if imgH > 0 {
+		add("ImageHeight", strconv.Itoa(imgH))
+	}
+	// MicronsPerPixel is the single (symmetric) value; the spec says to take an
+	// average when X and Y differ. md.MPP is the symmetric value (0 if asymmetric).
+	mpp := md.MPP
+	if mpp == 0 && md.MPPX != 0 && md.MPPY != 0 {
+		mpp = (md.MPPX + md.MPPY) / 2
+	}
+	if mpp != 0 {
+		add("MicronsPerPixel", num(mpp))
 	}
 	if md.MPPX != 0 {
 		add("MicronsPerPixelX", num(md.MPPX))
 	}
 	if md.MPPY != 0 {
 		add("MicronsPerPixelY", num(md.MPPY))
+	}
+	// --- Optional WSI fields ---
+	add("VendorName", md.Make)
+	add("ScannerName", md.Model)
+	if md.Magnification != 0 {
+		add("ObjectiveMagnification", num(md.Magnification))
 	}
 	add("ScannerSerialNo", md.SerialNumber)
 	if !md.AcquisitionDateTime.IsZero() {

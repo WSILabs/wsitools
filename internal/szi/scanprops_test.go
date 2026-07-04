@@ -21,7 +21,7 @@ func TestScanPropsAllFields(t *testing.T) {
 		Software:            "Aperio v12.1",
 	}
 	var buf bytes.Buffer
-	if err := WriteScanProperties(&buf, md); err != nil {
+	if err := WriteScanProperties(&buf, md, 2220, 2967); err != nil {
 		t.Fatal(err)
 	}
 	s := buf.String()
@@ -34,11 +34,16 @@ func TestScanPropsAllFields(t *testing.T) {
 	// Property NAMES must match the reader's mapping so values round-trip.
 	for _, want := range []string{
 		"http://www.pathozoom.com/szi",
+		// Mandatory measurement fields (SZI spec §3.4).
+		"ImageWidth", "2220",
+		"ImageHeight", "2967",
+		"MicronsPerPixel", "0.25",
+		"MicronsPerPixelX",
+		"MicronsPerPixelY",
+		// Optional WSI fields.
 		"VendorName", "Aperio",
 		"ScannerName", "ScanScope CS",
 		"ObjectiveMagnification", "40",
-		"MicronsPerPixelX", "0.25",
-		"MicronsPerPixelY",
 		"ScannerSerialNo", "SN-12345",
 		"TimeStart", "2024-01-15T09:30:00",
 		"SoftwareName", "Aperio v12.1",
@@ -52,7 +57,7 @@ func TestScanPropsAllFields(t *testing.T) {
 func TestScanPropsOmitsEmpty(t *testing.T) {
 	md := source.Metadata{Make: "Aperio"} // others empty/zero
 	var buf bytes.Buffer
-	if err := WriteScanProperties(&buf, md); err != nil {
+	if err := WriteScanProperties(&buf, md, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	s := buf.String()
