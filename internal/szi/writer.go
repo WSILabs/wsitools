@@ -54,7 +54,7 @@ func (w *Writer) WriteTile(level, col, row int, body []byte) error {
 // emitted into the ZIP at Close so it appears after the tile tree.
 func (w *Writer) WriteScanProperties(md source.Metadata) error {
 	var buf bytes.Buffer
-	if err := WriteScanProperties(&buf, md); err != nil {
+	if err := WriteScanProperties(&buf, md, w.cfg.Width, w.cfg.Height); err != nil {
 		return err
 	}
 	w.scanXML = buf.Bytes()
