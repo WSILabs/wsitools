@@ -4,6 +4,8 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-07-03
+
 ### Fixed
 
 - **`convert --to ome-tiff` carries the acquisition date and scanner identity**
@@ -13,8 +15,6 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   Bio-Formats / QuPath). Note: opentile-go's OME reader does not yet surface
   make/model/serial from the typed `<Microscope>` element, so `info` still shows
   them empty until that read-side change lands (filed upstream).
-
-### Fixed
 
 - **SZI `scan-properties.xml` now emits the spec-mandatory measurement fields.**
   Per the SZI format spec (v1.2 §3.4) `ImageWidth`, `ImageHeight`,
@@ -33,8 +33,6 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   acquisition time to midnight. The provenance now carries the full RFC3339
   timestamp, so the time survives the round-trip.
 
-### Fixed
-
 - **`convert --to ome-tiff` preserves magnification** (wsitools#27, partial). The
   ome-tiff tile-copy and re-encode paths synthesized OME-XML without the
   `<Instrument>/<Objective NominalMagnification>` block (only the `--factor`/crop
@@ -42,8 +40,6 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   emit it via `SyntheticOMEDescriptionWithMag`, so the source magnification reads
   back. (Identity fields — make/software/datetime — are still not carried in the
   OME-XML; tracked in #27.)
-
-### Fixed
 
 - **`crop --lossless` of a non-JPEG source no longer produces a mixed-codec
   pyramid** (wsitools#28). Lossless crop copies L0 verbatim (source codec) but
