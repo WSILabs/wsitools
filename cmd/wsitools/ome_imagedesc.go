@@ -3,7 +3,16 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 )
+
+// OMEIdentity carries the source scanner-identity metadata emitted into the
+// OME-XML: <Instrument><Microscope Manufacturer/Model/SerialNumber> and the
+// primary <Image AcquisitionDate>. Zero-valued fields are omitted.
+type OMEIdentity struct {
+	Make, Model, SerialNumber string
+	Acquired                  time.Time
+}
 
 // OMEAssoc describes one associated image (label/macro/thumbnail) to enumerate
 // in the OME-XML. Name MUST be one of "label"/"macro"/"thumbnail" (the reader
@@ -33,22 +42,26 @@ const omePreamble = `<!-- Warning: this comment is an OME-XML metadata block, wh
 // associated images to enumerate as <Image> elements (IFD positions
 // 1, 2, … matching the order writeAssociatedImages writes them).
 func SyntheticOMEDescription(l0W, l0H uint32, mppX, mppY float64, name, srcSoftware string, assoc []OMEAssoc) string {
-	return syntheticOMEDescriptionMag(l0W, l0H, mppX, mppY, 0, name, srcSoftware, assoc)
+	return syntheticOMEDescriptionMag(l0W, l0H, mppX, mppY, 0, name, srcSoftware, OMEIdentity{}, assoc)
 }
 
-// SyntheticOMEDescriptionWithMag is like SyntheticOMEDescription but also
-// emits an <Instrument>/<Objective NominalMagnification="mag"> block and
-// links the primary <Image> to it via <ObjectiveSettings>, allowing
-// opentile-go's OME reader to populate md.Magnification on re-open.
-// mag is ignored (no <Instrument> block emitted) when mag <= 0.
-func SyntheticOMEDescriptionWithMag(l0W, l0H uint32, mppX, mppY, mag float64, name, srcSoftware string, assoc []OMEAssoc) string {
-	return syntheticOMEDescriptionMag(l0W, l0H, mppX, mppY, mag, name, srcSoftware, assoc)
+// SyntheticOMEDescriptionWithMag is like SyntheticOMEDescription but also emits
+// an <Instrument> block (with <Objective NominalMagnification> when mag > 0 and
+// <Microscope Manufacturer/Model/SerialNumber> from id), links the primary
+// <Image> to it via <InstrumentRef>/<ObjectiveSettings>, and emits the primary
+// <Image AcquisitionDate>. This lets opentile-go's OME reader populate
+// Magnification + AcquisitionDateTime on re-open (make/model/serial are emitted
+// per the OME schema for Bio-Formats/QuPath; opentile's reader doesn't surface
+// those yet — see wsitools#27).
+func SyntheticOMEDescriptionWithMag(l0W, l0H uint32, mppX, mppY, mag float64, name, srcSoftware string, id OMEIdentity, assoc []OMEAssoc) string {
+	return syntheticOMEDescriptionMag(l0W, l0H, mppX, mppY, mag, name, srcSoftware, id, assoc)
 }
 
-func syntheticOMEDescriptionMag(l0W, l0H uint32, mppX, mppY, mag float64, name, srcSoftware string, assoc []OMEAssoc) string {
+func syntheticOMEDescriptionMag(l0W, l0H uint32, mppX, mppY, mag float64, name, srcSoftware string, id OMEIdentity, assoc []OMEAssoc) string {
 	if name == "" {
 		name = "Image"
 	}
+	hasInstrument := mag > 0 || id.Make != "" || id.Model != "" || id.SerialNumber != ""
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(omePreamble + "\n")
@@ -58,28 +71,50 @@ func syntheticOMEDescriptionMag(l0W, l0H uint32, mppX, mppY, mag float64, name, 
 		b.WriteString(` (from ` + xmlEscape(srcSoftware) + `)`)
 	}
 	b.WriteString(`">` + "\n")
-	// Emit an <Instrument>/<Objective> block when magnification is known so
-	// opentile-go's OME reader can populate md.Magnification via the
-	// <ObjectiveSettings> link on the primary image.
-	if mag > 0 {
-		fmt.Fprintf(&b, `  <Instrument ID="Instrument:0">`+"\n")
-		fmt.Fprintf(&b, `    <Objective ID="Objective:0" NominalMagnification="%g"/>`+"\n", mag)
+	// <Instrument> carries the scanner identity (<Microscope>) and the objective
+	// (<Objective NominalMagnification>) so opentile-go can populate Magnification
+	// and OME-aware tools can read the manufacturer/model/serial.
+	if hasInstrument {
+		b.WriteString(`  <Instrument ID="Instrument:0">` + "\n")
+		if id.Make != "" || id.Model != "" || id.SerialNumber != "" {
+			b.WriteString(`    <Microscope`)
+			if id.Make != "" {
+				fmt.Fprintf(&b, ` Manufacturer="%s"`, xmlEscape(id.Make))
+			}
+			if id.Model != "" {
+				fmt.Fprintf(&b, ` Model="%s"`, xmlEscape(id.Model))
+			}
+			if id.SerialNumber != "" {
+				fmt.Fprintf(&b, ` SerialNumber="%s"`, xmlEscape(id.SerialNumber))
+			}
+			b.WriteString(`/>` + "\n")
+		}
+		if mag > 0 {
+			fmt.Fprintf(&b, `    <Objective ID="Objective:0" NominalMagnification="%g"/>`+"\n", mag)
+		}
 		b.WriteString(`  </Instrument>` + "\n")
 	}
-	writeOMEImage(&b, 0, name, l0W, l0H, mppX, mppY, mag > 0)
+	writeOMEImage(&b, 0, name, l0W, l0H, mppX, mppY, mag > 0, hasInstrument, id.Acquired)
 	for i, a := range assoc {
-		writeOMEImage(&b, 1+i, a.Name, a.W, a.H, 0, 0, false)
+		writeOMEImage(&b, 1+i, a.Name, a.W, a.H, 0, 0, false, false, time.Time{})
 	}
 	b.WriteString(`</OME>`)
 	return b.String()
 }
 
 // writeOMEImage writes one <Image>/<Pixels> block mapping to top-level IFD ifd.
-// mppX/mppY are emitted as PhysicalSize only when non-zero.
-// hasObjective, when true, emits <ObjectiveSettings ID="Objective:0"/> linking
-// this image to the Objective defined in the surrounding <Instrument> block.
-func writeOMEImage(b *strings.Builder, ifd int, name string, w, h uint32, mppX, mppY float64, hasObjective bool) {
+// mppX/mppY are emitted as PhysicalSize only when non-zero. Child element order
+// follows the OME schema: AcquisitionDate, InstrumentRef, ObjectiveSettings,
+// Pixels. hasObjective/hasInstrument gate the respective links; acquired is
+// emitted as <AcquisitionDate> when non-zero (primary image only).
+func writeOMEImage(b *strings.Builder, ifd int, name string, w, h uint32, mppX, mppY float64, hasObjective, hasInstrument bool, acquired time.Time) {
 	fmt.Fprintf(b, `  <Image ID="Image:%d" Name="%s">`+"\n", ifd, xmlEscape(name))
+	if !acquired.IsZero() {
+		fmt.Fprintf(b, `    <AcquisitionDate>%s</AcquisitionDate>`+"\n", acquired.UTC().Format("2006-01-02T15:04:05"))
+	}
+	if hasInstrument {
+		b.WriteString(`    <InstrumentRef ID="Instrument:0"/>` + "\n")
+	}
 	if hasObjective {
 		b.WriteString(`    <ObjectiveSettings ID="Objective:0"/>` + "\n")
 	}

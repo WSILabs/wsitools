@@ -163,6 +163,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 			srcImageDesc = SyntheticOMEDescriptionWithMag(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				md.MPP, md.MPP, md.Magnification, "Image", srcSoft,
+				OMEIdentity{Make: md.Make, Model: md.Model, SerialNumber: md.SerialNumber, Acquired: md.AcquisitionDateTime},
 				omeAssociatedSpecs(src, omeEditPlan{}),
 			)
 		}
@@ -351,6 +352,7 @@ func runConvertTIFFReencode(cmd *cobra.Command, input, container, codecName, qua
 			srcImageDesc = SyntheticOMEDescriptionWithMag(
 				uint32(l0.Size().X), uint32(l0.Size().Y),
 				md.MPP, md.MPP, md.Magnification, "Image", srcSoft,
+				OMEIdentity{Make: md.Make, Model: md.Model, SerialNumber: md.SerialNumber, Acquired: md.AcquisitionDateTime},
 				omeAssociatedSpecs(src, omeEditPlan{}),
 			)
 		}

@@ -858,10 +858,12 @@ func downsampleToOMETIFF(
 
 	// Build OME-XML with reduced L0 dimensions, scaled MPP, and scaled
 	// magnification so opentile-go's OME reader populates md.Magnification.
+	omeMD := src.Metadata() // opentile.Metadata (Scanner* field names)
 	omeXML := SyntheticOMEDescriptionWithMag(
 		uint32(outW), uint32(outH),
 		mppX, mppY, mag,
 		"Image", string(src.Format()),
+		OMEIdentity{Make: omeMD.ScannerManufacturer, Model: omeMD.ScannerModel, SerialNumber: omeMD.ScannerSerial, Acquired: omeMD.AcquisitionDateTime},
 		omeAssocs,
 	)
 

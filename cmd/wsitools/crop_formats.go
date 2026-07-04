@@ -355,7 +355,9 @@ func cropToOMETIFF(p cropEmitParams) error {
 			omeAssocs = append(omeAssocs, OMEAssoc{Name: name, W: aw, H: ah})
 		}
 	}
-	omeXML := SyntheticOMEDescriptionWithMag(uint32(p.outW), uint32(p.outH), mppX, mppY, mag, "Image", string(p.src.Format()), omeAssocs)
+	omeMD := p.src.Metadata() // opentile.Metadata (Scanner* field names)
+	omeXML := SyntheticOMEDescriptionWithMag(uint32(p.outW), uint32(p.outH), mppX, mppY, mag, "Image", string(p.src.Format()),
+		OMEIdentity{Make: omeMD.ScannerManufacturer, Model: omeMD.ScannerModel, SerialNumber: omeMD.ScannerSerial, Acquired: omeMD.AcquisitionDateTime}, omeAssocs)
 
 	w, err := streamwriter.Create(p.output, streamwriter.Options{
 		BigTIFF:              bigtiffMode,
