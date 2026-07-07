@@ -354,11 +354,7 @@ func buildPyramidFromRaster(ctx context.Context, w *streamwriter.Writer, l0 []by
 				decor.Name("encoding "),
 				decor.Percentage(decor.WCSyncSpace),
 			),
-			mpb.AppendDecorators(
-				decor.EwmaSpeed(0, "%.0f tiles/s", 30),
-				decor.Name(" ETA "),
-				decor.EwmaETA(decor.ET_STYLE_GO, 30),
-			),
+			mpb.AppendDecorators(tileSpeedETADecorators()...),
 		)
 	}
 

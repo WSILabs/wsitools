@@ -48,13 +48,27 @@ func newTileProgressTo(out io.Writer, enabled bool, label string, total int64) *
 	p := mpb.New(mpb.WithOutput(out))
 	bar := p.AddBar(total,
 		mpb.PrependDecorators(decor.Name(label+" "), decor.Percentage(decor.WCSyncSpace)),
-		mpb.AppendDecorators(
-			decor.EwmaSpeed(0, "%.0f tiles/s", 30),
-			decor.Name(" ETA "),
-			decor.EwmaETA(decor.ET_STYLE_GO, 30),
-		),
+		mpb.AppendDecorators(tileSpeedETADecorators()...),
 	)
 	return &progressBar{p: p, bar: bar}
+}
+
+// tileSpeedETADecorators builds the trailing "N tiles/s ETA M" decorators shared
+// by every tile-count bar (this wrapper and downsample's inline bar).
+//
+// These MUST be Average (not Ewma) decorators: our bars are advanced with plain
+// bar.Increment(), which updates the count but never feeds the per-iteration
+// duration that Ewma decorators require (bar.EwmaIncrement). An Ewma speed/ETA on
+// a plain-incremented bar therefore renders a permanent "0 tiles/s ETA 0s" (the
+// EWMA never accumulates a sample) — visible on slow encodes like htj2k. Average
+// speed/ETA derive from elapsed time + current progress, which plain increments
+// do update, so they read correctly.
+func tileSpeedETADecorators() []decor.Decorator {
+	return []decor.Decorator{
+		decor.AverageSpeed(0, "%.0f tiles/s"),
+		decor.Name(" ETA "),
+		decor.AverageETA(decor.ET_STYLE_GO),
+	}
 }
 
 // Increment advances the bar by one tile. Safe to call from a single goroutine
