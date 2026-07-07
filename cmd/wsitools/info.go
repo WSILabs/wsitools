@@ -22,7 +22,7 @@ var infoCmd = &cobra.Command{
 	Use:   "info <file>",
 	Short: "Print slide summary (format, levels, metadata, associated images)",
 	Long: `Print a summary of a whole-slide image: file size, format,
-scanner metadata (make/model/software/datetime/MPP/magnification),
+scanner metadata (make/model/software/writer/datetime/MPP/magnification),
 pyramid levels (dimensions + tile size + compression per level), and
 associated images (label/macro/thumbnail/overview).
 
@@ -57,6 +57,7 @@ type infoMetadata struct {
 	Make          string  `json:"make"`
 	Model         string  `json:"model"`
 	Software      string  `json:"software"`
+	Writer        string  `json:"writer,omitempty"`
 	DateTime      string  `json:"datetime"`
 	MPP           float64 `json:"mpp"`
 	MPPX          float64 `json:"mpp_x"`
@@ -97,6 +98,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 			Make:          md.Make,
 			Model:         md.Model,
 			Software:      md.Software,
+			Writer:        md.Writer,
 			MPP:           md.MPP,
 			MPPX:          md.MPPX,
 			MPPY:          md.MPPY,
@@ -142,6 +144,12 @@ func renderInfoText(w io.Writer, r *infoResult) error {
 	}
 	if r.Metadata.Software != "" {
 		fmt.Fprintf(w, "Software: %s\n", r.Metadata.Software)
+	}
+	// Writer (who wrote this file) is shown only when it differs from Software
+	// (the scanner/acquisition software) — i.e. for transcoded/wsitools output,
+	// where Software is preserved from the source but the file was rewritten.
+	if r.Metadata.Writer != "" && r.Metadata.Writer != r.Metadata.Software {
+		fmt.Fprintf(w, "Writer:  %s\n", r.Metadata.Writer)
 	}
 	if r.Metadata.DateTime != "" {
 		fmt.Fprintf(w, "DateTime: %s\n", r.Metadata.DateTime)

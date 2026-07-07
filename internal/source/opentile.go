@@ -101,6 +101,7 @@ func (s *opentileSource) Metadata() Metadata {
 		Make:                md.ScannerManufacturer,
 		Model:               md.ScannerModel,
 		SerialNumber:        md.ScannerSerial,
+		Writer:              md.Writer,
 		Magnification:       md.Magnification,
 		AcquisitionDateTime: md.AcquisitionDateTime,
 		Raw:                 map[string]string{},
