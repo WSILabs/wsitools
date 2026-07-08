@@ -4,6 +4,39 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-07-07
+
+### Fixed
+
+- **Progress bar shows the real tile rate + ETA again** (was a permanent
+  `0 tiles/s ETA 0s`). The tile-count bar used mpb's *Ewma* speed/ETA
+  decorators, which only update via `bar.EwmaIncrement(dur)` — but every write
+  path advances the bar with plain `bar.Increment()` (the retile-engine sink
+  drain and downsample's per-tile loop), so the EWMA never received a sample and
+  rendered a stuck zero. Most visible on slow encodes like
+  `convert --to cog-wsi --codec htj2k`, where the bar advanced (e.g. 58%) while
+  the rate/ETA stayed 0. Switched to *Average* speed/ETA decorators (derived from
+  progress + elapsed time), shared via one `tileSpeedETADecorators()` so the two
+  bar-construction sites can't drift. Every command that draws a tile bar
+  (convert to every target, downsample, crop --lossless) is fixed.
+
+### Added
+
+- **`info` surfaces more metadata: writer, serial, ICC presence, properties.**
+  - **Writer** — the software that *wrote* the file (`wsitools/<version>`),
+    distinct from **Software** (the scanner/acquisition software, preserved from
+    source). Shown as a `Writer:` line + `writer` JSON field, only when it differs
+    from Software (native slides stay uncluttered; transcoded / Bio-Formats / iris
+    files reveal their true writer).
+  - **Scanner serial** — `Serial:` line + `serial_number` JSON field.
+  - **ICC profile presence** — `ICC: present (N)` line + `icc_profile_bytes` JSON
+    field, so a color-managed slide is visible at a glance.
+  - **Vendor/provenance properties** — opentile's full property bag (`aperio.*`,
+    `wsi-tools.*`, `cog-wsi.*`, …) was dropped entirely; now plumbed through
+    `source.Metadata.Properties` and shown as a count by default, the full sorted
+    list under `--properties`. `--json` always includes the map. This makes a
+    converted file's lineage (`wsi-tools.source/codec/version`) inspectable.
+
 ## [0.26.0] - 2026-07-03
 
 ### Fixed
