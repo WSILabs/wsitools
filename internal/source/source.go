@@ -158,6 +158,11 @@ type Metadata struct {
 	ICCProfile          []byte  // embedded color profile; nil if none
 	AcquisitionDateTime time.Time
 	Raw                 map[string]string
+	// Properties is the reader's full vendor/provenance key→value bag (opentile's
+	// Metadata.Properties): aperio.*, tiff.*, wsi-tools.*, cog-wsi.* and friends.
+	// Distinct from Raw (a small, writer-consumed bag). nil if the reader exposes
+	// none. Read-only — do not mutate.
+	Properties map[string]string
 }
 
 // AmbiguousSeriesError is returned by Open when a directory input resolves to

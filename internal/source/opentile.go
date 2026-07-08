@@ -109,6 +109,14 @@ func (s *opentileSource) Metadata() Metadata {
 	if len(md.ScannerSoftware) > 0 {
 		m.Software = md.ScannerSoftware[0]
 	}
+	// Copy the reader's full property bag (aperio.*, wsi-tools.*, …) so info and
+	// other consumers can surface provenance without reaching back into opentile.
+	if len(md.Properties) > 0 {
+		m.Properties = make(map[string]string, len(md.Properties))
+		for k, v := range md.Properties {
+			m.Properties[k] = v
+		}
+	}
 	// Cross-format scale: opentile-go normalizes every format's native
 	// pixel size into MicronsPerPixelX/Y. Prefer that; fall back to the
 	// SVS-specific struct only when the cross-format value is absent.

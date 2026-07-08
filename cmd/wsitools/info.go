@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,23 +17,31 @@ import (
 	opentile "github.com/wsilabs/opentile-go"
 )
 
-var infoJSON *bool
+var (
+	infoJSON       *bool
+	infoProperties bool
+)
 
 var infoCmd = &cobra.Command{
 	Use:   "info <file>",
 	Short: "Print slide summary (format, levels, metadata, associated images)",
 	Long: `Print a summary of a whole-slide image: file size, format,
-scanner metadata (make/model/software/writer/datetime/MPP/magnification),
+scanner metadata (make/model/serial/software/writer/datetime/MPP/
+magnification/ICC-profile presence),
 pyramid levels (dimensions + tile size + compression per level), and
 associated images (label/macro/thumbnail/overview).
 
-Use --json to emit machine-readable JSON instead of human-readable text.`,
+Use --json to emit machine-readable JSON instead of human-readable text.
+Use --properties to list the reader's full vendor/provenance property bag
+(aperio.*, wsi-tools.*, …) in text mode; --json always includes it.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runInfo,
 }
 
 func init() {
 	infoJSON = cliout.RegisterJSONFlag(infoCmd)
+	infoCmd.Flags().BoolVar(&infoProperties, "properties", false,
+		"list all vendor/provenance properties in text output (--json always includes them)")
 	rootCmd.AddCommand(infoCmd)
 }
 
@@ -54,15 +63,18 @@ type infoAssoc struct {
 }
 
 type infoMetadata struct {
-	Make          string  `json:"make"`
-	Model         string  `json:"model"`
-	Software      string  `json:"software"`
-	Writer        string  `json:"writer,omitempty"`
-	DateTime      string  `json:"datetime"`
-	MPP           float64 `json:"mpp"`
-	MPPX          float64 `json:"mpp_x"`
-	MPPY          float64 `json:"mpp_y"`
-	Magnification float64 `json:"magnification"`
+	Make            string            `json:"make"`
+	Model           string            `json:"model"`
+	SerialNumber    string            `json:"serial_number,omitempty"`
+	Software        string            `json:"software"`
+	Writer          string            `json:"writer,omitempty"`
+	DateTime        string            `json:"datetime"`
+	MPP             float64           `json:"mpp"`
+	MPPX            float64           `json:"mpp_x"`
+	MPPY            float64           `json:"mpp_y"`
+	Magnification   float64           `json:"magnification"`
+	ICCProfileBytes int               `json:"icc_profile_bytes,omitempty"`
+	Properties      map[string]string `json:"properties,omitempty"`
 }
 
 type infoResult struct {
@@ -95,14 +107,17 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		SizeBytes: stat.Size(),
 		Format:    src.Format(),
 		Metadata: infoMetadata{
-			Make:          md.Make,
-			Model:         md.Model,
-			Software:      md.Software,
-			Writer:        md.Writer,
-			MPP:           md.MPP,
-			MPPX:          md.MPPX,
-			MPPY:          md.MPPY,
-			Magnification: md.Magnification,
+			Make:            md.Make,
+			Model:           md.Model,
+			SerialNumber:    md.SerialNumber,
+			Software:        md.Software,
+			Writer:          md.Writer,
+			MPP:             md.MPP,
+			MPPX:            md.MPPX,
+			MPPY:            md.MPPY,
+			Magnification:   md.Magnification,
+			ICCProfileBytes: len(md.ICCProfile),
+			Properties:      md.Properties,
 		},
 	}
 	if !md.AcquisitionDateTime.IsZero() {
@@ -142,6 +157,9 @@ func renderInfoText(w io.Writer, r *infoResult) error {
 	if r.Metadata.Model != "" {
 		fmt.Fprintf(w, "Model:   %s\n", r.Metadata.Model)
 	}
+	if r.Metadata.SerialNumber != "" {
+		fmt.Fprintf(w, "Serial:  %s\n", r.Metadata.SerialNumber)
+	}
 	if r.Metadata.Software != "" {
 		fmt.Fprintf(w, "Software: %s\n", r.Metadata.Software)
 	}
@@ -163,6 +181,26 @@ func renderInfoText(w io.Writer, r *infoResult) error {
 	}
 	if r.Metadata.Magnification > 0 {
 		fmt.Fprintf(w, "Magnification: %gx\n", r.Metadata.Magnification)
+	}
+	if r.Metadata.ICCProfileBytes > 0 {
+		fmt.Fprintf(w, "ICC:     present (%s)\n", formatBytes(int64(r.Metadata.ICCProfileBytes)))
+	}
+	// Properties: a count by default (keeps the summary compact), the full sorted
+	// list under --properties. --json always carries the map.
+	if n := len(r.Metadata.Properties); n > 0 {
+		if infoProperties {
+			fmt.Fprintf(w, "Properties (%d):\n", n)
+			keys := make([]string, 0, n)
+			for k := range r.Metadata.Properties {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				fmt.Fprintf(w, "  %s = %s\n", k, r.Metadata.Properties[k])
+			}
+		} else {
+			fmt.Fprintf(w, "Properties: %d (use --properties to list)\n", n)
+		}
 	}
 
 	if len(r.Levels) > 0 {
