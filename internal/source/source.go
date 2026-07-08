@@ -146,13 +146,23 @@ func (c Compression) String() string {
 // Metadata is the cross-format scanner / acquisition info.
 type Metadata struct {
 	Make, Model, Software, SerialNumber string
-	Magnification                       float64
-	MPP                                 float64 // symmetric µm/px (0 if unknown OR asymmetric)
-	MPPX                                float64 // µm/px, X axis; 0 if unknown
-	MPPY                                float64 // µm/px, Y axis; 0 if unknown
-	ICCProfile                          []byte  // embedded color profile; nil if none
-	AcquisitionDateTime                 time.Time
-	Raw                                 map[string]string
+	// Writer identifies the software that WROTE this file, as distinct from
+	// Software (the scanner/acquisition software). For wsitools-produced files
+	// this is "wsitools/<version>"; opentile derives it per format (OME Creator,
+	// the generic-TIFF wsi-tools provenance block, the cog-wsi version tag, …).
+	Writer              string
+	Magnification       float64
+	MPP                 float64 // symmetric µm/px (0 if unknown OR asymmetric)
+	MPPX                float64 // µm/px, X axis; 0 if unknown
+	MPPY                float64 // µm/px, Y axis; 0 if unknown
+	ICCProfile          []byte  // embedded color profile; nil if none
+	AcquisitionDateTime time.Time
+	Raw                 map[string]string
+	// Properties is the reader's full vendor/provenance key→value bag (opentile's
+	// Metadata.Properties): aperio.*, tiff.*, wsi-tools.*, cog-wsi.* and friends.
+	// Distinct from Raw (a small, writer-consumed bag). nil if the reader exposes
+	// none. Read-only — do not mutate.
+	Properties map[string]string
 }
 
 // AmbiguousSeriesError is returned by Open when a directory input resolves to
