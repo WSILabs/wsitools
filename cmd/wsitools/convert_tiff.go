@@ -82,12 +82,20 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		}
 	}
 
-	// Validate all levels have a representable TIFF compression tag.
+	// Validate every level's compression is tile-copyable into the target
+	// container, honoring the capability table for non-standard codecs
+	// (htj2k/avif/webp/jpegxl now copy verbatim where the container supports them,
+	// instead of a blanket "no standard TIFF Compression tag" rejection). (#33)
+	var copyWarn string
 	for _, lvl := range src.Levels() {
-		if compressionTagFor(lvl.Compression()) == 0 {
-			return fmt.Errorf("level %d: source compression %s has no standard TIFF Compression tag; cannot tile-copy",
-				lvl.Index(), lvl.Compression())
+		warn, err := checkTileCopyCodec(target, lvl.Compression(), cvAllowNonconformant)
+		if err != nil {
+			return fmt.Errorf("level %d: %w", lvl.Index(), err)
 		}
+		copyWarn = warn
+	}
+	if copyWarn != "" {
+		fmt.Fprintln(os.Stderr, "warning:", copyWarn)
 	}
 
 	// Resolve the container name: --to svs|tiff|ome-tiff is the user's
