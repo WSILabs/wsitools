@@ -4,6 +4,20 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.3] - 2026-07-09
+
+### Fixed
+
+- **AVIF encoding now works on the release binaries** (wsitools#34). vcpkg's
+  `libavif` port has no default features, so the bare dependency built libavif
+  with *no* AV1 codec — every AVIF encode failed with `NO_CODEC_AVAILABLE` on all
+  shipped binaries (silently, until the v0.26.2 `doctor` probe exposed it and
+  correctly failed the release). `vcpkg.json` now pins
+  `libavif[aom]` (the only AV1 encoder the port exposes at our baseline; provides
+  encode *and* decode), and the release workflow installs `nasm` on macOS for
+  aom's x86_64 cross-build. Verified `✓ avif` (real encode) across all five
+  targets, including Windows.
+
 ### Changed
 
 - **Bump opentile-go to v0.60.2** — fixes JPEG-XL decode (opentile-go#107; the
