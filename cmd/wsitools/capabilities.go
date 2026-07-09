@@ -19,9 +19,14 @@ type containerCaps struct {
 func containerCapabilities(container string) containerCaps {
 	switch container {
 	case "tiff":
+		// Generic TIFF has no codec authority (unlike SVS/OME/DICOM): any codec
+		// carried by a TIFF Compression tag is structurally valid, and wsitools
+		// already writes non-libtiff private tags freely (e.g. jpeg2000=33003, the
+		// Aperio convention). Every codec wsitools can write also round-trips
+		// through our own reader (jpegxl decode fixed in opentile-go v0.60.2 /
+		// #107), so none are gated. (wsitools#24)
 		return containerCaps{
-			conformant:    []string{"jpeg", "jpeg2000", "htj2k", "avif", "webp"},
-			nonconformant: []string{"jpegxl"},
+			conformant: []string{"jpeg", "jpeg2000", "htj2k", "avif", "webp", "jpegxl"},
 		}
 	case "svs":
 		return containerCaps{
@@ -34,12 +39,11 @@ func containerCapabilities(container string) containerCaps {
 			nonconformant: []string{"htj2k", "avif", "webp", "jpegxl"},
 		}
 	case "cog-wsi":
+		// opentile-go v0.60.2 (#107) decodes JPEG-XL-in-TIFF, so jpegxl now
+		// round-trips through our reader and is conformant — it was gated only on
+		// that decoder bug (wsitools#24), not on any container limitation.
 		return containerCaps{
-			conformant: []string{"jpeg", "jpeg2000", "htj2k", "avif", "webp"},
-			// jpegxl bytes are valid (raw JXL codestream) but opentile-go v0.60.1
-			// cannot decode them yet — see wsitools#24. Keep it writable behind
-			// --allow-nonconformant, not silently emit "valid" undecodable output.
-			nonconformant: []string{"jpegxl"},
+			conformant: []string{"jpeg", "jpeg2000", "htj2k", "avif", "webp", "jpegxl"},
 		}
 	case "dicom":
 		return containerCaps{

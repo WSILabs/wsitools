@@ -4,6 +4,20 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump opentile-go to v0.60.2** — fixes JPEG-XL decode (opentile-go#107; the
+  decoder subscribed to invalid libjxl events, so every JXL-in-TIFF read failed
+  with "corrupt input data").
+- **`jpegxl` is now conformant for `tiff` and `cog-wsi`** (wsitools#24). It was
+  gated behind `--allow-nonconformant` *only* because opentile couldn't decode
+  JXL-in-TIFF — a reader bug, not a container limitation. With the v0.60.2 fix it
+  round-trips, so `convert --to tiff|cog-wsi --codec jpegxl` no longer needs the
+  flag. Generic TIFF now has **no nonconformant codecs**: every codec wsitools
+  writes (jpeg/jpeg2000/htj2k/avif/webp/jpegxl) reads back through our own reader.
+  (SVS/OME-TIFF still gate the exotic codecs — those containers have real format
+  authorities: OpenSlide/Aperio and Bio-Formats read only jpeg/jpeg2000.)
+
 ## [0.26.2] - 2026-07-08
 
 ### Fixed
