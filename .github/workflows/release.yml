@@ -149,6 +149,13 @@ jobs:
         if: matrix.goos == 'linux'
         run: sudo apt-get update && sudo apt-get install -y autoconf-archive nasm
 
+      - name: Install vcpkg build prerequisites (macOS)
+        if: matrix.goos == 'darwin'
+        # aom's x86_64 assembly needs nasm; vcpkg can't auto-acquire it on macOS,
+        # so the darwin/amd64 cross-build fails without it. (arm64 aom doesn't use
+        # nasm, but installing it there is harmless.)
+        run: brew install nasm
+
       - name: Set up MSYS2 mingw toolchain (Windows)
         id: msys2
         if: matrix.goos == 'windows'

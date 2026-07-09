@@ -20,6 +20,17 @@ target. The codec C libraries are built statically by **vcpkg** (`vcpkg.json` +
 `.github/vcpkg-triplets/`); the shared recipe lives in
 `.github/actions/build-static`.
 
+**AVIF needs an explicit AV1 encoder.** vcpkg's `libavif` port has no default
+features, so a bare `"libavif"` dependency builds libavif with *no* AV1 codec —
+`avifEncoderWrite` then returns `NO_CODEC_AVAILABLE` and every AVIF encode fails
+(this was the Windows AVIF bug, wsitools#34). `vcpkg.json` therefore pins
+`{"name":"libavif","default-features":false,"features":["aom"]}`. `aom` is the
+only AV1 encoder the port exposes at our baseline (`e287d598…` → libavif 1.4.2;
+no `svt-av1`/`rav1e` feature there — those would need a baseline bump). `aom`
+provides both encode and decode, so it fixes AVIF encode *and* decode. It is a
+heavy dependency (build time + binary size on every target); confirm a
+`doctor` `✓ avif` on the built binaries after any libavif/baseline change.
+
 ## One-time setup — macOS signing secrets
 
 Add these GitHub repo secrets for signed + notarized macOS binaries. Without
