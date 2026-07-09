@@ -68,12 +68,18 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 	reencode := overlapping || cvCodec != "" || tileSizeDiffers
 
 	if !reencode {
-		// Verbatim tile-copy requires a representable TIFF Compression tag.
+		// Verbatim tile-copy: honor the capability table for non-standard codecs
+		// (htj2k/avif/webp are conformant for cog-wsi and now copy verbatim). (#33)
+		var copyWarn string
 		for _, lvl := range src.Levels() {
-			if compressionTagFor(lvl.Compression()) == 0 {
-				return fmt.Errorf("level %d: source compression %s has no standard TIFF Compression tag; cannot tile-copy",
-					lvl.Index(), lvl.Compression())
+			warn, err := checkTileCopyCodec("cog-wsi", lvl.Compression(), cvAllowNonconformant)
+			if err != nil {
+				return fmt.Errorf("level %d: %w", lvl.Index(), err)
 			}
+			copyWarn = warn
+		}
+		if copyWarn != "" {
+			fmt.Fprintln(os.Stderr, "warning:", copyWarn)
 		}
 	}
 

@@ -277,8 +277,48 @@ func compressionTagFor(c source.Compression) uint16 {
 		return 8
 	case source.CompressionNone:
 		return 1
+	case source.CompressionWebP:
+		return 50001 // tiff.CompressionWebP (Adobe-allocated)
+	case source.CompressionJPEGXL:
+		return 50002 // tiff.CompressionJPEGXL (Adobe draft)
+	case source.CompressionAVIF:
+		return 60001 // tiff.CompressionAVIF (wsitools private)
+	case source.CompressionHTJ2K:
+		return 60003 // tiff.CompressionHTJ2K (wsitools private)
 	}
-	// Other codecs (AVIF, WebP, JPEGXL, HTJ2K, Iris): no standardized TIFF tag.
-	// Return 0; preflight (Task 10) will surface this as a clean error.
+	// Iris-proprietary / unknown: no TIFF representation.
 	return 0
+}
+
+// checkTileCopyCodec decides whether a verbatim tile-copy of a source whose tiles
+// use compression c can be written into `container`, mirroring validateCodec (the
+// re-encode gate) for tile-copy. Standard TIFF compressions (jpeg / jpeg2000 /
+// lzw / deflate / uncompressed) are always copyable. The non-standard codecs
+// (htj2k / avif / webp / jpegxl) are gated by the capability table: conformant →
+// allowed; nonconformant → allowed only with --allow-nonconformant (returns a
+// warning); otherwise a clear error pointing at --codec / --allow-nonconformant.
+// A compression with no TIFF tag at all (Iris) is rejected with a re-encode hint.
+func checkTileCopyCodec(container string, c source.Compression, allowNonconformant bool) (string, error) {
+	if compressionTagFor(c) == 0 {
+		return "", fmt.Errorf("source compression %s has no TIFF representation; re-encode with --codec (e.g. --codec jpeg)", c)
+	}
+	// Standard TIFF compressions aren't enumerated in the (encode-oriented)
+	// capability lists but are always tile-copyable into any TIFF-family container.
+	switch c {
+	case source.CompressionJPEG, source.CompressionJPEG2000,
+		source.CompressionLZW, source.CompressionDeflate, source.CompressionNone:
+		return "", nil
+	}
+	name := c.String()
+	caps := containerCapabilities(container)
+	if codecInSet(caps.conformant, name) {
+		return "", nil
+	}
+	if codecInSet(caps.nonconformant, name) {
+		if allowNonconformant {
+			return fmt.Sprintf("tile-copying %s into %s is non-conformant: the bytes are valid but this tool's reader cannot open them as %s", name, container, container), nil
+		}
+		return "", fmt.Errorf("tile-copying a %s source into %s is non-conformant (not readable as %s); pass --allow-nonconformant to write it anyway, or --codec jpeg to re-encode", name, container, container)
+	}
+	return "", fmt.Errorf("tile-copying %s into %s is not supported; re-encode with --codec", name, container)
 }
