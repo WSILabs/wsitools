@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	opentile "github.com/wsilabs/opentile-go"
@@ -227,14 +228,33 @@ func cropToTIFF(p cropEmitParams) error {
 func cropToSVS(p cropEmitParams) error {
 	rawDesc, _ := source.ReadSourceImageDescription(p.input)
 	desc, derr := ParseImageDescription(rawDesc)
-	if derr != nil {
-		return fmt.Errorf("parse source ImageDescription: %w", derr)
-	}
+	svsSource := p.src.Format() == opentile.FormatSVS && derr == nil
 	baseW, baseH := p.src.Levels()[0].Size.W, p.src.Levels()[0].Size.H
-	cropDesc := BuildCropImageDescription(rawDesc, baseW, baseH, p.ex, p.ey, p.l0W, p.l0H, p.outTile, p.outTile, p.quality, p.codecName)
-	cropDesc = scaleAperioResolutionTokens(cropDesc, p.factor)
-	outMPP := desc.MPP * float64(p.factor)
-	outMag := desc.AppMag / float64(p.factor)
+
+	var cropDesc string
+	var outMPP, outMag float64
+	if svsSource {
+		// SVS source: mutate its real Aperio document so every scanner property
+		// round-trips, then scale the resolution tokens for the crop/factor.
+		cropDesc = BuildCropImageDescription(rawDesc, baseW, baseH, p.ex, p.ey, p.l0W, p.l0H, p.outTile, p.outTile, p.quality, p.codecName)
+		cropDesc = scaleAperioResolutionTokens(cropDesc, p.factor)
+		outMPP = desc.MPP * float64(p.factor)
+		outMag = desc.AppMag / float64(p.factor)
+	} else {
+		// Non-SVS source (BIF/IFE/…) has no Aperio document to mutate, so
+		// synthesize one sized to the crop output — the same fallback that
+		// convert --to svs / --factor use for non-SVS sources. This is what lets
+		// a readable-but-writerless source be cropped into SVS (wsitools#32).
+		md := p.src.Metadata()
+		outMPP = md.MPP.X * float64(p.factor)
+		outMag = md.Magnification / float64(p.factor)
+		srcSoft := strings.TrimSpace(md.ScannerManufacturer + " " + md.ScannerModel)
+		cropDesc = SyntheticAperioDescription(
+			uint32(p.l0W), uint32(p.l0H),
+			uint32(p.outTile), uint32(p.outTile),
+			p.quality, outMPP, outMag, srcSoft, p.codecName,
+		).Encode()
+	}
 
 	// SVS bigtiff auto-detects from the crop extent (l0W×l0H), not the
 	// downsampled output dims, matching the old cropEmitSVS behaviour.
