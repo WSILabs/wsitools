@@ -4,6 +4,41 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-07-08
+
+### Fixed
+
+- **`crop` / `convert --rect` accept readable writerless sources (BIF/IFE) with
+  an explicit `--to`** (wsitools#32). The gate keyed off "does the *source*
+  format have a matching writer" rather than "is the source *readable*", so
+  `convert --to svs --rect … x.bif` failed with `unsupported source format bif`
+  before any I/O — even though a crop only reads the source and the writer comes
+  from `--to`. The source→writer map is now used only to derive a default target
+  when `--to` is omitted; with an explicit `--to`, cropping proceeds on
+  readability. `cropToSVS` also now synthesizes an Aperio ImageDescription for
+  non-SVS sources (it previously hard-failed on "not an Aperio ImageDescription"),
+  matching `convert --to svs` / `--factor`.
+- **Verbatim tile-copy honors the codec×container capability table for the
+  non-standard codecs** (wsitools#33). Tile-copying an htj2k (or avif/webp/jpegxl)
+  source into the TIFF family hard-failed with "source compression X has no
+  standard TIFF Compression tag; cannot tile-copy", even though those codecs have
+  private TIFF tags used by the re-encode path and the capability table marks
+  htj2k/avif/webp conformant for tiff + cog-wsi. Tile-copy now copies them
+  verbatim where conformant, requires `--allow-nonconformant` (with a warning)
+  where nonconformant, and gives a clear re-encode hint for a truly
+  unrepresentable codec (Iris) — mirroring the re-encode gate.
+
+### Changed
+
+- **`doctor` verifies each codec can actually *encode*** (wsitools#34). It
+  previously printed `✓ <codec>` by library presence alone, so it advertised
+  `avif` even on a build whose libavif has no AV1 encoder backend (the Windows/
+  MinGW packaging gap). It now encodes a throwaway tile through each registered
+  codec and reports `✗ <codec>  library present, encoder unavailable: <reason>`
+  when the library linked but cannot encode. The AVIF encoder also surfaces the
+  real reason (via `avifResultToString`, e.g. "No codec available") instead of a
+  bare `-1`, both in the encode error and in doctor's reason line.
+
 ## [0.26.1] - 2026-07-07
 
 ### Fixed
