@@ -39,7 +39,7 @@ static int wsi_avif_encode(
     r = avifImageRGBToYUV(image, &rgb_img);
     if (r != AVIF_RESULT_OK) {
         avifImageDestroy(image);
-        return -1;
+        return (int)r; // positive avifResult → Go maps via avifResultToString
     }
 
     avifEncoder *encoder = avifEncoderCreate();
@@ -58,7 +58,10 @@ static int wsi_avif_encode(
 
     if (r != AVIF_RESULT_OK) {
         avifRWDataFree(&output);
-        return -1;
+        // avifEncoderWrite returns AVIF_RESULT_NO_CODEC_AVAILABLE when libavif was
+        // built without an AV1 encoder (aom/svt-av1/rav1e) — the common Windows
+        // packaging gap. Return the code so Go can name it.
+        return (int)r;
     }
 
     *outbuf = (unsigned char *)malloc(output.size);
@@ -133,7 +136,13 @@ func (e *Encoder) EncodeTile(rgb []byte, w, h int, dst []byte) ([]byte, error) {
 	runtime.KeepAlive(rgb)
 
 	if rc != 0 {
-		return nil, fmt.Errorf("codec/avif: wsi_avif_encode returned %d", rc)
+		if rc > 0 {
+			// Positive rc is an avifResult (e.g. AVIF_RESULT_NO_CODEC_AVAILABLE when
+			// this libavif has no AV1 encoder). Surface the human-readable reason.
+			msg := C.GoString(C.avifResultToString(C.avifResult(rc)))
+			return nil, fmt.Errorf("codec/avif: encode failed: %s", msg)
+		}
+		return nil, fmt.Errorf("codec/avif: internal error before encode (rc %d)", rc)
 	}
 	if outBuf == nil {
 		return nil, fmt.Errorf("codec/avif: nil output buffer")
