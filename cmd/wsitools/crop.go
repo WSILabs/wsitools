@@ -164,11 +164,19 @@ func runCrop(ctx context.Context, input, output string, x, y, w, h, quality, wor
 	}
 	defer src.Close()
 
-	srcTarget, ok := downsampleTargetForFormat(string(src.Format()))
-	if !ok {
-		return fmt.Errorf("crop: unsupported source format %q (supported: svs, ome-tiff, tiff, cog-wsi, dicom)", src.Format())
-	}
+	// Crop/downsample-with-rect decode → re-encode → write, so the SOURCE only
+	// needs to be readable; the writer comes from --to. The source-format→writer
+	// map is therefore only needed to DERIVE a default target when --to is omitted
+	// (format-preserving crop). With an explicit --to, proceed on readability alone
+	// — this admits readable-but-writerless sources (BIF, IFE) into a supported
+	// container. An unsupported explicit target is still rejected by the dispatch
+	// switch below. (wsitools#32)
 	if target == "" {
+		srcTarget, ok := downsampleTargetForFormat(string(src.Format()))
+		if !ok {
+			return fmt.Errorf("crop: cannot infer an output format for source %q; "+
+				"pass --to {svs|ome-tiff|tiff|cog-wsi|dicom}", src.Format())
+		}
 		target = srcTarget
 	}
 
