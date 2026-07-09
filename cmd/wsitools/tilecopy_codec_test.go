@@ -30,8 +30,9 @@ func TestCheckTileCopyCodec(t *testing.T) {
 		{"avif->tiff conformant", "tiff", source.CompressionAVIF, false, false, false, ""},
 		{"htj2k->ome-tiff nonconformant no flag", "ome-tiff", source.CompressionHTJ2K, false, true, false, "allow-nonconformant"},
 		{"htj2k->ome-tiff nonconformant with flag", "ome-tiff", source.CompressionHTJ2K, true, false, true, ""},
-		{"jpegxl->tiff nonconformant no flag", "tiff", source.CompressionJPEGXL, false, true, false, "allow-nonconformant"},
-		{"jpegxl->cog-wsi nonconformant with flag", "cog-wsi", source.CompressionJPEGXL, true, false, true, ""},
+		{"jpegxl->tiff conformant (opentile v0.60.2)", "tiff", source.CompressionJPEGXL, false, false, false, ""},
+		{"jpegxl->cog-wsi conformant (opentile v0.60.2)", "cog-wsi", source.CompressionJPEGXL, false, false, false, ""},
+		{"jpegxl->ome-tiff nonconformant no flag", "ome-tiff", source.CompressionJPEGXL, false, true, false, "allow-nonconformant"},
 		{"iris->tiff unrepresentable", "tiff", source.CompressionIrisProprietary, false, true, false, "re-encode"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
