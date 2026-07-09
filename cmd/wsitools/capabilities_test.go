@@ -15,15 +15,16 @@ func TestValidateCodec(t *testing.T) {
 		{"cog-wsi", "avif", false, false, false},
 		{"dzi", "png", false, false, false},
 		{"dicom", "htj2k", false, false, false},
+		// jpegxl round-trips through opentile-go v0.60.2 (#107 fix), so it's
+		// conformant for the permissive TIFF-family containers now (wsitools#24).
+		{"tiff", "jpegxl", false, false, false},
+		{"cog-wsi", "jpegxl", false, false, false},
 		// nonconformant → error by default, warn under --allow
 		{"ome-tiff", "avif", false, true, false},
 		{"ome-tiff", "avif", true, false, true},
-		{"tiff", "jpegxl", false, true, false},
-		{"tiff", "jpegxl", true, false, true},
-		// cog-wsi jpegxl: valid bytes but opentile can't decode them yet
-		// (wsitools#24) → nonconformant, not conformant.
-		{"cog-wsi", "jpegxl", false, true, false},
-		{"cog-wsi", "jpegxl", true, false, true},
+		// SVS/OME still gate jpegxl (Aperio/OpenSlide + OME readers don't read it).
+		{"ome-tiff", "jpegxl", false, true, false},
+		{"svs", "jpegxl", false, true, false},
 		{"svs", "avif", false, true, false},
 		{"svs", "avif", true, false, true},
 		// unsupported → hard error regardless of --allow
