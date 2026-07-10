@@ -75,6 +75,29 @@ func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) 
 
 // writeCOGWSIAssociated writes src's associated images into w per plan. It does
 // NOT Abort/Close w — the caller owns the writer lifecycle. Split out of
+// addCOGWSIAssociatedOrSkip adds a faithfully-copied SOURCE associated image to
+// the cog-wsi writer, treating cog-wsi's unsupported-type rejection
+// (ErrInvalidAssocType — cog-wsi accepts only label|macro|thumbnail|overview, so
+// a source's probability/map image is not representable) as a NON-FATAL
+// skip-with-warning rather than aborting the whole conversion. Returns nil on
+// success or skip; a non-nil error only for genuinely fatal failures.
+//
+// Every faithful-copy loop over source associateds (plain convert, --factor/
+// downsample, crop) MUST route through this so they degrade uniformly — the
+// transform paths previously aborted where plain convert skipped (wsitools#36).
+// It is deliberately NOT used for adding a known-valid type (a --replace target
+// or a regenerated thumbnail): there, a rejection is a real error to surface.
+func addCOGWSIAssociatedOrSkip(w *cogwsiwriter.Writer, spec cogwsiwriter.AssociatedSpec, typ string) error {
+	if err := w.AddAssociated(spec); err != nil {
+		if errors.Is(err, cogwsiwriter.ErrInvalidAssocType) {
+			slog.Warn("skipping associated image with unsupported type", "type", typ, "reason", err)
+			return nil
+		}
+		return fmt.Errorf("add associated %s: %w", typ, err)
+	}
+	return nil
+}
+
 // writeCOGWSI so the retile-engine path (which builds the pyramid itself) can
 // reuse the verbatim associated-image copy.
 func writeCOGWSIAssociated(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) error {
@@ -102,12 +125,8 @@ func writeCOGWSIAssociated(w *cogwsiwriter.Writer, src source.Source, plan assoc
 			}
 			return err
 		}
-		if err := w.AddAssociated(spec); err != nil {
-			if errors.Is(err, cogwsiwriter.ErrInvalidAssocType) {
-				slog.Warn("skipping associated image with unsupported type", "type", a.Type(), "reason", err)
-				continue
-			}
-			return fmt.Errorf("add associated %s: %w", a.Type(), err)
+		if err := addCOGWSIAssociatedOrSkip(w, spec, a.Type()); err != nil {
+			return err
 		}
 	}
 	// Upsert: replace of an absent type appends the new image.
