@@ -4,6 +4,21 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.4] - 2026-07-09
+
+### Fixed
+
+- **`convert --factor` / `crop` into `cog-wsi` no longer aborts on a source
+  associated type cog-wsi can't hold** (wsitools#36). A Ventana BIF carries a
+  `probability` associated image; cog-wsi accepts only label/macro/thumbnail/
+  overview. The plain convert path already skipped it with a warning, but the
+  `--factor`/downsample and crop paths returned the writer's `ErrInvalidAssocType`
+  verbatim and aborted the whole conversion. All three faithful-copy paths now
+  route through a shared `addCOGWSIAssociatedOrSkip` helper, so an unsupported-
+  but-optional source associated degrades to a skip-with-warning uniformly. (A
+  known-valid type — a `--replace` target or a regenerated thumbnail — still
+  surfaces a rejection as a real error.)
+
 ## [0.26.3] - 2026-07-09
 
 ### Fixed
