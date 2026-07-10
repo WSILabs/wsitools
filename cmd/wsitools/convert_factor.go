@@ -706,9 +706,9 @@ func downsampleToCOGWSI(
 				aborted = true
 				return err
 			}
-			if err := w.AddAssociated(spec); err != nil {
+			if err := addCOGWSIAssociatedOrSkip(w, spec, string(a.Type())); err != nil {
 				aborted = true
-				return fmt.Errorf("add associated %s: %w", a.Type(), err)
+				return err
 			}
 		}
 	}
