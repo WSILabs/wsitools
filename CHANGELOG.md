@@ -4,6 +4,36 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.7] - 2026-07-11
+
+### Fixed
+
+- **`convert --to cog-wsi --tile-order hilbert|morton` no longer produces corrupt
+  output** (wsitools#41). The finalize placed each tile at its emission-order file
+  offset but the layout planner *sized* that slot in raster order, so a reordered
+  tile overran a slot sized for a different tile ("two SOI markers" on decode).
+  row-major was unaffected (emission == raster). The planner now packs tile data
+  in emission order (each slot sized for the tile written there) and returns
+  raster-indexed offsets for the IFD — which also makes a reorder strategy's
+  on-disk spatial locality real (tiles physically relocate). row-major output is
+  byte-identical; hilbert/morton now decode to the same pixels. Adds an
+  end-to-end per-order round-trip test (the old tileorder tests only covered the
+  index math).
+- **Physical-RAM detection on Windows** (wsitools#39). Windows had no
+  `PhysicalRAM` probe, so the `memlimit` 75%-of-RAM soft cap was silently
+  inoperative (`doctor` showed `Physical RAM: unknown`) and memory-heavy commands
+  ran with no OOM-avoidance limit. Added a `GlobalMemoryStatusEx` probe (direct
+  kernel32 call — `x/sys/windows` doesn't wrap it), so the default cap engages on
+  Windows like Linux/macOS.
+
+### Changed
+
+- **Faster `convert --to cog-wsi` finalize read-back** (wsitools#37). For the
+  default row-major order the spool read-back now streams through a buffered
+  sequential reader instead of a per-tile `ReadAt` syscall. Byte-identical output;
+  small win on macOS, larger on Windows (per-tile syscalls are costlier there).
+  (Follows the O(1)-offset + buffered-append work in 0.26.6.)
+
 ## [0.26.6] - 2026-07-11
 
 ### Changed
