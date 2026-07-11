@@ -365,11 +365,22 @@ func (w *Writer) Close() error {
 	}
 
 	// Stream level spools in reverse order (smallest first), in strategy order.
+	// Row-major emission reads spool entries in append order (rasterIdx==emitIdx),
+	// so the read-back can stream through a buffered sequential reader instead of a
+	// per-tile ReadAt syscall (wsitools#37). Reordering strategies (hilbert/morton)
+	// read out of order and stay on the random-access ReadEntryAt path.
+	seqRead := w.order.Name() == "row-major"
 	for i := len(w.levels) - 1; i >= 0; i-- {
 		lv := w.levels[i]
 		tilesX := lv.gridX
 		tilesY := lv.gridY
 		total := tilesX * tilesY
+		if seqRead {
+			if err := lv.spool.BeginSeqRead(); err != nil {
+				w.abortInternal()
+				return fmt.Errorf("L%d spool read-back: %w", i, err)
+			}
+		}
 		for emitIdx := uint32(0); emitIdx < total; emitIdx++ {
 			x, y := w.order.IndexToXY(emitIdx, tilesX, tilesY)
 			rasterIdx := y*tilesX + x
@@ -378,7 +389,15 @@ func (w *Writer) Close() error {
 			// (x,y) at emission position emitIdx, it occupies that slot.
 			// The IFD records this offset at TileOffsets[rasterIdx] (set above).
 			off := int64(plan.Levels[i].TileOffsets[emitIdx])
-			buf, err := lv.spool.ReadEntryAt(int(rasterIdx))
+			var (
+				buf []byte
+				err error
+			)
+			if seqRead {
+				buf, err = lv.spool.NextEntry() // sequential: seqIdx == rasterIdx == emitIdx
+			} else {
+				buf, err = lv.spool.ReadEntryAt(int(rasterIdx))
+			}
 			if err != nil {
 				w.abortInternal()
 				return fmt.Errorf("read L%d tile (%d,%d): %w", i, x, y, err)
