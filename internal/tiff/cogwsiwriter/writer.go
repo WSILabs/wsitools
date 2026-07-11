@@ -243,6 +243,7 @@ func (w *Writer) Close() error {
 		in.Levels = append(in.Levels, levelLayoutInput{
 			TileBytes:      bytesLen,
 			TileCount:      uint32(len(entries)),
+			GridX:          lv.gridX,
 			TileGeometry:   tileGeom{TileW: lv.spec.TileWidth, TileH: lv.spec.TileHeight, ImgW: lv.spec.ImageWidth, ImgH: lv.spec.ImageHeight},
 			Compression:    lv.spec.Compression,
 			JPEGTables:     lv.spec.JPEGTables,
@@ -266,7 +267,7 @@ func (w *Writer) Close() error {
 		})
 	}
 
-	plan, err := planLayout(in)
+	plan, err := planLayout(w.order, in)
 	if err != nil {
 		w.abortInternal()
 		return err
@@ -274,24 +275,9 @@ func (w *Writer) Close() error {
 
 	totalLevels := len(w.levels)
 
-	// Remap plan TileOffsets from raster-emission order to strategy order.
-	// planLayout assigns TileOffsets[emitIdx] in sequential (raster) order.
-	// When the strategy reorders emission, tile (x,y) is emitted at
-	// emitIdx = order.Index(x,y,...), so its file offset is
-	// plan.Levels[i].TileOffsets[emitIdx]. The IFD must record this at
-	// raster slot y*tilesX+x. Build per-level remapped offset slices.
-	remappedOffsets := make([][]uint64, len(w.levels))
-	for i, lv := range w.levels {
-		tilesX := lv.gridX
-		tilesY := lv.gridY
-		total := tilesX * tilesY
-		remapped := make([]uint64, total)
-		for emitIdx := uint32(0); emitIdx < total; emitIdx++ {
-			x, y := w.order.IndexToXY(emitIdx, tilesX, tilesY)
-			remapped[y*tilesX+x] = plan.Levels[i].TileOffsets[emitIdx]
-		}
-		remappedOffsets[i] = remapped
-	}
+	// planLayout places tiles in emission order and returns raster-indexed
+	// TileOffsets (offsets[rasterIdx] = where tile (x,y) is stored), so they drop
+	// straight into the IFD — no post-hoc remap. (#41)
 
 	// Build IFD bytes for each level and associated image.
 	type ifdBlob struct {
@@ -303,7 +289,7 @@ func (w *Writer) Close() error {
 
 	for i, lv := range w.levels {
 		b := tiff.NewEntryBuilder(plan.BigTIFF)
-		if err := populateLevelIFD(b, lv.spec, remappedOffsets[i], lv.spool.Entries(), w.opts, i, totalLevels); err != nil {
+		if err := populateLevelIFD(b, lv.spec, plan.Levels[i].TileOffsets, lv.spool.Entries(), w.opts, i, totalLevels); err != nil {
 			w.abortInternal()
 			return fmt.Errorf("populate IFD L%d: %w", i, err)
 		}
@@ -384,11 +370,10 @@ func (w *Writer) Close() error {
 		for emitIdx := uint32(0); emitIdx < total; emitIdx++ {
 			x, y := w.order.IndexToXY(emitIdx, tilesX, tilesY)
 			rasterIdx := y*tilesX + x
-			// TileOffsets[emitIdx] is the pre-planned file offset for the
-			// emitIdx-th tile in raster emission order. Since we emit tile
-			// (x,y) at emission position emitIdx, it occupies that slot.
-			// The IFD records this offset at TileOffsets[rasterIdx] (set above).
-			off := int64(plan.Levels[i].TileOffsets[emitIdx])
+			// planLayout placed tile (x,y) at plan.TileOffsets[rasterIdx] (a slot
+			// sized for THIS tile, positioned in emission order). Write it there;
+			// the IFD records the same offset at raster slot rasterIdx. (#41)
+			off := int64(plan.Levels[i].TileOffsets[rasterIdx])
 			var (
 				buf []byte
 				err error
