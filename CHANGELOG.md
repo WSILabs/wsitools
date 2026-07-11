@@ -4,6 +4,20 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.5] - 2026-07-10
+
+### Fixed
+
+- **Splice-based associated-image edits work on Windows again** (wsitools#38).
+  Every default (`--fsync true`) `label|macro|thumbnail|overview remove` — and
+  splice-model `replace` — failed on Windows with `fsync: Access is denied`. The
+  splice output temp was opened `O_WRONLY`, and Windows `FlushFileBuffers`
+  (`File.Sync`) returns `ERROR_ACCESS_DENIED` on a write-only handle. The temp is
+  now opened `O_RDWR`, matching the streamwriter path whose `Sync` already worked.
+  (It was the only `O_WRONLY` in the tree.) The existing splice tests all ran with
+  `Fsync:false`, which is why Windows CI stayed green through the bug; a new
+  `Fsync:true` test covers the commit path.
+
 ## [0.26.4] - 2026-07-09
 
 ### Fixed
