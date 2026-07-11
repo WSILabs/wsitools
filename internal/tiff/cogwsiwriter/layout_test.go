@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 func TestLayoutClassicTIFFTwoLevels(t *testing.T) {
@@ -11,7 +12,7 @@ func TestLayoutClassicTIFFTwoLevels(t *testing.T) {
 		{TileBytes: []uint32{100, 100, 100, 100}, TileCount: 4, TileGeometry: tileGeom{TileW: 256, TileH: 256, ImgW: 512, ImgH: 512}, JPEGTables: nil},
 		{TileBytes: []uint32{50, 50}, TileCount: 2, TileGeometry: tileGeom{TileW: 256, TileH: 256, ImgW: 256, ImgH: 512}, JPEGTables: nil},
 	}
-	plan, err := planLayout(layoutInput{
+	plan, err := planLayout(tileorder.RowMajor, layoutInput{
 		Levels:      in,
 		Associated:  nil,
 		BigTIFFMode: BigTIFFAuto,
@@ -56,7 +57,7 @@ func TestLayoutPromotesToBigTIFF(t *testing.T) {
 		TileCount:    uint32(len(tiles)),
 		TileGeometry: tileGeom{TileW: 256, TileH: 256, ImgW: 65536, ImgH: 49152},
 	}}
-	plan, err := planLayout(layoutInput{Levels: in, BigTIFFMode: BigTIFFAuto})
+	plan, err := planLayout(tileorder.RowMajor, layoutInput{Levels: in, BigTIFFMode: BigTIFFAuto})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +68,11 @@ func TestLayoutPromotesToBigTIFF(t *testing.T) {
 
 func TestLayoutHonorsBigTIFFOverride(t *testing.T) {
 	in := []levelLayoutInput{{TileBytes: []uint32{10}, TileCount: 1, TileGeometry: tileGeom{TileW: 8, TileH: 8, ImgW: 8, ImgH: 8}}}
-	on, _ := planLayout(layoutInput{Levels: in, BigTIFFMode: BigTIFFOn})
+	on, _ := planLayout(tileorder.RowMajor, layoutInput{Levels: in, BigTIFFMode: BigTIFFOn})
 	if !on.BigTIFF {
 		t.Errorf("BigTIFFOn override ignored")
 	}
-	off, _ := planLayout(layoutInput{Levels: in, BigTIFFMode: BigTIFFOff})
+	off, _ := planLayout(tileorder.RowMajor, layoutInput{Levels: in, BigTIFFMode: BigTIFFOff})
 	if off.BigTIFF {
 		t.Errorf("BigTIFFOff override ignored")
 	}
@@ -101,7 +102,7 @@ func TestLayoutAssociatedImagesPlacedAfterPyramid(t *testing.T) {
 		},
 		BigTIFFMode: BigTIFFAuto,
 	}
-	plan, err := planLayout(in)
+	plan, err := planLayout(tileorder.RowMajor, in)
 	if err != nil {
 		t.Fatalf("planLayout: %v", err)
 	}

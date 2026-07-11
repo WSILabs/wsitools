@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/wsilabs/wsitools/internal/tiff"
+	"github.com/wsilabs/wsitools/internal/tiff/tileorder"
 )
 
 // BigTIFFMode controls classic vs BigTIFF selection.
@@ -25,6 +26,7 @@ type tileGeom struct {
 type levelLayoutInput struct {
 	TileBytes    []uint32 // per-tile compressed length, in source (row-major) order
 	TileCount    uint32   // == len(TileBytes); kept for clarity
+	GridX        uint32   // tiles per row; GridY = TileCount/GridX (for emission-order placement)
 	TileGeometry tileGeom
 	Compression  uint16
 	JPEGTables   []byte // optional, abbreviated-JPEG mode
@@ -96,8 +98,11 @@ const (
 	tileAlign = 16
 )
 
-// planLayout computes the full file layout. It does NOT write any bytes.
-func planLayout(in layoutInput) (layoutPlan, error) {
+// planLayout computes the full file layout. It does NOT write any bytes. order
+// is the tile emission order (row-major/hilbert/morton) — tile data is placed in
+// that order (so a reorder strategy's spatial locality is real), while the
+// returned TileOffsets stay raster-indexed for the IFD.
+func planLayout(order tileorder.OrderStrategy, in layoutInput) (layoutPlan, error) {
 	useBig, err := decideBigTIFF(in)
 	if err != nil {
 		return layoutPlan{}, err
@@ -139,19 +144,41 @@ func planLayout(in layoutInput) (layoutPlan, error) {
 	cursor = alignUp(cursor, tileAlign)
 	plan.HeadBlockEnd = cursor
 
-	// Phase 3: tile data in REVERSE level order (smallest first).
+	// Phase 3: tile data in REVERSE level order (smallest first). Within a level,
+	// tiles are placed in EMISSION order — the k-th emitted tile (raster index
+	// rasterIdx = order-mapped from k) gets the next slot, sized for THAT tile.
+	// This is what makes a reorder strategy's on-disk spatial locality real and,
+	// critically, keeps each slot sized for the tile written into it (#41 — the
+	// old raster-order sizing overran slots for reordered tiles). The offsets
+	// array stays raster-indexed (offsets[rasterIdx]) so it drops straight into
+	// the IFD. Row-major is unchanged (rasterIdx == k).
 	for i := len(in.Levels) - 1; i >= 0; i-- {
 		lv := in.Levels[i]
 		offsets := make([]uint64, len(lv.TileBytes))
-		for j, n := range lv.TileBytes {
+		// GridX==0 (minimal/synthetic inputs): fall back to a single row so the
+		// grid math can't divide by zero; that's raster order, identical to the
+		// pre-#41 packing.
+		gridX := lv.GridX
+		if gridX == 0 {
+			gridX = lv.TileCount
+		}
+		var tilesY uint32
+		if gridX > 0 {
+			tilesY = lv.TileCount / gridX
+		}
+		firstSet := false
+		for k := uint32(0); k < lv.TileCount; k++ {
+			x, y := order.IndexToXY(k, gridX, tilesY)
+			rasterIdx := y*gridX + x
 			cursor = alignUp(cursor, tileAlign)
-			offsets[j] = cursor
-			cursor += uint64(n)
+			if !firstSet {
+				plan.Levels[i].TileDataOffset = cursor // start of this level's tile region
+				firstSet = true
+			}
+			offsets[rasterIdx] = cursor
+			cursor += uint64(lv.TileBytes[rasterIdx])
 		}
 		plan.Levels[i].TileOffsets = offsets
-		if len(offsets) > 0 {
-			plan.Levels[i].TileDataOffset = offsets[0]
-		}
 	}
 
 	// Phase 4: associated-image data after all pyramid data.

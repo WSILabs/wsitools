@@ -22,6 +22,9 @@ type spool struct {
 	entries []spoolEntry
 	size    int64 // running total of appended bytes = next entry's offset
 	flushed bool  // bw drained to f (must precede any read-back)
+
+	sr     *bufio.Reader // buffered sequential read-back (row-major finalize)
+	seqIdx int           // next entry index for NextEntry
 }
 
 func openSpool(path string) (*spool, error) {
@@ -71,6 +74,35 @@ func (s *spool) Rewind() error {
 
 // Read implements io.Reader on the underlying file (post-Rewind).
 func (s *spool) Read(p []byte) (int, error) { return s.f.Read(p) }
+
+// BeginSeqRead rewinds the spool and arms a buffered sequential reader, so
+// entries can be read back in append order via NextEntry with ~fileSize/bufSize
+// read syscalls instead of one ReadAt per entry. Used by the finalize when the
+// tile emission order equals the spool append order (row-major). (wsitools#37)
+func (s *spool) BeginSeqRead() error {
+	if err := s.Rewind(); err != nil { // Rewind syncs the append buffer first
+		return err
+	}
+	if s.sr == nil {
+		s.sr = bufio.NewReaderSize(s.f, 1<<20)
+	} else {
+		s.sr.Reset(s.f)
+	}
+	s.seqIdx = 0
+	return nil
+}
+
+// NextEntry reads the next entry's bytes in append order from the buffered
+// sequential reader armed by BeginSeqRead. Byte-for-byte identical to
+// ReadEntryAt(seqIdx); it just avoids the per-entry ReadAt syscall.
+func (s *spool) NextEntry() ([]byte, error) {
+	buf := make([]byte, s.entries[s.seqIdx].Length)
+	if _, err := io.ReadFull(s.sr, buf); err != nil {
+		return nil, err
+	}
+	s.seqIdx++
+	return buf, nil
+}
 
 // ReadEntryAt reads the compressed bytes for entry idx (0-based, raster order)
 // into a freshly allocated buffer and returns it. idx must be in [0, len(entries)).
