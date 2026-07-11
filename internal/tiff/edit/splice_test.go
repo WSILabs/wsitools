@@ -51,6 +51,39 @@ func TestSpliceRemoveMiddleIFD(t *testing.T) {
 	}
 }
 
+// TestSpliceRemoveWithFsync exercises the Fsync (default-on) commit path, which
+// the other splice tests skip (Fsync:false). Guards wsitools#38: the output temp
+// was opened O_WRONLY, and Windows FlushFileBuffers returns ERROR_ACCESS_DENIED
+// on a write-only handle, so every default splice edit failed on Windows. This
+// passes on all platforms once the temp is opened O_RDWR; on Windows CI it would
+// fail without the fix.
+func TestSpliceRemoveWithFsync(t *testing.T) {
+	data, _ := buildClassicTIFF(t, []string{"Aperio\nimage", "Aperio\nlabel 4x4", "Aperio\nmacro 8x8"})
+	in := writeTemp(t, data)
+	out := filepath.Join(filepath.Dir(in), "out.tiff")
+
+	f, err := Parse(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Splice(SpliceParams{
+		InPath: in, OutPath: out, File: f, Mode: SpliceRemove, TargetIdx: 1, Fsync: true,
+	}); err != nil {
+		t.Fatalf("Splice with Fsync=true: %v", err)
+	}
+	outData, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	of, err := Parse(bytes.NewReader(outData), int64(len(outData)))
+	if err != nil {
+		t.Fatalf("re-parse output: %v", err)
+	}
+	if len(of.IFDs) != 2 {
+		t.Fatalf("output has %d IFDs, want 2", len(of.IFDs))
+	}
+}
+
 func TestSpliceRefusesInterleavedLayout(t *testing.T) {
 	data, _ := buildClassicTIFF(t, []string{"Aperio\nimage", "Aperio\nlabel 4x4", "Aperio\nmacro"})
 	f, err := Parse(bytes.NewReader(data), int64(len(data)))
