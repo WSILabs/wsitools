@@ -4,6 +4,21 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.6] - 2026-07-11
+
+### Changed
+
+- **Faster `convert --to cog-wsi`** (wsitools#37). The spool-and-finalize writer
+  had two avoidable costs on a verbatim tile-copy: `ReadEntryAt` re-summed all
+  preceding entry lengths to locate each tile — O(n²) across the finalize
+  read-back (~660M iterations for CMU-2's ~39k tiles) — and the per-tile spool
+  append was an unbuffered `Write` (one syscall per tile). Entry offsets are now
+  stored at append time (O(1) lookup) and appends go through a 1 MiB buffer.
+  Output is byte-identical. macOS `svs → cog-wsi` on CMU-2: 0.53s → 0.34s; the
+  bigger win is on Windows, where the per-tile write syscalls were far costlier.
+  (The finalize read-back's per-tile `ReadAt`/`WriteAt` — the remaining cost,
+  constrained by the 16-byte tile alignment — is a tracked follow-up.)
+
 ## [0.26.5] - 2026-07-10
 
 ### Fixed
