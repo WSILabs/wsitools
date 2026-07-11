@@ -129,7 +129,11 @@ func doSplice(p SpliceParams) error {
 	defer in.Close()
 
 	outTmp := p.OutPath + fmt.Sprintf(".tmp-%d", os.Getpid())
-	out, err := os.OpenFile(outTmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	// Read-write (not write-only): on Windows, FlushFileBuffers (File.Sync) returns
+	// ERROR_ACCESS_DENIED on a GENERIC_WRITE-only handle, so a write-only temp
+	// breaks the Fsync path (wsitools#38). The streamwriter opens via os.Create
+	// (O_RDWR) and its Sync works — match it.
+	out, err := os.OpenFile(outTmp, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
