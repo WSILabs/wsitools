@@ -242,7 +242,7 @@ func runConvertTIFFTileCopy(_ *cobra.Command, src source.Source, input, target s
 		defer s.Close()
 		slide = s
 	}
-	if err := writeTIFFTileCopy(w, src, container, srcImageDesc, omeSynthetic, omeEditPlan{dropAll: cvNoAssociated}, slide); err != nil {
+	if err := writeTIFFTileCopy(w, src, rawJP2KTileCopyTag(input, src), container, srcImageDesc, omeSynthetic, omeEditPlan{dropAll: cvNoAssociated}, slide); err != nil {
 		w.Abort()
 		return err
 	}
@@ -785,7 +785,38 @@ func jpegTilePhotometric(tile []byte) uint16 {
 	}
 }
 
-func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0Desc string, omeSynthetic bool, plan omeEditPlan, slide *opentile.Slide) error {
+// rawJP2KTileCopyTag returns the source L0's raw TIFF Compression (tag 259) when
+// it is a JPEG 2000 variant — 33003 (Aperio YCbCr), 33005 (Aperio RGB), or 34712
+// (registered) — else 0. A verbatim tile-copy must preserve this exact code so it
+// doesn't relabel the colorspace; compressionTagFor collapses every J2K to 33003,
+// which would mislabel an RGB (33005) source as YCbCr. (#44)
+func rawJP2KTileCopyTag(input string, src source.Source) uint16 {
+	levels := src.Levels()
+	if len(levels) == 0 || levels[0].Compression() != source.CompressionJPEG2000 {
+		return 0
+	}
+	recs, err := source.WalkIFDs(input)
+	if err != nil || len(recs) == 0 {
+		return 0
+	}
+	switch uint16(recs[0].Compression) {
+	case tiff.CompressionJPEG2000, tiff.CompressionJPEG2000RGB, 34712:
+		return uint16(recs[0].Compression)
+	}
+	return 0
+}
+
+// tileCopyLevelCompression is compressionTagFor, but for a JPEG 2000 level it
+// preserves the source's raw J2K tag (srcRawJP2K, 0 if not applicable) so a
+// verbatim copy keeps the exact 33003/33005/34712 colorspace signal. (#44)
+func tileCopyLevelCompression(c source.Compression, srcRawJP2K uint16) uint16 {
+	if c == source.CompressionJPEG2000 && srcRawJP2K != 0 {
+		return srcRawJP2K
+	}
+	return compressionTagFor(c)
+}
+
+func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, srcRawJP2K uint16, container, l0Desc string, omeSynthetic bool, plan omeEditPlan, slide *opentile.Slide) error {
 	levels := src.Levels()
 	// A verbatim-copied JPEG tile must be tagged with the photometric matching
 	// its own framing (JFIF/Adobe-YCbCr → YCbCr(6); bare/Aperio → RGB(2)).
@@ -816,7 +847,7 @@ func writeTIFFTileCopy(w *streamwriter.Writer, src source.Source, container, l0D
 			ImageHeight:     uint32(lvl.Size().Y),
 			TileWidth:       uint32(lvl.TileSize().X),
 			TileHeight:      uint32(lvl.TileSize().Y),
-			Compression:     compressionTagFor(lvl.Compression()),
+			Compression:     tileCopyLevelCompression(lvl.Compression(), srcRawJP2K),
 			Photometric:     photometric,
 			SamplesPerPixel: 3,
 			BitsPerSample:   []uint16{8, 8, 8},
