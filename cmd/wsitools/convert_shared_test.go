@@ -17,6 +17,9 @@ func TestTileCopyEligible(t *testing.T) {
 	}{
 		{"cogwsi jpeg tiled", "cog-wsi", "", source.CompressionJPEG, true, true},
 		{"svs jpeg tiled", "svs", "", source.CompressionJPEG, true, true},
+		// JPEG 2000 is a genuine Aperio SVS codec → tile-copy verbatim, not
+		// re-encode (wsitools svs-jp2k asymmetry).
+		{"svs jp2k tiled", "svs", "", source.CompressionJPEG2000, true, true},
 		{"tiff webp tiled", "tiff", "", source.CompressionWebP, true, true},
 		{"ome-tiff jpeg tiled", "ome-tiff", "", source.CompressionJPEG, true, true},
 		// --codec forces re-encode.
@@ -43,6 +46,12 @@ func TestTargetAcceptsCodec(t *testing.T) {
 	}
 	if targetAcceptsCodec("svs", source.CompressionAVIF) {
 		t.Errorf("svs should reject AVIF")
+	}
+	if !targetAcceptsCodec("svs", source.CompressionJPEG) {
+		t.Errorf("svs should accept JPEG")
+	}
+	if !targetAcceptsCodec("svs", source.CompressionJPEG2000) {
+		t.Errorf("svs should accept JPEG2000 (genuine Aperio codec → tile-copy verbatim)")
 	}
 	if !targetAcceptsCodec("tiff", source.CompressionJPEG2000) {
 		t.Errorf("tiff should accept JPEG2000")
