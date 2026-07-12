@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wsilabs/wsitools/internal/cliout"
+	"github.com/wsilabs/wsitools/internal/source"
 
 	opentile "github.com/wsilabs/opentile-go"
 )
@@ -168,6 +169,27 @@ func init() {
 	rootCmd.AddCommand(validateCmd)
 }
 
+// probeUndecodableL0 opens the slide and decodes its L0 (0,0) tile as a
+// readability probe. It returns (reason, true) when the file cannot be decoded —
+// unopenable, no levels, or a tile codec this reader doesn't support (opentile
+// "codec not registered … tag N") — and ("", false) when the tile decodes. One
+// small tile is cheap and is the definitive "readable by this tool" signal. (#43)
+func probeUndecodableL0(path string) (string, bool) {
+	src, err := source.Open(path)
+	if err != nil {
+		return fmt.Sprintf("structurally valid but not openable for decode: %v", err), true
+	}
+	defer src.Close()
+	levels := src.Levels()
+	if len(levels) == 0 {
+		return "no pyramid levels to decode", true
+	}
+	if _, err := levels[0].DecodedTile(0, 0); err != nil {
+		return fmt.Sprintf("L0 tile (0,0) is not decodable (unsupported/unregistered tile codec?): %v", err), true
+	}
+	return "", false
+}
+
 func runValidate(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	// Cobra's "Error: ..." print is silenced at the root (main owns error output).
@@ -185,6 +207,26 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	failed := reportFails(report, validateStrict)
 	result := buildValidateResult(path, report)
+
+	// Structural validity is necessary but not sufficient: a file can have
+	// well-formed TIFF offsets/tags yet carry tiles in a codec this reader can't
+	// decode (e.g. htj2k tiles written into an SVS), so region/hash fail while
+	// validate would report "valid" — false assurance. When the structural report
+	// passed, probe-decode an L0 tile; if it can't be decoded, add an error
+	// finding so "valid" implies "readable by this tool". (#43)
+	if !failed {
+		if msg, bad := probeUndecodableL0(path); bad {
+			result.Findings = append(result.Findings, validateFinding{
+				Severity: opentile.Error.String(),
+				Code:     "undecodable-tile",
+				Message:  msg,
+				Count:    1,
+			})
+			result.OK = false
+			result.Worst = opentile.Error.String()
+			failed = true
+		}
+	}
 
 	if rErr := cliout.Render(*validateJSON, cmd.OutOrStdout(),
 		func(w io.Writer) error { return renderValidateText(w, &result, failed) },
