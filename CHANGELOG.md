@@ -4,6 +4,17 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump opentile-go to v0.61.0** (reader metadata + codec-tag fixes). Delivers
+  read-side improvements wsitools already wrote for: OME-TIFF now round-trips the
+  scanner identity (`<Microscope>` make/model/serial, opentile-go#106 → completes
+  wsitools#27) and the full acquisition timestamp (opentile-go#108 → wsitools#31),
+  and the JPEG 2000 reader now recognizes the Aperio **33005** (RGB) code on the
+  pyramid path (opentile-go#110), which unblocks the wsitools#44 write-side fix
+  (emit 33005 for RGB J2K in SVS). No wsitools code change needed for the
+  read-side wins — `info` on a wsitools OME-TIFF now shows make/serial.
+
 ## [0.26.9] - 2026-07-12
 
 ### Changed
