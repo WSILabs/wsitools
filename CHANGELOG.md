@@ -4,6 +4,18 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.9] - 2026-07-12
+
+### Changed
+
+- **`convert --to svs` tile-copies a JPEG 2000 source verbatim** instead of
+  re-encoding it. JPEG and JPEG 2000 are both genuine Aperio SVS tile codecs, but
+  the tile-copy whitelist accepted only jpeg, so a jp2k source (though conformant)
+  went through a pointless jp2k→jp2k re-encode. jp2k → svs now copies the tiles
+  byte-for-byte (verified: identical L0 tile bytes, output stays JPEG-2000, same
+  pixels, validates). Non-conformant codecs (htj2k/avif/webp/jpegxl) into svs stay
+  gated (#42).
+
 ## [0.26.8] - 2026-07-12
 
 ### Fixed
