@@ -244,7 +244,10 @@ func targetAcceptsCodec(target string, c source.Compression) bool {
 			return true
 		}
 	case "svs":
-		return c == source.CompressionJPEG
+		// JPEG and JPEG 2000 are both genuine Aperio SVS tile codecs, so a source
+		// in either can be tile-copied verbatim into an SVS (no re-encode). The
+		// others are non-conformant for SVS and are gated by the re-encode path.
+		return c == source.CompressionJPEG || c == source.CompressionJPEG2000
 	}
 	return false
 }
