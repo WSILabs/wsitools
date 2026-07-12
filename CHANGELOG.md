@@ -4,6 +4,29 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.8] - 2026-07-12
+
+### Fixed
+
+- **`convert --to svs` no longer silently writes an undecodable SVS for a
+  non-jpeg source** (wsitools#42). A source with an htj2k/avif/webp/jpegxl codec
+  and no `--codec` re-encoded those tiles into the SVS ungated (the conformance
+  check only ran for an *explicit* `--codec`), producing a nonconformant,
+  undecodable file with exit 0. The defaulted (source-derived) codec is now
+  gated on the re-encode path: it errors like an explicit non-conformant codec —
+  *"source codec htj2k is non-conformant for --to svs …; pass
+  --allow-nonconformant to write it verbatim, or --codec jpeg to re-encode"* —
+  consistent with `--to ome-tiff`. Conformant defaults (jpeg/jpeg2000) are
+  unaffected.
+- **`validate` catches undecodable files** (wsitools#43). It wrapped only
+  opentile's *structural* validation, so a well-formed file whose tiles use a
+  codec this reader can't decode reported "valid" while `region`/`hash` failed —
+  false assurance. After the structural report passes, `validate` now
+  probe-decodes an L0 tile; if it can't be decoded (unregistered/unsupported
+  codec, unopenable, no levels) it adds an error `undecodable-tile` finding and
+  fails (exit 2). "valid" now implies "readable by this tool"; good slides are
+  unaffected.
+
 ## [0.26.7] - 2026-07-11
 
 ### Fixed
