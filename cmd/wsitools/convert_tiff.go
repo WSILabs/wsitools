@@ -69,6 +69,25 @@ func runConvertTIFF(cmd *cobra.Command, input, target string, start time.Time) e
 	if cerr != nil {
 		return cerr
 	}
+	// Gate the DEFAULTED codec. reencodeCodecFor preserves the source codec when
+	// --codec is absent (correct — don't silently switch to jpeg), but convert.go
+	// only conformance-checks an *explicit* --codec. Without this, a non-jpeg
+	// source (htj2k/avif/webp/jpegxl) into svs re-encoded into a nonconformant,
+	// undecodable SVS with no flag. Gate the resolved codec here so a defaulted
+	// non-conformant codec errors like an explicit one (or warns under
+	// --allow-nonconformant). (#42)
+	if cvCodec == "" {
+		warn, verr := validateCodec(target, codecName, cvAllowNonconformant)
+		if verr != nil {
+			// The codec was defaulted from the source, not typed — phrase the error
+			// accordingly (validateCodec's message assumes an explicit --codec).
+			return fmt.Errorf("source codec %s is non-conformant for --to %s (the output would not be readable); "+
+				"pass --allow-nonconformant to write it verbatim, or --codec jpeg to re-encode", codecName, target)
+		}
+		if warn != "" {
+			fmt.Fprintln(os.Stderr, "warning:", warn)
+		}
+	}
 	return runConvertTIFFReencode(cmd, input, target, codecName, cvQuality, cvWorkers, start)
 }
 
