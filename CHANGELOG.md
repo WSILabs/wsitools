@@ -4,6 +4,30 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.10] - 2026-07-13
+
+### Fixed
+
+- **RGB JPEG 2000 is tagged Aperio 33005, not 33003** (wsitools#44). wsitools'
+  JP2K encoder produces an RGB/sRGB codestream but tagged it 33003 — Aperio's
+  YCbCr code — so Aperio-family readers (OpenSlide/QuPath/ImageScope) applied a
+  wrong YCbCr→RGB conversion, rendering wrong colors. (wsitools' own reader
+  decides color from the codestream, so it round-tripped fine and masked this.)
+  The encoder now emits 33005 (RGB), and a verbatim tile-copy PRESERVES the
+  source's raw J2K tag (33003/33005/34712) instead of collapsing every J2K to
+  33003 — so an RGB source isn't relabeled YCbCr, and a genuine YCbCr source
+  stays 33003. Requires the opentile-go v0.61.0 bump below (reads 33005).
+
+### Added
+
+- **`validate` checks JPEG 2000 colorspace-tag correctness** (wsitools#44). After
+  the structural + decodability checks, it probe-inspects the L0 codestream and
+  emits a warning `colorspace-mismatch` finding when the Aperio color code
+  (33003/33005) disagrees with the codestream's decoded colorspace — catching the
+  #44 class of bug (RGB tiles tagged 33003) on any file. It's a warning (the file
+  decodes; only the code is wrong), so it fails only under `--strict`; the
+  ambiguous no-colorspace-box case is skipped (no false positives).
+
 ### Changed
 
 - **Bump opentile-go to v0.61.0** (reader metadata + codec-tag fixes). Delivers
@@ -11,9 +35,9 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
   scanner identity (`<Microscope>` make/model/serial, opentile-go#106 → completes
   wsitools#27) and the full acquisition timestamp (opentile-go#108 → wsitools#31),
   and the JPEG 2000 reader now recognizes the Aperio **33005** (RGB) code on the
-  pyramid path (opentile-go#110), which unblocks the wsitools#44 write-side fix
-  (emit 33005 for RGB J2K in SVS). No wsitools code change needed for the
-  read-side wins — `info` on a wsitools OME-TIFF now shows make/serial.
+  pyramid path (opentile-go#110), which enables the wsitools#44 fix above. No
+  wsitools code change needed for the read-side wins — `info` on a wsitools
+  OME-TIFF now shows make/serial.
 
 ## [0.26.9] - 2026-07-12
 
