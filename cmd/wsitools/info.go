@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,7 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 
 	opentile "github.com/wsilabs/opentile-go"
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
 )
 
 var (
@@ -28,7 +30,8 @@ var infoCmd = &cobra.Command{
 	Long: `Print a summary of a whole-slide image: file size, format,
 scanner metadata (make/model/serial/software/writer/datetime/MPP/
 magnification/ICC-profile presence),
-pyramid levels (dimensions + tile size + compression per level), and
+pyramid levels (dimensions + tile size + compression + a per-level quality
+summary, incl. the effective/decoded colorspace), and
 associated images (label/macro/thumbnail/overview).
 
 Use --json to emit machine-readable JSON instead of human-readable text.
@@ -282,7 +285,74 @@ func inspectLevel(lvl source.Level) *quality.Info {
 	if err != nil {
 		return nil
 	}
+	enrichFromCodestream(&info, oc, buf[:n])
 	return &info
+}
+
+// decoderNameFor maps a codec to the opentile decoder-registry name for the
+// codecs that expose a CodestreamInspector (jpeg, jpeg2000, htj2k, jpegxl).
+// Returns "" for codecs with no header-only colorspace signal.
+func decoderNameFor(oc opentile.Compression) string {
+	switch oc {
+	case opentile.CompressionJPEG:
+		return "jpeg"
+	case opentile.CompressionJP2K:
+		return "jpeg2000"
+	case opentile.CompressionHTJ2K:
+		return "htj2k"
+	case opentile.CompressionJPEGXL:
+		return "jpegxl"
+	}
+	return ""
+}
+
+// enrichFromCodestream inspects the tile's codestream header (for codecs that
+// expose one — jpeg / jpeg2000 / htj2k / jpegxl) and fills in header-only facts
+// about what the tile actually contains: the effective (decoded) colorspace, the
+// bit depth, and — only when the per-codec inspector didn't already set it —
+// the chroma subsampling. The effective colorspace reports "RGB" for an MCT
+// (ICT/RCT) JPEG 2000 codestream (the transform is inverted on decode), via the
+// shared effectiveColorspace helper that validate's #44 check uses. No-op when
+// the codec has no CodestreamInspector or the header can't be parsed.
+func enrichFromCodestream(info *quality.Info, oc opentile.Compression, tileBytes []byte) {
+	name := decoderNameFor(oc)
+	if name == "" {
+		return
+	}
+	fac, ok := otdecoder.Get(name)
+	if !ok {
+		return
+	}
+	insp, ok := fac.(otdecoder.CodestreamInspector)
+	if !ok {
+		return
+	}
+	ci, err := insp.Inspect(tileBytes)
+	if err != nil {
+		return
+	}
+	info.Colorspace = effectiveColorspace(ci.ColorEncoding)
+	if ci.BitDepth > 0 {
+		info.BitDepth = ci.BitDepth
+	}
+	// The JPEG inspector derives chroma from the SOF/DQT path already; only
+	// gap-fill for the codestream codecs (JP2K / HTJ2K / JXL) whose per-codec
+	// inspectors don't, reading it from the SIZ.
+	if info.ChromaSubsampling == "" {
+		info.ChromaSubsampling = chromaString(ci.ChromaSubsampling)
+	}
+}
+
+// chromaString renders a codec-domain chroma subsampling as the conventional
+// J:a:b notation, or "" for grayscale (no chroma) / unknown — so info shows a
+// subsampling ratio only when there's a meaningful one.
+func chromaString(cs otdecoder.ChromaSubsampling) string {
+	switch cs {
+	case otdecoder.Subsampling444, otdecoder.Subsampling422, otdecoder.Subsampling420,
+		otdecoder.Subsampling440, otdecoder.Subsampling411:
+		return cs.String()
+	}
+	return ""
 }
 
 func isLosslessCompression(c source.Compression) bool {
@@ -294,18 +364,34 @@ func isLosslessCompression(c source.Compression) bool {
 }
 
 func formatQuality(q *quality.Info) string {
+	var body string
 	switch {
 	case q.Lossless && q.LayerCount > 0:
-		return fmt.Sprintf("lossless, %d layers", q.LayerCount)
+		body = fmt.Sprintf("lossless, %d layers", q.LayerCount)
 	case q.Lossless:
-		return "lossless"
+		body = "lossless"
 	case q.LayerCount > 0:
-		return fmt.Sprintf("lossy, %d layers", q.LayerCount)
-	case q.QualityEstimate > 0 && q.ChromaSubsampling != "":
-		return fmt.Sprintf("Q≈%d, %s", q.QualityEstimate, q.ChromaSubsampling)
+		body = fmt.Sprintf("lossy, %d layers", q.LayerCount)
 	case q.QualityEstimate > 0:
-		return fmt.Sprintf("Q≈%d", q.QualityEstimate)
+		body = fmt.Sprintf("Q≈%d", q.QualityEstimate)
 	default:
-		return q.Codec
+		body = q.Codec
 	}
+	// Group the header-only codestream facts (effective colorspace, bit depth,
+	// chroma subsampling) as a prefix, separated from the quality/layer body by
+	// a double space: e.g. "RGB 8-bit 4:2:0  Q≈93" or "RGB 8-bit  lossy, 1 layers".
+	var facts []string
+	if q.Colorspace != "" {
+		facts = append(facts, q.Colorspace)
+	}
+	if q.BitDepth > 0 {
+		facts = append(facts, fmt.Sprintf("%d-bit", q.BitDepth))
+	}
+	if q.ChromaSubsampling != "" {
+		facts = append(facts, q.ChromaSubsampling)
+	}
+	if len(facts) > 0 {
+		return strings.Join(facts, " ") + "  " + body
+	}
+	return body
 }

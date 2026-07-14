@@ -50,6 +50,8 @@ func TestInfoQualityOnSVSJSON(t *testing.T) {
 				Lossless          bool   `json:"lossless"`
 				QualityEstimate   int    `json:"quality_estimate"`
 				ChromaSubsampling string `json:"chroma_subsampling"`
+				Colorspace        string `json:"colorspace"`
+				BitDepth          int    `json:"bit_depth"`
 			} `json:"quality"`
 		} `json:"levels"`
 	}
@@ -76,6 +78,17 @@ func TestInfoQualityOnSVSJSON(t *testing.T) {
 	}
 	if l0.Quality.ChromaSubsampling == "" {
 		t.Error("L0 ChromaSubsampling: empty (expected 4:2:0 or 4:4:4)")
+	}
+	// A JPEG L0 must surface an effective colorspace — either RGB (Aperio's
+	// APP14 raw-RGB framing, as in this fixture) or YCbCr (JFIF). Never blank.
+	switch l0.Quality.Colorspace {
+	case "RGB", "YCbCr":
+	default:
+		t.Errorf("L0 Colorspace: got %q, want RGB or YCbCr", l0.Quality.Colorspace)
+	}
+	// A JPEG L0 codestream must report a bit depth (8 for this brightfield fixture).
+	if l0.Quality.BitDepth != 8 {
+		t.Errorf("L0 BitDepth: got %d, want 8", l0.Quality.BitDepth)
 	}
 }
 

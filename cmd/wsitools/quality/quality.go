@@ -29,6 +29,20 @@ type Info struct {
 	// empty if not applicable.
 	ChromaSubsampling string `json:"chroma_subsampling,omitempty"`
 
+	// Colorspace is the EFFECTIVE (decoded) colorspace of the tile:
+	// "RGB", "YCbCr", or "grayscale". Empty when it can't be
+	// determined (no codestream-inspector for the codec, or an
+	// ambiguous codestream with no colorspace box). A JPEG 2000 tile
+	// carrying an MCT (ICT/RCT) decorrelating transform reports "RGB"
+	// — the transform is inverted on decode — matching what a reader
+	// actually sees. (mirrors validate's #44 colorspace check)
+	Colorspace string `json:"colorspace,omitempty"`
+
+	// BitDepth is the bits per component of the tile codestream (8 for
+	// brightfield; 16 for some fluorescence / JPEG 2000). 0 when the
+	// codec exposes no header-only bit-depth signal.
+	BitDepth int `json:"bit_depth,omitempty"`
+
 	// LayerCount is the number of progressive layers (JPEG 2000) or
 	// 0 if not applicable.
 	LayerCount int `json:"layer_count,omitempty"`
