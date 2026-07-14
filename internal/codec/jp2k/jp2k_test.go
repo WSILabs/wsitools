@@ -35,8 +35,10 @@ func TestFactoryRegisteredAndTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEncoder: %v", err)
 	}
-	if got := enc.TIFFCompressionTag(); got != tiff.CompressionJPEG2000 {
-		t.Errorf("TIFFCompressionTag = %d, want %d", got, tiff.CompressionJPEG2000)
+	// The encoder always produces an RGB/sRGB codestream, so it tags the Aperio
+	// JPEG 2000 RGB code (33005), not the YCbCr code (33003). (wsitools#44)
+	if got := enc.TIFFCompressionTag(); got != tiff.CompressionJPEG2000RGB {
+		t.Errorf("TIFFCompressionTag = %d, want %d (33005 RGB)", got, tiff.CompressionJPEG2000RGB)
 	}
 }
 
