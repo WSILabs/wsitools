@@ -4,6 +4,30 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.11] - 2026-07-13
+
+### Added
+
+- **`info` surfaces each level's codestream facts: effective colorspace, bit
+  depth, and chroma subsampling.** The per-level quality summary now leads with
+  the header-only facts about what the tile actually contains, inspected once
+  from the tile's codestream (JPEG / JPEG 2000 / HTJ2K / JPEG XL):
+  - **Effective (decoded) colorspace** — `RGB`, `YCbCr`, or `grayscale` — the
+    colorspace a reader actually sees. A JPEG 2000 tile carrying an MCT (ICT/RCT)
+    decorrelating transform reports `RGB`, since the transform is inverted on
+    decode — the same effective-colorspace mapping `validate` uses for its #44
+    colorspace-mismatch check (now shared). This makes the Aperio 33003-vs-33005
+    distinction visible at a glance.
+  - **Bit depth** — bits-per-component (`8-bit`, `16-bit`), distinguishing
+    brightfield from higher-depth fluorescence / JPEG 2000.
+  - **Chroma subsampling** for JPEG 2000 / HTJ2K / JPEG XL — previously shown
+    only for JPEG; now gap-filled from the SIZ for the codestream codecs too.
+
+  Grouped as a prefix, e.g. `jpeg2000  RGB 8-bit 4:4:4  lossy, 1 layers`. Text
+  and `--json` (`quality.colorspace` / `quality.bit_depth` /
+  `quality.chroma_subsampling`) both carry them; each is omitted when the codec
+  exposes no such signal or the codestream is ambiguous.
+
 ## [0.26.10] - 2026-07-13
 
 ### Fixed

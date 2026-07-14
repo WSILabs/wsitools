@@ -235,23 +235,38 @@ func probeColorspaceMismatchL0(path string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	var decodedRGB, decodedYCbCr bool
-	switch info.ColorEncoding {
-	case otdecoder.ColorRGB, otdecoder.ColorYBRICT, otdecoder.ColorYBRRCT:
-		decodedRGB = true // RGB, or an MCT (ICT/RCT) codestream inverted to RGB on decode
-	case otdecoder.ColorYCbCr:
-		decodedYCbCr = true
-	default:
-		return "", false // grayscale / unknown / ambiguous — don't guess
-	}
-	switch {
-	case tag == tiff.CompressionJPEG2000 && decodedRGB:
-		return "L0 tiles are tagged JPEG 2000 33003 (Aperio YCbCr) but the codestream decodes to RGB — " +
-			"Aperio-family readers will apply a wrong YCbCr→RGB conversion; the RGB code is 33005", true
-	case tag == tiff.CompressionJPEG2000RGB && decodedYCbCr:
-		return "L0 tiles are tagged JPEG 2000 33005 (Aperio RGB) but the codestream decodes to YCbCr — the YCbCr code is 33003", true
+	// Only RGB vs YCbCr are decisive for the Aperio color-code check; grayscale /
+	// unknown / ambiguous (blank) codestreams don't assert a mismatch.
+	switch effectiveColorspace(info.ColorEncoding) {
+	case "RGB":
+		if tag == tiff.CompressionJPEG2000 {
+			return "L0 tiles are tagged JPEG 2000 33003 (Aperio YCbCr) but the codestream decodes to RGB — " +
+				"Aperio-family readers will apply a wrong YCbCr→RGB conversion; the RGB code is 33005", true
+		}
+	case "YCbCr":
+		if tag == tiff.CompressionJPEG2000RGB {
+			return "L0 tiles are tagged JPEG 2000 33005 (Aperio RGB) but the codestream decodes to YCbCr — the YCbCr code is 33003", true
+		}
 	}
 	return "", false
+}
+
+// effectiveColorspace maps a codec-domain ColorEncoding to the EFFECTIVE
+// (decoded) colorspace a reader sees: "RGB", "YCbCr", "grayscale", or "" when
+// it can't be determined. A JPEG 2000 MCT (ICT/RCT) codestream reports "RGB"
+// because the decorrelating transform is inverted on decode. Shared by
+// validate's #44 colorspace-mismatch check and info's per-level quality block.
+func effectiveColorspace(ce otdecoder.ColorEncoding) string {
+	switch ce {
+	case otdecoder.ColorRGB, otdecoder.ColorYBRICT, otdecoder.ColorYBRRCT:
+		return "RGB"
+	case otdecoder.ColorYCbCr:
+		return "YCbCr"
+	case otdecoder.ColorGrayscale:
+		return "grayscale"
+	default:
+		return ""
+	}
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
