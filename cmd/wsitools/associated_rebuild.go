@@ -24,7 +24,7 @@ type assocEditPlan struct {
 // writeCOGWSI copies the source pyramid (verbatim tiles) into w and writes its
 // associated images per plan. It does NOT Abort/Close w — the caller owns the
 // writer lifecycle. Pyramid tile bytes are copied unmodified (no re-encode).
-func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) error {
+func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, srcRawJP2K uint16, plan assocEditPlan) error {
 	levels := src.Levels()
 	// Verbatim JPEG tiles must carry the photometric matching their own framing
 	// (JFIF/Adobe-YCbCr → YCbCr(6); bare/Aperio → RGB(2)); sampled once from L0.
@@ -45,7 +45,7 @@ func writeCOGWSI(w *cogwsiwriter.Writer, src source.Source, plan assocEditPlan) 
 			ImageHeight:     uint32(lvl.Size().Y),
 			TileWidth:       uint32(lvl.TileSize().X),
 			TileHeight:      uint32(lvl.TileSize().Y),
-			Compression:     compressionTagFor(lvl.Compression()),
+			Compression:     tileCopyLevelCompression(lvl.Compression(), srcRawJP2K),
 			Photometric:     photometric,
 			SamplesPerPixel: 3,
 			BitsPerSample:   []uint16{8, 8, 8},
@@ -167,7 +167,7 @@ func rebuildCOGWSI(src source.Source, outPath string, plan assocEditPlan, fsync 
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
-	if err := writeCOGWSI(w, src, plan); err != nil {
+	if err := writeCOGWSI(w, src, 0, plan); err != nil {
 		w.Abort()
 		os.Remove(tmp)
 		return err

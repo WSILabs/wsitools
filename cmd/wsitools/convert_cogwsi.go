@@ -111,7 +111,7 @@ func runConvertCOGWSI(cmd *cobra.Command, input string, start time.Time) error {
 	if reencode {
 		err = reencodeCOGWSI(cmd.Context(), slide, src, w, plan, srcCodec, overlapping)
 	} else {
-		err = writeCOGWSI(w, src, plan)
+		err = writeCOGWSI(w, src, rawJP2KTileCopyTag(input, src), plan)
 	}
 	if err != nil {
 		w.Abort()

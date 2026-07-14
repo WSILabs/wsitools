@@ -9,8 +9,10 @@ import (
 
 	"github.com/wsilabs/wsitools/internal/cliout"
 	"github.com/wsilabs/wsitools/internal/source"
+	"github.com/wsilabs/wsitools/internal/tiff"
 
 	opentile "github.com/wsilabs/opentile-go"
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
 )
 
 // errValidationFailed is the sentinel returned by `validate` when the report
@@ -190,6 +192,68 @@ func probeUndecodableL0(path string) (string, bool) {
 	return "", false
 }
 
+// probeColorspaceMismatchL0 checks, for a JPEG 2000 L0 tagged with an Aperio
+// color code (33003 YCbCr / 33005 RGB), whether that code matches the
+// codestream's DECODED colorspace. A mismatch is the wsitools#44 class of bug:
+// RGB tiles tagged 33003 make Aperio-family readers (OpenSlide/QuPath) apply a
+// wrong YCbCr→RGB conversion. Returns (message, true) only on a CLEAR mismatch;
+// any error, a non-Aperio-coded tile, or an ambiguous codestream (no colorspace
+// box) yields ("", false) — no false positives. The MCT transform is inverted on
+// decode, so an ICT/RCT codestream decodes to RGB.
+func probeColorspaceMismatchL0(path string) (string, bool) {
+	recs, err := source.WalkIFDs(path)
+	if err != nil || len(recs) == 0 {
+		return "", false
+	}
+	tag := uint16(recs[0].Compression)
+	if tag != tiff.CompressionJPEG2000 && tag != tiff.CompressionJPEG2000RGB {
+		return "", false // only the Aperio YCbCr/RGB codes assert a colorspace
+	}
+	src, err := source.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer src.Close()
+	levels := src.Levels()
+	if len(levels) == 0 {
+		return "", false
+	}
+	buf := make([]byte, levels[0].TileMaxSize())
+	n, err := levels[0].TileInto(0, 0, buf)
+	if err != nil || n == 0 {
+		return "", false
+	}
+	fac, ok := otdecoder.Get("jpeg2000")
+	if !ok {
+		return "", false
+	}
+	insp, ok := fac.(otdecoder.CodestreamInspector)
+	if !ok {
+		return "", false
+	}
+	info, err := insp.Inspect(buf[:n])
+	if err != nil {
+		return "", false
+	}
+	var decodedRGB, decodedYCbCr bool
+	switch info.ColorEncoding {
+	case otdecoder.ColorRGB, otdecoder.ColorYBRICT, otdecoder.ColorYBRRCT:
+		decodedRGB = true // RGB, or an MCT (ICT/RCT) codestream inverted to RGB on decode
+	case otdecoder.ColorYCbCr:
+		decodedYCbCr = true
+	default:
+		return "", false // grayscale / unknown / ambiguous — don't guess
+	}
+	switch {
+	case tag == tiff.CompressionJPEG2000 && decodedRGB:
+		return "L0 tiles are tagged JPEG 2000 33003 (Aperio YCbCr) but the codestream decodes to RGB — " +
+			"Aperio-family readers will apply a wrong YCbCr→RGB conversion; the RGB code is 33005", true
+	case tag == tiff.CompressionJPEG2000RGB && decodedYCbCr:
+		return "L0 tiles are tagged JPEG 2000 33005 (Aperio RGB) but the codestream decodes to YCbCr — the YCbCr code is 33003", true
+	}
+	return "", false
+}
+
 func runValidate(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	// Cobra's "Error: ..." print is silenced at the root (main owns error output).
@@ -225,6 +289,20 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			result.OK = false
 			result.Worst = opentile.Error.String()
 			failed = true
+		} else if msg, bad := probeColorspaceMismatchL0(path); bad {
+			// Warning, not error: the file decodes fine here, but its declared
+			// colorspace code is wrong, so Aperio-family readers render wrong
+			// colors (wsitools#44 class). Fails only under --strict.
+			result.Findings = append(result.Findings, validateFinding{
+				Severity: opentile.Warning.String(),
+				Code:     "colorspace-mismatch",
+				Message:  msg,
+				Count:    1,
+			})
+			result.Worst = opentile.Warning.String()
+			if validateStrict {
+				failed = true
+			}
 		}
 	}
 

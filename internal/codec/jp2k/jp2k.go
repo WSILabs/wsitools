@@ -57,8 +57,14 @@ type Encoder struct {
 	reversible bool
 }
 
-func (*Encoder) LevelHeader() []byte        { return nil }
-func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEG2000 }
+func (*Encoder) LevelHeader() []byte { return nil }
+
+// TIFFCompressionTag returns Aperio's JPEG 2000 RGB code (33005), not the YCbCr
+// code (33003): this encoder always produces an RGB/sRGB codestream (MCT on), so
+// tagging it 33003 makes Aperio-family readers (OpenSlide/QuPath/ImageScope)
+// mis-apply a YCbCr→RGB conversion. (wsitools#44; requires opentile-go ≥ v0.61.0,
+// which reads 33005 on the pyramid path.)
+func (*Encoder) TIFFCompressionTag() uint16 { return tiff.CompressionJPEG2000RGB }
 func (*Encoder) TIFFPhotometric() uint16    { return codec.PhotometricRGB }
 func (*Encoder) Close() error               { return nil }
 

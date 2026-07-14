@@ -42,7 +42,12 @@ const (
 	CompressionLZW      uint16 = 5
 	CompressionJPEG     uint16 = 7
 	CompressionDeflate  uint16 = 8
-	CompressionJPEG2000 uint16 = 33003 // Aperio / OpenJPEG codestream
+	CompressionJPEG2000 uint16 = 33003 // Aperio JPEG 2000 — YCbCr convention (reader converts YCbCr→RGB)
+	// CompressionJPEG2000RGB is Aperio's JPEG 2000 RGB code: the codestream's
+	// components are already RGB, so a reader must NOT apply a YCbCr→RGB
+	// conversion. Use this for RGB J2K tiles (what wsitools' encoder produces);
+	// 33003 is only correct for a genuinely YCbCr codestream. (wsitools#44)
+	CompressionJPEG2000RGB uint16 = 33005
 	// New: wsi-tools-private compression tag values used by extension codecs.
 	// These are in the private/experimental TIFF tag range; they are not
 	// registered with Adobe but match the values opentile-go's
