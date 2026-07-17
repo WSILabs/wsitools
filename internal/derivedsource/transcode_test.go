@@ -86,7 +86,7 @@ func TestTranscodeToJPEG_WrapsEveryLevel(t *testing.T) {
 		},
 		md: source.Metadata{Magnification: 20},
 	}
-	got := TranscodeToJPEG(src, 90, 2)
+	got := TranscodeToJPEG(src, 90, 2, "")
 	if got.Format() != "tiff" {
 		t.Errorf("Format = %q, want tiff (source's)", got.Format())
 	}

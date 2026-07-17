@@ -364,22 +364,14 @@ func buildDescriptor(src source.Source, level int, lossyRatio float64) (ImageDes
 		// hardcoded JPEG-baseline. Probe the level's compression.
 		lvl := src.Levels()[level]
 		switch comp := lvl.Compression(); comp {
-		case source.CompressionJPEG:
-			// P0-validated JPEG-baseline WSM descriptor (the common case).
-			return ImageDescriptor{
-				TransferSyntax:  jpegBaselineTS,
-				Photometric:     "YBR_FULL_422",
-				SamplesPerPixel: 3,
-				ICCProfile:      icc,
-				Lossy:           true,
-				LossyMethod:     "ISO_10918_1",
-				LossyRatio:      lossyRatio,
-			}, nil
-		case source.CompressionJPEG2000, source.CompressionHTJ2K, source.CompressionJPEGXL:
-			// Probe the frame and frame-copy verbatim with the matching transfer
-			// syntax: JP2K → .90/.91, HTJ2K → .201/.203 (reversible vs lossy),
-			// JXL → .112; derive photometric from the codestream header via the
-			// inspector (same path as the non-DICOM frame-copy).
+		case source.CompressionJPEG, source.CompressionJPEG2000, source.CompressionHTJ2K, source.CompressionJPEGXL:
+			// Probe the actual frame and derive the descriptor from its codestream
+			// header (transfer syntax + photometric): JPEG-baseline → .50 with
+			// YBR_FULL_422 / YBR_FULL / RGB per the SOF (an RGB-framed source such as
+			// a Leica DICOM stays RGB, not mislabeled YBR); JP2K → .90/.91, HTJ2K →
+			// .201/.203, JXL → .112. This holds for both a verbatim frame-copy and a
+			// re-encoded frame (spool/derivedsource), so the header always matches the
+			// frame's real subsampling — no hardcoded YBR_FULL_422.
 			buf := make([]byte, lvl.TileMaxSize())
 			n, err := lvl.TileInto(0, 0, buf)
 			if err != nil {

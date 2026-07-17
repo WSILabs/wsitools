@@ -11,7 +11,7 @@ import (
 )
 
 func TestDicomFrameEncoderStandaloneJPEG(t *testing.T) {
-	enc, comp, err := newDicomFrameEncoder("jpeg", 80)
+	enc, comp, err := newDicomFrameEncoder("jpeg", 80, "")
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestDicomFrameEncoderStandaloneJPEG(t *testing.T) {
 }
 
 func TestDicomFrameEncoderReportsJP2KCompression(t *testing.T) {
-	enc, comp, err := newDicomFrameEncoder("jpeg2000", 80)
+	enc, comp, err := newDicomFrameEncoder("jpeg2000", 80, "")
 	if err != nil {
 		t.Skipf("jpeg2000 codec unavailable: %v", err) // cgo/openjpeg may be absent
 	}

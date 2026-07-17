@@ -609,9 +609,12 @@ func cropToDICOM(p cropEmitParams) error {
 		if comp != source.CompressionJPEG && comp != source.CompressionJPEG2000 {
 			return fmt.Errorf("--lossless into DICOM needs JPEG or JPEG 2000 source frames; got %s", comp)
 		}
+		// L0 is verbatim (keeps its exact subsampling); honor the source's chroma
+		// subsampling on the re-encoded lower levels too so the pyramid is consistent
+		// (no-op for a non-JPEG source).
 		ds, err := derivedsource.WithLosslessL0(
 			src.Levels()[0], p.stx0, p.sty0, p.outTilesX, p.outTilesY, p.l0W, p.l0H,
-			p.l0, p.nLevels, p.outTile, p.quality, p.workers, src.Format(), md, assoc)
+			p.l0, p.nLevels, p.outTile, p.quality, sourceJPEGSubsampling(p.src), p.workers, src.Format(), md, assoc)
 		if err != nil {
 			return fmt.Errorf("build derived source: %w", err)
 		}
