@@ -150,7 +150,7 @@ func TestPassthroughLevel_OffsetMappingAndCompression(t *testing.T) {
 func TestWithLosslessL0_RejectsZeroLevels(t *testing.T) {
 	fl := &fakeLevel{tileSize: image.Point{X: 4, Y: 4}, comp: source.CompressionJPEG}
 	lower := make([]byte, 8*8*3)
-	if _, err := WithLosslessL0(fl, 0, 0, 2, 2, 8, 8, lower, 0, 4, 90, 2, "dicom", source.Metadata{}, nil); err == nil {
+	if _, err := WithLosslessL0(fl, 0, 0, 2, 2, 8, 8, lower, 0, 4, 90, "", 2, "dicom", source.Metadata{}, nil); err == nil {
 		t.Fatal("expected error for nLevels=0, got nil")
 	}
 }
@@ -160,7 +160,7 @@ func TestWithLosslessL0_MixedLevelKinds(t *testing.T) {
 	// snapped region 8×8 raster for the re-encoded lower levels.
 	lower := make([]byte, 8*8*3)
 	md := source.Metadata{MPP: 1.0, Magnification: 20}
-	src, err := WithLosslessL0(fl, 1, 1, 2, 2, 8, 8, lower, 2 /*nLevels*/, 4 /*tileSize*/, 90, 2 /*workers*/, "dicom", md, nil)
+	src, err := WithLosslessL0(fl, 1, 1, 2, 2, 8, 8, lower, 2 /*nLevels*/, 4 /*tileSize*/, 90, "" /*subsampling*/, 2 /*workers*/, "dicom", md, nil)
 	if err != nil {
 		t.Fatalf("WithLosslessL0: %v", err)
 	}

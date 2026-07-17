@@ -24,7 +24,10 @@ import (
 func runDICOMEngine(ctx context.Context, slide *opentile.Slide, srcRegion opentile.Region, outL0 opentile.Size, codecName string, quality, workers int, format string, md source.Metadata, assoc []source.AssociatedImage, opts dicomwriter.Options, output string, force bool) error {
 	levels := octaveLevelSpecsFor(outL0, resolveTileSize(slide.Levels()[0].TileSize.W, cvTileSize))
 
-	enc, comp, err := newDicomFrameEncoder(codecName, quality)
+	// Honor the source's JPEG chroma subsampling on the re-encode (no-op for a
+	// non-JPEG source or a J2K-family output codec) so a 4:2:2/4:4:4 source isn't
+	// silently downgraded to the encoder default 4:2:0 — matching the TIFF family.
+	enc, comp, err := newDicomFrameEncoder(codecName, quality, sourceJPEGSubsampling(slide))
 	if err != nil {
 		return err
 	}
@@ -175,10 +178,14 @@ type dicomFrameEncoder struct {
 
 // newDicomFrameEncoder builds the frame encoder + reports the source.Compression
 // the spoolSource should advertise (so dicomwriter picks the transfer syntax).
-func newDicomFrameEncoder(codecName string, quality int) (*dicomFrameEncoder, source.Compression, error) {
+func newDicomFrameEncoder(codecName string, quality int, subsampling string) (*dicomFrameEncoder, source.Compression, error) {
 	switch codecName {
 	case "", "jpeg":
-		je, err := jpegcodec.New(codec.LevelGeometry{}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(quality)}})
+		knobs := map[string]string{"q": strconv.Itoa(quality)}
+		if subsampling != "" {
+			knobs["subsampling"] = subsampling
+		}
+		je, err := jpegcodec.New(codec.LevelGeometry{}, codec.Quality{Knobs: knobs})
 		if err != nil {
 			return nil, 0, fmt.Errorf("jpeg.New: %w", err)
 		}

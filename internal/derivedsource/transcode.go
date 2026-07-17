@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"io"
-	"strconv"
 	"sync"
 
 	"github.com/wsilabs/opentile-go/decoder"
@@ -22,6 +21,7 @@ import (
 type transcodeLevel struct {
 	src          source.Level
 	quality      int
+	subsampling  string // chroma subsampling knob ("444"/"422"/"440"/"420"); "" = encoder default (4:2:0)
 	index        int
 	tileW, tileH int
 
@@ -61,7 +61,7 @@ func (l *transcodeLevel) TileInto(x, y int, dst []byte) (int, error) {
 			TileWidth:   l.tileW,
 			TileHeight:  l.tileH,
 			PixelFormat: codec.PixelFormatRGB8,
-		}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(l.quality)}})
+		}, codec.Quality{Knobs: jpegEncodeKnobs(l.quality, l.subsampling)})
 		l.inited = true
 	}
 	if l.encErr != nil {
@@ -94,22 +94,25 @@ func tightTileRGB(img *decoder.Image) []byte {
 // TranscodeToJPEG wraps src as a derived source whose every pyramid level is
 // re-encoded to JPEG-baseline on demand (see transcodeLevel). Associated images
 // and metadata pass through unchanged. Backs `convert --to dicom --codec jpeg`.
+// subsampling ("444"/"422"/"440"/"420", or "" for the encoder default 4:2:0)
+// lets the re-encode honor the source's chroma subsampling.
 //
 // workers is accepted for signature parity with the other derivedsource
 // constructors and a future parallel pre-encode; tiles are currently transcoded
 // serially, on demand, as WritePyramid pulls them (bounded memory: one decoded
 // tile at a time).
-func TranscodeToJPEG(src source.Source, quality, workers int) source.Source {
+func TranscodeToJPEG(src source.Source, quality, workers int, subsampling string) source.Source {
 	_ = workers
 	levels := make([]source.Level, 0, len(src.Levels()))
 	for i, lvl := range src.Levels() {
 		ts := lvl.TileSize()
 		levels = append(levels, &transcodeLevel{
-			src:     lvl,
-			quality: quality,
-			index:   i,
-			tileW:   ts.X,
-			tileH:   ts.Y,
+			src:         lvl,
+			quality:     quality,
+			subsampling: subsampling,
+			index:       i,
+			tileW:       ts.X,
+			tileH:       ts.Y,
 		})
 	}
 	return &derived{

@@ -4,6 +4,24 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+## [0.26.12] - 2026-07-17
+
+### Fixed
+
+- **DICOM re-encode now honors the source's chroma subsampling.** Every JPEG
+  re-encode path into DICOM (`convert --to dicom --factor` / `--codec jpeg` /
+  differing `--tile-size`, `downsample <dicom>`, lossy `crop <dicom>`, and the
+  re-encoded lower levels of a `--lossless` crop) forced the JPEG encoder default
+  4:2:0, silently downgrading a 4:2:2 or 4:4:4 source. It now matches the source's
+  subsampling — the same honor-source behavior the TIFF family already had.
+- **DICOM `PhotometricInterpretation` is derived from the actual frame, not
+  hardcoded.** The DICOM-source JPEG descriptor branch hardcoded `YBR_FULL_422`;
+  it now probes the frame's codestream (like the JPEG 2000 branch already did), so
+  the header always matches the frame: 4:4:4 → `YBR_FULL`, 4:2:2/4:2:0 →
+  `YBR_FULL_422`, an RGB-framed JPEG → `RGB`, grayscale → `MONOCHROME2`. This
+  keeps header and frame consistent once subsampling is honored, and also corrects
+  verbatim re-emission of non-4:2:2 DICOM JPEG sources.
+
 ## [0.26.11] - 2026-07-13
 
 ### Added

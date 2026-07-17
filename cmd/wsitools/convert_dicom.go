@@ -103,7 +103,8 @@ func runConvertDICOM(cmd *cobra.Command, input string, start time.Time) error {
 		}
 		slog.Warn("re-encoding pyramid to JPEG-baseline (lossy) for --to dicom --codec jpeg",
 			"quality", quality)
-		emit = derivedsource.TranscodeToJPEG(src, quality, workers)
+		// Honor the source's JPEG chroma subsampling (no-op for a non-JPEG source).
+		emit = derivedsource.TranscodeToJPEG(src, quality, workers, sourceJPEGSubsampling(slide))
 	}
 
 	if cmd.Flags().Changed("level") {

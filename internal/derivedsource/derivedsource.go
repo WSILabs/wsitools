@@ -20,6 +20,18 @@ import (
 	"github.com/wsilabs/wsitools/internal/source"
 )
 
+// jpegEncodeKnobs builds the JPEG codec quality knobs for a re-encoded level:
+// the quality integer plus an optional chroma-subsampling knob so a re-encode
+// honors the source's subsampling (444/422/440/420) instead of forcing the
+// encoder default (4:2:0). An empty subsampling leaves the encoder default.
+func jpegEncodeKnobs(quality int, subsampling string) map[string]string {
+	k := map[string]string{"q": strconv.Itoa(quality)}
+	if subsampling != "" {
+		k["subsampling"] = subsampling
+	}
+	return k
+}
+
 // rasterLevel is one pyramid level backed by an RGB888 raster; tiles are
 // JPEG-baseline encoded as complete (self-contained) frames — the form DICOM
 // encapsulated PixelData requires. WritePyramid pulls tiles one at a time, so
@@ -28,12 +40,13 @@ import (
 // parallelizes the CPU-bound JPEG encode across cores while preserving the
 // pull-based Level API.
 type rasterLevel struct {
-	raster   []byte
-	w, h     int
-	tileSize int
-	quality  int
-	workers  int
-	index    int
+	raster      []byte
+	w, h        int
+	tileSize    int
+	quality     int
+	subsampling string // chroma subsampling knob ("444"/"422"/"440"/"420"); "" = encoder default (4:2:0)
+	workers     int
+	index       int
 
 	once   sync.Once
 	frames [][]byte // [ty*tilesX + tx] → encoded frame; populated by encodeAll
@@ -82,7 +95,7 @@ func (l *rasterLevel) encodeAll() {
 				TileWidth:   l.tileSize,
 				TileHeight:  l.tileSize,
 				PixelFormat: codec.PixelFormatRGB8,
-			}, codec.Quality{Knobs: map[string]string{"q": strconv.Itoa(l.quality)}})
+			}, codec.Quality{Knobs: jpegEncodeKnobs(l.quality, l.subsampling)})
 			if err != nil {
 				mu.Lock()
 				if l.encErr == nil {
@@ -201,7 +214,7 @@ func (l *passthroughLevel) DecodedTile(x, y int) (*decoder.Image, error) {
 // levels are box-halved raster levels decoded from the snapped region
 // (lowerRaster, snapW×snapH). Used by crop --lossless into DICOM. Returns fewer
 // than nLevels levels if a box-halved dimension reaches 0.
-func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH int, lowerRaster []byte, nLevels, tileSize, quality, workers int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
+func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH int, lowerRaster []byte, nLevels, tileSize, quality int, subsampling string, workers int, format string, md source.Metadata, assoc []source.AssociatedImage) (source.Source, error) {
 	if nLevels < 1 {
 		return nil, fmt.Errorf("derivedsource: nLevels must be at least 1, got %d", nLevels)
 	}
@@ -224,7 +237,7 @@ func WithLosslessL0(srcL0 source.Level, offX, offY, gridW, gridH, snapW, snapH i
 		if lw == 0 || lh == 0 {
 			break
 		}
-		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, workers: workers, index: i})
+		levels = append(levels, &rasterLevel{raster: raster, w: lw, h: lh, tileSize: tileSize, quality: quality, subsampling: subsampling, workers: workers, index: i})
 	}
 	return &derived{format: format, levels: levels, md: md, assoc: assoc}, nil
 }
