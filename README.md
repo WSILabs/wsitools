@@ -4,266 +4,82 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/wsilabs/wsitools.svg)](https://pkg.go.dev/github.com/wsilabs/wsitools)
 
-A Swiss-army knife of utilities for whole-slide imaging (WSI) files used in
-digital pathology.
+A command-line toolkit for whole-slide imaging (WSI) files in digital
+pathology — **inspect, edit, and convert** slides across every major vendor
+format, from a single static binary with no runtime dependencies.
+
+wsitools is built for pathology pipelines: edit associated images (like the
+label) without re-encoding the pyramid, transcode between containers and codecs,
+generate DeepZoom tiles for web viewers, downsample or crop slides, and check
+them for structural conformance.
 
 > [!WARNING]
-> **Pre-1.0 — expect breaking changes.** wsitools is under active development
-> and not yet API/CLI stable. Anything may change between releases without a
-> deprecation period: CLI flags and subcommands, JSON output fields, and
-> output file-format details. Pin a specific version and review
-> [`CHANGELOG.md`](./CHANGELOG.md) before upgrading.
+> **Pre-1.0 — expect breaking changes.** CLI flags, JSON fields, and output
+> details may change between releases without deprecation. Pin a version and
+> review [`CHANGELOG.md`](./CHANGELOG.md) before upgrading.
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
+## What it does
 
-## What's here (v0.23)
+- **Inspect** — slide summary (levels, codecs, colorspace, metadata), per-IFD
+  and per-tag dumps, content hashing, and structural validation.
+  → `info`, `dump-ifds`, `hash`, `validate`
+- **Extract a pixel region** — save a rectangular region as a standalone PNG.
+  → `region`
+- **Extract an associated image** — save the label, macro, thumbnail, or
+  overview as a standalone PNG or JPEG.
+  → `extract`
+- **Edit** — remove or replace an associated image. The pyramid tile bytes are
+  copied verbatim (no decode/re-encode).
+  → `label|macro|thumbnail|overview  remove|replace`
+- **Convert & transform** — reshape a slide, streaming (no full-resolution
+  raster in memory):
+    - *Re-container* into another format — a lossless tile-copy when the source
+      codec is compatible with the target.
+      → `convert --to {cog-wsi, svs, tiff, ome-tiff, dzi, szi, dicom, bif, ife}`
+    - *Transcode* the pyramid to a different codec.
+      → `convert --codec {jpeg, jpeg2000, jpegxl, avif, webp, htj2k}`
+    - *Downsample* to a lower magnification — during a convert, or in place
+      (same container out).
+      → `convert --factor N` / `--target-mag M`, or `downsample`
+    - *Crop* a region — during a convert, or in place.
+      → `convert --rect X,Y,W,H`, or `crop`
+- **App info** — report installed codecs and memory limits, or print the version.
+  → `doctor`, `version`
 
-**Inspection**
-
-- `wsitools info` — slide summary: format, levels (dimensions + tile
-  size + compression), associated images, scanner metadata. Text or
-  `--json`. Analog of `openslide-show-properties`.
-- `wsitools dump-ifds` — format-aware per-IFD layout dump. Annotates each
-  IFD with its classification (pyramid L0/L1/…/label/macro/thumbnail/
-  overview/probability/map) and reports wsitools private tags (65080–
-  65084). Slim tiffinfo analog. Use `--raw` for a full per-tag dump
-  (every TIFF tag with name + type + count + value + enum interpretation;
-  composes with `--json`); `--raw-full` disables smart truncation of long
-  arrays and binary blobs.
-- `wsitools region --x --y --w --h --level -o out.png` — extract a
-  rectangular pixel region as PNG (analog of `openslide-write-png`).
-- `wsitools hash` — content hash. `--mode file` (default,
-  `sha256sum`-equivalent) or `--mode pixel` (L0 RGB tiles in raster order,
-  stable across re-encode).
-- `wsitools validate <file>` — check a slide's structural conformance against
-  opentile-go's reader (level geometry, tile-grid math, monotone pyramid,
-  per-format checks). Prints findings (info / warning / error) as text or
-  `--json`. Exit code: `0` valid, `2` invalid (findings crossed the gate), `1`
-  operational error (path missing/unreadable). `--strict` treats warnings as
-  failures.
-- `wsitools extract --type <t> -o <path>` — save an associated image
-  (label / macro / thumbnail / overview) as PNG (default) or JPEG. JPEG
-  output is byte-pass-through when the source is already JPEG.
-
-**Associated-image editing**
-
-- `wsitools label remove <slide>` — strip the label image (PHI) from an
-  SVS or generic-TIFF file. The pyramid tile bytes are copied verbatim
-  (no decode, no re-encode); only the tail IFD is rewritten. Output is a
-  clean, compact file with no recoverable label PHI. Writes
-  `<stem>_relabeled<ext>` next to the input by default; use `-o/--output`
-  for an explicit path or `--in-place` to atomically overwrite the
-  original (temp + fsync + rename).
-- `wsitools label replace --image new.png <slide>` — replace the label
-  with a new image. Encoding defaults to LZW + Predictor 2 (lossless,
-  barcode-safe); override with `--compression {jpeg,lzw,deflate,none}`.
-  `--resize fit|stretch|none` (default `fit`), `--bg RRGGBB` for
-  letterbox fill (default `F5F5E6`), `--force` to skip the aspect guard,
-  `--label-dims WxH` to override target dimensions.
-- `wsitools macro|thumbnail|overview remove|replace …` — same mechanics
-  for the other associated-image types; `replace` defaults to JPEG
-  encoding. **`remove` works for every type on SVS, generic-TIFF,
-  COG-WSI, and OME-TIFF.** **`replace`** is supported for all types on
-  **generic-TIFF**, **COG-WSI**, and **OME-TIFF** (all three use a
-  full-file rebuild; COG-WSI replacements round-trip cleanly — no
-  abbreviated-JPEG limitation; OME-TIFF replacements are JPEG-only).
-  **OME-TIFF editing is lossy**: the rebuild regenerates a minimal
-  OME-XML — instrument/acquisition/channel/vendor metadata are discarded
-  even for the surviving pyramid; an always-on runtime warning fires; see
-  [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). On
-  **SVS** `replace` works for any associated image that trails the tiled
-  pyramid — **label**, **macro**, and **overview** — via a tail IFD
-  rewrite that leaves the pyramid bytes untouched. The **thumbnail**
-  (Aperio stores it at IFD 1, before the pyramid) can also be replaced on
-  single-level slides, but on a multi-level slide it would require
-  relocating the tiled levels, so it `replace`-errors with a clear message.
+Full per-command reference: **[docs/commands.md](docs/commands.md)**.
 
 > [!NOTE]
-> **OME-TIFF support in wsitools is rudimentary.** The writer models only
-> dimensions, MPP, and magnification — it does not carry instrument,
-> channel, acquisition, stage, or vendor metadata. Both `convert --to
-> ome-tiff` and associated-image editing regenerate a minimal OME-XML,
-> discarding richer OME annotations. For workflows that require the full
-> OME data model, use
-> [Bio-Formats](https://www.openmicroscopy.org/bio-formats/) (`bioformats2raw`
-> + `raw2ometiff`, or `bfconvert`). See
-> [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md).
+> Editing out the label is often a step in a **de-identification** workflow, but
+> wsitools edits *images* — it does not, on its own, de-identify a slide. Other
+> PHI may remain in slide metadata or in images you didn't remove. Removing an
+> image deletes it from the output file; the rest of the slide is your
+> responsibility.
 
-Other formats (DICOM, NDPI, Philips, BIF, IFE, Leica) are not supported
-for in-place editing — use `convert --to {svs,tiff} --no-associated` plus
-`label replace` instead.
+## Supported formats
 
-**Conversion**
+**Reads:** Aperio SVS · Hamamatsu NDPI · Philips-TIFF · OME-TIFF · DICOM-WSI ·
+Ventana/Roche BIF · Iris IFE · Leica SCN · generic tiled TIFF · COG-WSI
 
-- `wsitools convert --to cog-wsi` — losslessly copy a WSI into the COG-WSI
-  container (Cloud Optimized GeoTIFF + WSI extension tags). Tile bytes are
-  copied verbatim; no decode, no re-encode. See
-  `docs/superpowers/specs/2026-05-20-cog-wsi-format.md` for the format spec.
-- `wsitools convert --to {svs, tiff, ome-tiff}` — tile-copy re-container
-  (no `--codec` set) or re-encode (`--codec {jpeg, jpeg2000, jpegxl, avif,
-  webp, htj2k}`; JPEG 2000 lossless via `--quality reversible=true`).
-  Streaming pipeline; no L0 raster materialisation.
-- `wsitools convert --to dzi` — DeepZoom pyramid output, OpenSeadragon-
-  compatible (256×256 tiles, 1 px overlap, JPEG Q=85 by default). Single-
-  pass pyramid-descent generator with parallel libjpeg-turbo encoders;
-  ~150× faster than v0.16, faster than libvips `dzsave` on CMU-1.ndpi.
-  Associated images (label/macro/thumbnail/overview) are written as lossless
-  PNGs under `<stem>_associated/<type>.png` (DZI has no native slot for them, so
-  they're emitted as sidecars rather than dropped; `--no-associated` skips).
-- `wsitools convert --to szi` — Smart Zoom Image: DZI pyramid wrapped in a
-  store-method ZIP, plus an optional `scan-properties.xml` populated from
-  source metadata. Associated images are stored as PNG entries under
-  `<name>/<name>_associated/<type>.png` inside the archive.
-- `wsitools convert --to dicom` — **early** (experimental). Emits conformant
-  DICOM-WSI VOLUME instances from a **DICOM, JPEG-baseline, or JPEG 2000 source**
-  (SVS etc.): by default the **full resolution pyramid** — `convert --to dicom
-  -o <dir> <input>` writes one instance per source level as `<dir>/level-<n>.dcm`
-  (n=0 = full resolution) as a multi-instance Series sharing
-  Study/Series/FrameOfReference UIDs, written **atomically** (temp dir → rename,
-  never a partial pyramid). `--level N` selects a single level instead. The
-  source level's compressed tiles are copied **verbatim** (no decode/re-encode)
-  and re-encapsulated as TILED_FULL multi-frame PixelData. For **JPEG-baseline**,
-  `PhotometricInterpretation` is **marker-driven** — probed from the first tile's
-  JPEG markers (RGB for the Aperio APP14 raw-RGB variant, `YBR_FULL_422` /
-  `YBR_FULL` for subsampled / 4:4:4 YCbCr). For **JPEG 2000**, the transfer
-  syntax is **reversibility-driven** (`…4.90` lossless / `…4.91` lossy) and
-  `PhotometricInterpretation` is **codestream-derived** from the SIZ/COD markers
-  (RGB / `YBR_ICT` / `YBR_RCT` / `MONOCHROME2`). The source ICC profile is carried
-  through or a canonical **sRGB** profile is synthesized when absent. Validated
-  with `dciodvfy` (0 errors on every pyramid level) plus a pixel round-trip on
-  CMU-1-Small-Region.svs (RGB JPEG-baseline) and JP2K-33003-1.svs (RGB JPEG 2000);
-  the JP2K YBR / lossless branches are unit-tested only. In **full-pyramid mode**
-  the slide's **associated images** (label/overview/thumbnail, macro→overview) are
-  also emitted as single-frame instances in the same Series at `<dir>/<type>.dcm`
-  (e.g. `label.dcm`); `--no-associated` skips them, and `--level N` emits none.
-  >8-bit / `.jp2`-boxed JPEG 2000 are later slices. DICOM is also a **transform
-  target**: `convert --to dicom --factor N` reduces *any* source into a DICOM
-  pyramid, and `downsample <dicom>` / `crop <dicom>` (re-encode, plus
-  `crop --lossless` verbatim-L0 frame-copy) emit a reduced/cropped DICOM
-  directly (a `<dir>/level-<n>.dcm` pyramid; see `crop` / `downsample` below).
-  Re-encoded levels are **JPEG-baseline** — the DICOM derived-pyramid path does
-  not yet wire up the JPEG 2000 / HTJ2K encoders (which exist for the TIFF
-  family, see `--codec` above); the tile encode runs on a `--jobs` worker pool.
-- `wsitools convert --to bif` — **early** (experimental). Writes a Ventana/Roche
-  **DP 200-shaped BIF** from any source: the full pyramid as row-major `level=N`
-  IFDs plus a whole-slide overview (the source's `overview`/`macro` carried
-  through and oriented to portrait when present, else synthesized from the
-  tissue at the DP 200 canonical 1251×3685) and synthesized `<iScan>`/
-  `<EncodeInfo>` metadata (scanner model, MPP, magnification). **JPEG** sources
-  are **tile-copied verbatim** (fast, no re-encode); **non-JPEG** sources
-  re-encode to JPEG with **`--codec jpeg`** (self-contained tiles, on a
-  `--workers` pool). Output renders correctly in **bio-formats / QuPath** and (as
-  of opentile-go v0.45.3) round-trips **pixel-identically** through wsitools' own
-  reader. Tile storage is **row-major** with serpentine-numbered stitch joins,
-  matching genuine `Ventana-1.bif` (the whitepaper's "serpentine" describes the
-  stitch-graph numbering, not the pixel storage — opentile-go's BIF read bug we
-  found here is fixed in v0.45.3 / #57). Limitations: single-AOI, no Z; no
-  separate label/thumbnail or probability map carried; no `--factor`/`--target-mag`.
-- `wsitools downsample` — downsample a WSI by a power-of-2 factor (e.g.
-  40x → 20x), **format-preserving**: the output is the same container as the
-  source (SVS→SVS, OME-TIFF→OME-TIFF, generic-TIFF→generic-TIFF,
-  COG-WSI→COG-WSI, **DICOM→DICOM** — a `level-<n>.dcm` pyramid directory).
-  Regenerates the full pyramid from the new base, scales MPP
-  ×N / magnification ÷N, and copies associated images **byte-faithfully**
-  (verbatim source strips + Predictor/JPEGTables, via opentile-go
-  `AssociatedSourceOf`). Sources
-  with no matching writer error with a pointer to `convert`. To downsample
-  *into a different* container, use `convert --to {svs,tiff,ome-tiff,cog-wsi,
-  dicom} --factor N` (`dzi`/`szi` not yet supported).
-- `wsitools crop` — extract a rectangular region (`--rect X,Y,W,H`, level-0
-  coords) into the **same container** as the source (SVS, OME-TIFF,
-  generic-TIFF, COG-WSI, **DICOM**). Default re-encodes the exact extent;
-  `--lossless` snaps the rect to the source tile grid and copies L0 tiles
-  **verbatim** (byte-identical L0; the output is a tile-aligned superset of the
-  rect). Lower pyramid levels are rebuilt from the cropped base; the thumbnail
-  is regenerated from the crop region (label/macro/overview pass through). For a
-  DICOM source the output is a `level-<n>.dcm` pyramid directory.
+**Writes:** SVS · generic TIFF · OME-TIFF · COG-WSI · DICOM-WSI · DeepZoom (DZI) ·
+SZI · BIF · IFE
 
-Source formats accepted: SVS, Philips-TIFF, OME-TIFF (tiled), BIF, IFE,
-generic-TIFF, NDPI, OME-OneFrame, Leica SCN (single-image), COG-WSI, and
-DICOM-WSI.
-
-### Format × command support
-
-| Source format | `info` | `region` | `dump-ifds` | `extract`¹ | `hash`² | convert (from)³ | convert (to)⁴ | `downsample` / `crop`⁹ | label/macro remove\|replace⁷ |
+| Source format | `info` | `region` | `dump-ifds` | `extract` | `hash` | convert *from* | convert *to* | downsample / crop | edit |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | SVS           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
 | Philips-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — | — |
-| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓⁸ |
+| OME-TIFF      | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ (lossy) |
 | BIF           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | — | — | — |
 | generic-TIFF  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
-| NDPI          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
-| OME-OneFrame  | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
-| Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓\* | — | — | — |
+| NDPI          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓* | — | — | — |
+| Leica SCN     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓* | — | — | — |
 | COG-WSI       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓  | ✓ | ✓ | ✓ |
 | IFE           | ✓ | ✓ | — | ✓ | ✓ | ✓  | — | — | — |
-| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓⁵ | ✓ | ✓⁶ | ✓⁶ | — |
+| DICOM-WSI     | ✓ | ✓ | — | ✓ | ✓ | ✓  | ✓ | ✓ | — |
 
-¹ `extract` works when the slide carries that associated image (label/macro/thumbnail/overview); run `info` to list which.
-² `hash`: `--mode pixel` works for every format; the default file-mode is a single-file SHA-256.
-³ **convert (from)** — readable as a convert source. **✓\*** = striped source: opentile-go synthesizes a tile grid over the source strips, so `convert` decodes + re-encodes (reproducible JPEG tiles) rather than doing a bit-exact tile-copy. The lossless tile-copy fast path applies only to natively-tiled sources (plain ✓).
-⁴ **convert (to)** — available as a convert output **target**. The full target set is `cog-wsi`, `svs`, `tiff` (→ generic-TIFF), `ome-tiff`, `dicom`, `dzi`, `szi`, `bif`, `ife`; **DZI, SZI, BIF, and IFE** are output-only pyramid formats (not listed as readable-source rows). **IFE** ([Iris File Extension](https://github.com/IrisDigitalPathology/Iris-File-Extension)) writes JPEG/AVIF tiles with full metadata (MPP/mag/ICC/associated/attributes); a 256px-tiled JPEG/AVIF source copies tiles verbatim (lossless), else the pyramid is re-encoded, and output is validated against the official Iris-Codec implementation (`make ife-validate`). All ✓ targets except `dzi`/`szi`/`bif` also accept `--factor N` / `--target-mag M` to downsample during conversion (scales MPP ×N / magnification ÷N).
-⁵ DICOM directory input → use `--mode pixel` (file-mode is undefined for a multi-file series; a multi-series directory errors — see below).
-⁶ DICOM-WSI **write** is early — `convert --to dicom` emits conformant WSM VOLUME instances from a DICOM, **JPEG-baseline**, **or JPEG 2000** source (verbatim tile-copy, ICC carried-or-synthesized). JPEG-baseline `PhotometricInterpretation` is marker-driven; JPEG 2000 derives its transfer syntax from source reversibility (`…4.90` lossless / `…4.91` lossy) and its `PhotometricInterpretation` from the codestream SIZ/COD markers (RGB / `YBR_ICT` / `YBR_RCT` / `MONOCHROME2`). It emits a single instance with `--level N`, **or** the **full pyramid** by default as a multi-instance Series (one instance per level, `<dir>/level-<n>.dcm`, shared Series/FrameOfReference, atomic dir output). Full-pyramid mode also emits the slide's **associated images** (label/overview/thumbnail, macro→overview) as single-frame instances in the same Series at `<dir>/<type>.dcm` (per-type `ImageType`/`SpecimenLabelInImage`, SlideLabel module for label/overview). JPEG / JPEG 2000 associated images tile-copy verbatim-encapsulated; an associated image whose codec is **not** a DICOM transfer syntax (e.g. the **LZW label** on every Aperio SVS) is **decoded and stored as an uncompressed native RGB instance** (Explicit VR LE, VR `OB`, lossless — keeps the barcode scannable) rather than skipped, with decoding delegated to opentile-go v0.38.1 (`AssociatedImage.Decode`). `--no-associated` skips them; `--level N` emits none. Validated with `dciodvfy` (0 errors on every level and every associated instance, including the native label) plus pixel round-trips on the RGB JPEG-baseline (CMU-1-Small-Region.svs) and RGB JPEG 2000 (JP2K-33003-1.svs) paths and the native LZW-label transcode; the JP2K YBR / lossless branches are unit-tested only. >8-bit / `.jp2`-boxed JPEG 2000 are later slices. DICOM is also a **transform target**: `convert --to dicom --factor N` (any source), `downsample <dicom>`, and `crop <dicom>` (± `--lossless`) emit a reduced/cropped DICOM pyramid via the `internal/derivedsource` adapter — re-encoded levels are JPEG-baseline (parallel `--jobs` encode), a lossless crop's L0 is a verbatim frame-copy, and a crop's thumbnail is regenerated from the crop region.
-⁷ **label/macro remove|replace** — applies equally to `thumbnail` and `overview`. Pyramid tile bytes are copied verbatim (no decode/re-encode); only the tail IFD is rewritten.
-⁸ **OME-TIFF editing is lossy** — rebuilds the file via `streamwriter` and regenerates a minimal OME-XML (instrument/acquisition/channel/vendor `OriginalMetadata` not preserved; pyramid pixels, geometry/MPP/magnification, ICC, and the other associated images are). An always-on runtime warning fires on every OME-TIFF edit. Associated replacements are **JPEG-only** (opentile-go's OME-TIFF reader limitation — LZW/Deflate replacements would be unreadable). See [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md). For faithful OME metadata carry-through, use [Bio-Formats](https://www.openmicroscopy.org/bio-formats/).
-⁹ **`downsample` / `crop`** — both are **format-preserving** transforms sharing one support set (the ✓ rows; for DICOM see ⁶). `downsample` reduces by `--factor N` / `--target-mag M`; `crop` extracts `--rect X,Y,W,H` (level-0 coords), default re-encoding the exact extent or `--lossless` snapping to the tile grid and copying L0 tiles verbatim (byte-identical L0). To transform *into a different* container, use `convert --to <target> --factor N`.
-
-`downsample` is **format-preserving** — it reduces a slide and emits the same
-container it read (the ✓ rows: SVS, OME-TIFF, generic-TIFF, COG-WSI, DICOM). Other
-source formats error with a pointer to `convert --to … --factor`.
-
-Striped sources produce reproducible but synthesized JPEG tiles in the output
-(bit-exact tile-copy applies only to natively-tiled sources).
-
-**DICOM-WSI input.** A DICOM source may be either a single `.dcm` instance
-or a directory containing a WSM series — pass the path to either. A named
-`.dcm` always opens the series it belongs to (its siblings sharing the same
-`SeriesUID`), even when the directory holds other slides. If a directory holds
-more than one distinct WSM series, wsitools **refuses with an error** that lists
-the candidate series; pass a specific `.dcm` of the slide you want to resolve
-the ambiguity. (`dump-ifds` is TIFF-only and does not apply to
-DICOM; use `hash --mode pixel` rather than the default file-mode for a DICOM
-content hash.)
-
-**Diagnostics**
-
-- `wsitools doctor` — report installed codec libraries, physical RAM, and
-  the active soft memory limit (see [Memory](#memory)).
-- `wsitools version` — print version + Go runtime info.
-
-A global `--max-memory` flag caps the process's soft memory limit (default
-75% of RAM); see [Memory](#memory).
-
-## Roadmap
-
-See [`docs/roadmap.md`](./docs/roadmap.md) for the full list of planned
-utilities (`dump-tile`, `tagset`, `inventory`, `verify`, `diff`,
-`tile-server`, `dicom-wsi`, more codecs) and architectural items still
-queued.
-
-## Build prerequisites
-
-cgo dependencies (macOS via Homebrew):
-
-```sh
-brew install jpeg-turbo openjpeg jpeg-xl libavif webp openjph
-```
-
-`pkg-config` resolves all of them at build time. Linux equivalents
-(Debian/Ubuntu):
-
-```sh
-apt install libturbojpeg0-dev libopenjp2-7-dev libjxl-dev libavif-dev libwebp-dev
-# OpenJPH (HTJ2K) typically requires source build on Linux as of 2026-05.
-```
-
-Build a slim binary that skips selected codecs via build tags:
-
-```sh
-go build -tags 'noavif nowebp nohtj2k' ./cmd/wsitools   # only JPEG-XL + JPEG
-go build -tags 'nojxl noavif nowebp nohtj2k' ./cmd/wsitools   # only JPEG
-```
+<sub>**✓\*** stripped source — decoded and re-encoded into reproducible JPEG tiles
+rather than bit-exact tile-copied. DICOM-WSI writing is experimental. Full matrix
+(including OME-OneFrame), convert targets, and per-format caveats:
+**[docs/formats.md](docs/formats.md)**.</sub>
 
 ## Install
 
@@ -271,9 +87,9 @@ go build -tags 'nojxl noavif nowebp nohtj2k' ./cmd/wsitools   # only JPEG
 
 Download the archive for your platform from the
 [latest release](https://github.com/WSILabs/wsitools/releases/latest), extract,
-and run `wsitools` — no toolchain or codec libraries to install. Every binary is
-statically linked and includes all codecs (jpeg, jpeg2000, htj2k, jpegxl, avif,
-webp). Verify integrity with `sha256sum -c SHA256SUMS`.
+and run `wsitools`. Every binary is statically linked and bundles all codecs
+(jpeg, jpeg2000, htj2k, jpegxl, avif, webp) — no toolchain or libraries needed.
+Verify with `sha256sum -c SHA256SUMS`.
 
 | Platform | Asset |
 |---|---|
@@ -281,197 +97,71 @@ webp). Verify integrity with `sha256sum -c SHA256SUMS`.
 | macOS Apple Silicon / Intel | `wsitools-darwin-{arm64,amd64}.tar.gz` |
 | Windows x86-64 | `wsitools-windows-amd64.zip` |
 
-macOS binaries are signed + notarized, so they run with no Gatekeeper prompt.
+> macOS binaries are **not yet signed or notarized**. On first run, clear the
+> quarantine flag with `xattr -d com.apple.quarantine wsitools`, or allow the
+> binary in **System Settings → Privacy & Security**. Signing + notarization is
+> planned — see the [roadmap](docs/roadmap.md).
 
 ### From source
 
-Its image codecs are C libraries linked via cgo, so install those first. With
-**Go 1.26+** and the codec libraries present:
+With **Go 1.26+** and the image codec libraries installed (JPEG is the only
+required one; the rest are optional):
 
 ```sh
 go install github.com/wsilabs/wsitools/cmd/wsitools@latest
 ```
 
-**Step-by-step, full-codec instructions for macOS, Linux, and Windows are in
-[docs/INSTALL.md](docs/INSTALL.md)** — including a JPEG-only minimal install and
-how to skip individual codecs (`-tags no<codec>`). **JPEG (libjpeg-turbo) is the
-only required codec** — it covers Aperio SVS, the TIFF family, and DICOM JPEG.
-JPEG 2000 (legacy Aperio), JPEG XL, AVIF, WebP, and HTJ2K are all optional.
+Step-by-step instructions for macOS, Linux, and Windows — including a JPEG-only
+minimal build and how to skip individual codecs — are in
+**[docs/INSTALL.md](docs/INSTALL.md)**.
 
-## Usage
-
-### Inspection
+## Quick start
 
 ```sh
-# Slide summary (analog of openslide-show-properties)
+# Slide summary (add --json for scripting)
 wsitools info slide.svs
 
-# Same data as JSON for scripting
-wsitools info --json slide.svs | jq .levels
-
-# Format-aware per-IFD layout dump (slim)
-wsitools dump-ifds slide.svs
-
-# Full per-tag dump with names + enum interpretation (tiffinfo analog)
-wsitools dump-ifds --raw slide.svs
-
-# Same content as JSON
-wsitools dump-ifds --raw --json slide.svs | jq .
-
-# Extract a rectangular pixel region as PNG
+# Extract a pixel region as PNG
 wsitools region --x 10000 --y 8000 --w 1024 --h 1024 --level 0 -o tile.png slide.svs
 
-# Save the slide's label as a standalone PNG
-wsitools extract --type label -o label.png slide.svs
+# Remove the label image — pyramid bytes untouched, no re-encode
+wsitools label remove slide.svs            # → slide_relabeled.svs
 
-# Content hash for cache identity / dedup (default: SHA-256 of file bytes)
-wsitools hash slide.svs
-
-# Pixel-stable hash (decodes L0 tiles → SHA-256 of RGB raster)
-wsitools hash --mode pixel slide.svs
-```
-
-### Associated-image editing (deidentification)
-
-```sh
-# Strip the label (PHI) — pyramid bytes untouched, no decode/re-encode
-wsitools label remove slide.svs
-# → writes slide_relabeled.svs next to the input
-
-# Overwrite the original atomically (temp + fsync + rename)
-wsitools label remove --in-place slide.svs
-
-# Explicit output path
-wsitools label remove -o deidentified.svs slide.svs
-
-# Replace the label with a new image (LZW+predictor2 default — lossless, barcode-safe)
-wsitools label replace --image new_label.png slide.svs
-
-# Replace with explicit compression and letterbox background
-wsitools label replace --image new_label.png --compression jpeg --bg F5F5E6 slide.svs
-
-# Remove or replace the macro / thumbnail / overview the same way
-wsitools macro remove slide.svs
-wsitools macro replace --image new_macro.jpg slide.svs
-wsitools thumbnail remove slide.svs
-wsitools overview remove slide.svs
-```
-
-Supported for SVS, generic-TIFF, COG-WSI, and **OME-TIFF** (lossy — see
-footnote ⁸ and [docs/ome-tiff-limitations.md](docs/ome-tiff-limitations.md)).
-COG-WSI and OME-TIFF both use a full-file rebuild (pyramid tile bytes copied
-verbatim; geometry/MPP/magnification/ICC and the other associated images
-preserved). OME-TIFF editing additionally regenerates a minimal OME-XML —
-instrument/acquisition/channel/vendor metadata are not carried through; an
-always-on runtime warning makes this explicit. Associated replacements on
-OME-TIFF are JPEG-only (reader limitation). Other formats (DICOM, NDPI,
-Philips, BIF, IFE, Leica) are not writable — convert first with
-`convert --to {svs,tiff}`.
-
-### Conversion
-
-```sh
-# Lossless tile-copy into a different container
+# Re-container into COG-WSI (lossless tile-copy when the source codec fits the target)
 wsitools convert --to cog-wsi -o slide.cog.tiff slide.svs
-wsitools convert --to ome-tiff -o slide.ome.tiff slide.svs
 
-# Re-encode to a different codec (still SVS-shaped)
-wsitools convert --to svs --codec jpegxl -o slide-jxl.svs slide.svs
-
-# Force BigTIFF (default `auto` promotes when predicted output > 2 GiB)
-wsitools convert --to cog-wsi --bigtiff on -o slide.cog.tiff slide.svs
-
-# Skip label/macro/thumbnail/overview
-wsitools convert --to cog-wsi --no-associated -o slide.cog.tiff slide.svs
-
-# DeepZoom output (OpenSeadragon-compatible)
+# Generate DeepZoom tiles for a web viewer (OpenSeadragon-compatible)
 wsitools convert --to dzi -o slide.dzi slide.svs
 
-# Smart Zoom Image (DZI in a store-method ZIP)
-wsitools convert --to szi -o slide.szi slide.svs
+# Crop a region into the same container (--lossless keeps L0 tiles byte-identical)
+wsitools crop --rect 20000,15000,8192,8192 --lossless -o region.svs slide.svs
 
-# Downsample a 40x SVS to 20x (factor 2 default)
+# Downsample a 40× slide to 20× (same container out)
 wsitools downsample -o slide-20x.svs slide-40x.svs
-
-# Or via target magnification
-wsitools downsample --target-mag 10 -o slide-10x.svs slide-40x.svs
 ```
 
-### Other
+More examples and every flag: **[docs/commands.md](docs/commands.md)**.
+
+## Documentation
+
+- **[Command reference](docs/commands.md)** — every command, flag, and output layout
+- **[Format support](docs/formats.md)** — full format × command matrix and caveats
+- **[Installation](docs/INSTALL.md)** — per-platform builds, codec selection
+- **[Memory & performance](docs/memory.md)** — footprint and the `--max-memory` limit
+- **[OME-TIFF limitations](docs/ome-tiff-limitations.md)** — what the minimal writer carries
+- **[Roadmap](docs/roadmap.md)** — planned utilities, formats, and signed macOS builds
+- **[Changelog](CHANGELOG.md)** — release notes
+
+## Contributing & testing
 
 ```sh
-# Check installed codec libs
-wsitools doctor
-
-# Suppress progress bar (useful in CI / scripts)
-wsitools --quiet convert --to cog-wsi -o out.tiff in.svs
-
-# Per-level timing summaries on stderr
-wsitools --verbose convert --to dzi -o out.dzi in.svs
-
-# Structured JSON logging (for log aggregators)
-wsitools --log-format json convert --to cog-wsi -o out.tiff in.svs
-```
-
-### Example output
-
-```
-$ wsitools convert --to dzi -o CMU-1.dzi CMU-1.ndpi
-encoding  100% 15847/15847 tiles  1132 tiles/s  ETA 0s
-wrote CMU-1.dzi (47.3 MB, 14s)
-```
-
-## Memory
-
-Conversion footprint scales with slide **width**, not a fixed ceiling.
-`convert --to dzi|szi` streams top-to-bottom but holds full-width strip
-buffers across every pyramid level plus the reader's per-tile decode
-caches, so peak resident memory grows with the widest level:
-
-- CMU-1.ndpi (L0 51200 × 38144): ~3.5 GB peak
-- OS-2.ndpi  (L0 126976 × 73728): ~5.4 GB peak
-
-`downsample` (v0.1) additionally materialises the full L0 raster (a 40x
-L0 ≈ 100K × 60K × 3 ≈ 18 GB); a streaming retrofit is queued — see
-[`docs/roadmap.md`](./docs/roadmap.md).
-
-To keep a runaway conversion from exhausting the machine, wsitools sets a
-**soft memory limit at 75% of physical RAM by default** (via Go's
-`GOMEMLIMIT`). Under pressure the garbage collector works harder —
-trading some speed — instead of letting the process OOM the host. Tune or
-disable it:
-
-```sh
-# Cap the soft limit at 4 GiB (slower, lower peak)
-wsitools --max-memory 4GiB convert --to dzi -o out.dzi in.ndpi
-
-# Disable the cap entirely
-wsitools --max-memory off convert --to dzi -o out.dzi in.ndpi
-
-# GOMEMLIMIT env is respected and takes precedence over the default
-GOMEMLIMIT=8GiB wsitools convert --to dzi -o out.dzi in.ndpi
-```
-
-Precedence: `--max-memory` > `GOMEMLIMIT` > 75% default. `wsitools doctor`
-reports the active limit and its source. The reader's own decode-cache
-budget is separately tunable via `OPENTILE_READ_MEMORY_BUDGET` (default
-1 GiB; opentile-go v0.30+).
-
-## Testing
-
-```sh
-make test     # unit tests + integration, race-detector
+make test   # unit + integration tests, race detector
 make vet
 ```
 
-Integration tests are fixture-gated by `WSI_TOOLS_TESTDIR` (default
-`./sample_files`). CI downloads CMU-1-Small-Region.svs + CMU-1.ndpi from
-[`wsilabs/wsi-fixtures`](https://github.com/wsilabs/wsi-fixtures) on every
-push and PR. For local work, soft-link to your fixture pool:
-
-```sh
-ln -s $HOME/GitHub/opentile-go/sample_files sample_files
-```
+Integration tests are fixture-gated by `WSI_TOOLS_TESTDIR`; CI pulls fixtures
+from [`wsilabs/wsi-fixtures`](https://github.com/wsilabs/wsi-fixtures) on every
+push and PR.
 
 ## License
 
