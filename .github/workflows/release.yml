@@ -34,6 +34,11 @@ jobs:
 
       - name: Build release notes + title
         id: meta
+        env:
+          # Sentinel for the macOS signing gate — the same Developer-ID cert
+          # secret the build job's sign step checks. Present → binaries are signed
+          # + notarized, so the notes say so; absent → they ship unsigned.
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
@@ -68,11 +73,16 @@ jobs:
           | macOS Intel  | `wsitools-darwin-amd64.tar.gz` |
           | Windows x86-64 | `wsitools-windows-amd64.zip` |
 
-          Verify with `sha256sum -c SHA256SUMS`. macOS binaries are not yet signed or
-          notarized — on first run, clear the quarantine flag with
-          `xattr -d com.apple.quarantine wsitools` (or allow the binary in System
-          Settings → Privacy & Security).
+          Verify with `sha256sum -c SHA256SUMS`.
           EOF
+
+          # macOS signing note — conditional on the same cert-secret sentinel the
+          # build job's sign step gates on, so the notes never over-claim.
+          if [ -n "${MACOS_CERT_P12_BASE64:-}" ]; then
+            echo 'macOS binaries are signed + notarized.' >> release_notes.md
+          else
+            echo 'macOS binaries are not yet signed or notarized — on first run, clear the quarantine flag with `xattr -d com.apple.quarantine wsitools` (or allow the binary in System Settings → Privacy & Security).' >> release_notes.md
+          fi
 
           # actions/checkout fetches the tag as a lightweight ref, so
           # %(contents:subject) falls back to the commit subject. Re-fetch the
