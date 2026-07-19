@@ -15,8 +15,8 @@ import (
 // drain, WriteTile blocks forever at tile ~1025. The conversion must
 // complete (not time out).
 func TestConvertSVSLargeNoDeadlock(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1.svs")
 	out := filepath.Join(t.TempDir(), "out.svs")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)

@@ -11,7 +11,7 @@ import (
 // SVS downsample via convert must match the standalone downsample (pixel-equal),
 // and scale metadata (factor-4 of a 40x slide → ~10x, MPP ×4).
 func TestConvertFactorSVSParity(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -43,7 +43,7 @@ func TestConvertFactorSVSParity(t *testing.T) {
 
 // tiff + cog-wsi targets must produce scaled metadata (factor-4 of a 20x → 5x).
 func TestConvertFactorTIFFTargets(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -66,7 +66,7 @@ func TestConvertFactorTIFFTargets(t *testing.T) {
 
 // invalid factor rejected (full message wired in a later task; here at least it must not silently pass).
 func TestConvertFactorRejectsBadValue(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -79,7 +79,7 @@ func TestConvertFactorRejectsBadValue(t *testing.T) {
 }
 
 func TestDownsampleAliasEqualsConvert(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -100,7 +100,7 @@ func TestDownsampleAliasEqualsConvert(t *testing.T) {
 }
 
 func TestConvertFactorOMETIFF(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -121,7 +121,7 @@ func TestConvertFactorOMETIFF(t *testing.T) {
 
 // downsample is format-preserving: OME-TIFF source -> OME-TIFF output (reduced).
 func TestDownsamplePreservesOMETIFF(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "ome-tiff", "Leica-1.ome.tiff")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -138,7 +138,7 @@ func TestDownsamplePreservesOMETIFF(t *testing.T) {
 
 // downsample of a COG-WSI source preserves cog-wsi.
 func TestDownsamplePreservesCOGWSI(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "cog-wsi", "CMU-1-Small-Region_cog-wsi.tiff")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -158,7 +158,7 @@ func TestDownsamplePreservesCOGWSI(t *testing.T) {
 // and carry scaled metadata synthesized from the source's opentile metadata.
 // Guards A2 (the old code rejected src.Format() != SVS).
 func TestConvertFactorSVSFromNonSVS(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	// cog-wsi source: non-SVS format, Aperio Make, MPP 0.499, 20x.
 	src := filepath.Join(testDir(t), "cog-wsi", "CMU-1-Small-Region_cog-wsi.tiff")
 	if _, err := os.Stat(src); err != nil {
@@ -220,7 +220,7 @@ func TestDownsampleSVSAllowsJpegCodecs(t *testing.T) {
 
 // downsample of a non-writable source format errors with a pointer to convert.
 func TestDownsampleRejectsNonWritableFormat(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "ndpi", "CMU-1.ndpi")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)

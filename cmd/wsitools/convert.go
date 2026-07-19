@@ -58,7 +58,7 @@ tile-copy: compressed tile bytes are copied verbatim into the new
 container, no decode or re-encode. For natively-tiled sources (SVS,
 Philips, OME-tiled, BIF, IFE, generic-TIFF, COG-WSI, SZI, single-image
 Leica-SCN) the source's tile bytes appear verbatim in the destination.
-For striped sources (NDPI, OME-OneFrame) the file has no tile bytes;
+For stripped sources (NDPI, OME-OneFrame) the file has no tile bytes;
 opentile-go synthesizes JPEG tiles deterministically from MCU-aligned
 sub-regions, so the output is reproducible byte-for-byte (the bytes are
 opentile-go's synthesized tiles, not source strip bytes).

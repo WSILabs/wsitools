@@ -31,8 +31,8 @@ func photometricOf(t *testing.T, bin, file string) string {
 // keeps Photometric=RGB(2). Covers re-encode AND both verbatim tile-copy cases,
 // seeding the JFIF-source case by re-encoding CMU (CI-available) first.
 func TestConvertPhotometricMatchesJPEGFraming(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1-Small-Region.svs")
 	dir := t.TempDir()
 
 	conv := func(out string, args ...string) {

@@ -21,8 +21,8 @@ func dumpRaw(t *testing.T, bin, file string) string {
 // private MPP/mag tags with scaled values — magnification halved
 // (40 → 20) and MPP doubled (~0.25 → ~0.50).
 func TestDownsampleScalesMPPAndMag(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/scan_620_.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/scan_620_.svs")
 	out := filepath.Join(t.TempDir(), "ds.svs")
 	cmdOut, err := exec.Command(bin, "downsample", "--factor", "2", "-f", "-o", out, src).CombinedOutput()
 	if err != nil {
@@ -48,8 +48,8 @@ func TestDownsampleScalesMPPAndMag(t *testing.T) {
 // TestConvertCogWSICarriesScaleNDPI: cog-wsi from an NDPI source carries
 // the WSI MPP/mag tags + resolution (cross-format MPP path).
 func TestConvertCogWSICarriesScaleNDPI(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "ndpi/CMU-1.ndpi")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "ndpi/CMU-1.ndpi")
 	out := filepath.Join(t.TempDir(), "o.cog.tiff")
 	cmdOut, err := exec.Command(bin, "convert", "--to", "cog-wsi", "-f", "-o", out, src).CombinedOutput()
 	if err != nil {
@@ -80,8 +80,8 @@ func grepLine(s, sub string) string {
 // NDPI fixture now prints an MPP line (previously dropped — NDPI carries
 // MPP in its TIFF resolution tags, which opentile-go reads).
 func TestInfoReportsMPPForNDPI(t *testing.T) {
-	bin := stripedBinary(t)
-	sample := stripedSample(t, "ndpi/CMU-1.ndpi")
+	bin := strippedBinary(t)
+	sample := strippedSample(t, "ndpi/CMU-1.ndpi")
 	out, err := exec.Command(bin, "info", sample).CombinedOutput()
 	if err != nil {
 		t.Fatalf("info: %v\n%s", err, out)
@@ -120,8 +120,8 @@ func iccLen(raw string) int {
 // streamwriter path with svs. (CMU-1.svs would also carry the same ICC
 // but its size triggers a pre-existing, ICC-unrelated streamwriter hang.)
 func TestICCByteIdenticalAcrossPaths(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/JP2K-33003-1.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/JP2K-33003-1.svs")
 	const wantLen = 141992
 	cases := []struct {
 		name string
@@ -154,8 +154,8 @@ func TestICCByteIdenticalAcrossPaths(t *testing.T) {
 
 // TestNoICCWhenSourceLacksIt: a source with no ICC emits no tag 34675.
 func TestNoICCWhenSourceLacksIt(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/scan_620_.svs") // no ICC
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/scan_620_.svs") // no ICC
 	out := filepath.Join(t.TempDir(), "o.cog.tiff")
 	if cmdOut, err := exec.Command(bin, "convert", "--to", "cog-wsi", "-f", "-o", out, src).CombinedOutput(); err != nil {
 		t.Fatalf("convert: %v\n%s", err, cmdOut)

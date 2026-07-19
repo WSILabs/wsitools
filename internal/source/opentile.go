@@ -42,7 +42,7 @@ func OpenWithSlide(path string) (Source, *opentile.Slide, error) {
 		return nil, nil, fmt.Errorf("source: open %s: %w", path, err)
 	}
 	// Sanity: confirm opentile-go has synthesized tile geometry for this
-	// format. Striped / single-frame formats (NDPI, OME-OneFrame) are
+	// format. Stripped / single-frame formats (NDPI, OME-OneFrame) are
 	// handled internally by opentile-go's readers, which synthesize
 	// (Size, TileSize, Grid). If a future format reports zero TileSize
 	// on level 0, reject early with a clear diagnostic rather than

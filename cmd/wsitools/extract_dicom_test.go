@@ -8,7 +8,7 @@ import (
 
 // extract of the uncompressed DICOM label must succeed and produce a PNG.
 func TestExtractDICOMUncompressedLabel(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	dir := filepath.Join(testDir(t), "dicom", "Leica-4")
 	if _, err := os.Stat(dir); err != nil {
 		t.Skipf("no DICOM fixture at %s", dir)

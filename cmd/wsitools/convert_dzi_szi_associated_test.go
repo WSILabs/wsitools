@@ -13,7 +13,7 @@ import (
 // image as a lossless PNG under <base>_associated/ (DZI has no standard slot, so
 // wsitools emits siblings of the tile tree rather than dropping them).
 func TestConvertToDZIEmitsAssociatedPNGs(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -39,7 +39,7 @@ func TestConvertToDZIEmitsAssociatedPNGs(t *testing.T) {
 
 // TestConvertToDZINoAssociated: --no-associated skips the associated directory.
 func TestConvertToDZINoAssociated(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -56,7 +56,7 @@ func TestConvertToDZINoAssociated(t *testing.T) {
 // TestConvertToSZIEmitsAssociatedPNGs: convert --to szi stores each associated
 // image as a PNG zip entry under <name>/<name>_associated/.
 func TestConvertToSZIEmitsAssociatedPNGs(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)

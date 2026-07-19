@@ -24,8 +24,8 @@ func TestTileCopyEligible(t *testing.T) {
 		{"ome-tiff jpeg tiled", "ome-tiff", "", source.CompressionJPEG, true, true},
 		// --codec forces re-encode.
 		{"svs jpeg tiled w/ codec", "svs", "jpeg", source.CompressionJPEG, true, false},
-		// Striped source.
-		{"cogwsi striped", "cog-wsi", "", source.CompressionJPEG, false, false},
+		// Stripped source.
+		{"cogwsi stripped", "cog-wsi", "", source.CompressionJPEG, false, false},
 		// SVS is JPEG-only.
 		{"svs webp tiled", "svs", "", source.CompressionWebP, true, false},
 		// dzi/szi never tile-copy.

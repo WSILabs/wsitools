@@ -218,11 +218,11 @@ func acceptedOrdersForFormat(format string) []string {
 }
 
 // nativelyTiled returns true if the source format is natively tile-based
-// (not strip-synthesized). Striped formats: NDPI, OME-OneFrame. opentile-go's
-// readers synthesize tile geometry for striped sources; tile-copy still
+// (not strip-synthesized). Stripped formats: NDPI, OME-OneFrame. opentile-go's
+// readers synthesize tile geometry for stripped sources; tile-copy still
 // works on synthesized tiles (the bytes are reproducible standalone
 // JPEGs), but our "bit-exact" guarantee applies only to natively-tiled
-// sources. Striped sources take the re-encode path.
+// sources. Stripped sources take the re-encode path.
 func nativelyTiled(format string) bool {
 	switch format {
 	case "ndpi", "ome-tiff-oneframe":

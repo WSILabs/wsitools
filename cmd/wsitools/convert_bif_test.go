@@ -10,7 +10,7 @@ import (
 // TestConvertToBIF: a JPEG-tiled SVS converts to a BIF that re-detects as bif
 // with VENTANA DP 200 identity and the source's level count.
 func TestConvertToBIF(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -31,7 +31,7 @@ func TestConvertToBIF(t *testing.T) {
 // source without --codec must be rejected with a message pointing at the JPEG
 // requirement, rather than silently producing a broken file.
 func TestConvertToBIFRejectsNonJPEG(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "590_lzw_imagescope.tif")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -49,7 +49,7 @@ func TestConvertToBIFRejectsNonJPEG(t *testing.T) {
 // TestConvertToBIFReencode: --codec jpeg re-encodes a non-JPEG (LZW) source to
 // a valid BIF that re-detects as bif.
 func TestConvertToBIFReencode(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "590_lzw_imagescope.tif")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -68,7 +68,7 @@ func TestConvertToBIFReencode(t *testing.T) {
 // DP 200 canonical 1251×3685 portrait, and the reader crops the label as its
 // top 1/3 (1251×1228) — for both carry-through and synthesized overviews.
 func TestConvertToBIFOverviewDims(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -96,7 +96,7 @@ func mustInfo(t *testing.T, bin, path string) []byte {
 // through opentile (wsitools' own reader) with an identical pixel hash — i.e.
 // opentile places the row-major BIF tiles correctly (opentile-go #57, v0.45.3).
 func TestConvertToBIFOpentileRoundTrip(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -117,7 +117,7 @@ func TestConvertToBIFOpentileRoundTrip(t *testing.T) {
 
 // TestConvertToBIFRejectsBadCodec: BIF only supports --codec jpeg.
 func TestConvertToBIFRejectsBadCodec(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)

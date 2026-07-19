@@ -43,7 +43,7 @@ func TestProbeCodecsAllEncode(t *testing.T) {
 // TestDoctorReportsMemory runs the built binary's `doctor` and checks the
 // Memory section is present with a Soft limit line.
 func TestDoctorReportsMemory(t *testing.T) {
-	bin := stripedBinary(t) // reuse helper from striped_formats_test.go
+	bin := strippedBinary(t) // reuse helper from stripped_formats_test.go
 	out, err := exec.Command(bin, "doctor").CombinedOutput()
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, out)
