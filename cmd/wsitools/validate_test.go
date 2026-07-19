@@ -217,7 +217,7 @@ func exitCode(err error) int {
 }
 
 func TestValidateGoodSlideExitsZero(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -232,7 +232,7 @@ func TestValidateGoodSlideExitsZero(t *testing.T) {
 }
 
 func TestValidateGoodSlideJSON(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -255,7 +255,7 @@ func TestValidateGoodSlideJSON(t *testing.T) {
 }
 
 func TestValidateMissingPathExitsOne(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	out, err := runBin(bin, "validate", filepath.Join(t.TempDir(), "does-not-exist.svs"))
 	if code := exitCode(err); code != 1 {
 		t.Fatalf("exit = %d, want 1 (operational error)\n%s", code, out)
@@ -271,7 +271,7 @@ func TestValidateMissingPathExitsOne(t *testing.T) {
 }
 
 func TestValidateGarbageFileExitsTwo(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	junk := filepath.Join(t.TempDir(), "garbage.svs")
 	if err := os.WriteFile(junk, []byte("not a tiff at all, just bytes"), 0o644); err != nil {
 		t.Fatal(err)

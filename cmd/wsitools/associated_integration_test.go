@@ -815,7 +815,7 @@ func multiLevelSVSFixture(t *testing.T) string {
 // multi-level SVS converted via the tile-copy path must keep the thumbnail and
 // overview (they were dropped when the thumbnail stranded after the pyramid).
 func TestConvertToSVSMultiLevelKeepsThumbnail(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	in := multiLevelSVSFixture(t)
 	for _, ty := range []string{"thumbnail", "overview", "label"} {
 		if _, _, ok := assocOfType(t, in, ty); !ok {
@@ -847,7 +847,7 @@ func mustRun(t *testing.T, bin string, args ...string) []byte {
 // TestConvertToSVSMultiLevelReencodeKeepsThumbnail: the --codec re-encode path
 // must also keep the thumbnail+overview on a multi-level SVS.
 func TestConvertToSVSMultiLevelReencodeKeepsThumbnail(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	in := multiLevelSVSFixture(t)
 	for _, ty := range []string{"thumbnail", "overview"} {
 		if _, _, ok := assocOfType(t, in, ty); !ok {

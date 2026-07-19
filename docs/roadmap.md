@@ -40,7 +40,7 @@ queued, deferred, or under consideration.
 - `region` — openslide-write-png analog: extract `--x --y --w --h --level` rectangle as PNG.
 
 ### v0.15
-- (no new utilities — source-format expansion: NDPI, OME-OneFrame, and Leica SCN (single-image) slides now work across all CLI subcommands. opentile-go synthesizes tile geometry for striped sources; wsitools' source layer trusts the synthesis. Bit-exact tile-copy promise for `convert` applies to natively-tiled sources only; striped sources produce reproducible but synthesized JPEG tiles in the output.)
+- (no new utilities — source-format expansion: NDPI, OME-OneFrame, and Leica SCN (single-image) slides now work across all CLI subcommands. opentile-go synthesizes tile geometry for stripped sources; wsitools' source layer trusts the synthesis. Bit-exact tile-copy promise for `convert` applies to natively-tiled sources only; stripped sources produce reproducible but synthesized JPEG tiles in the output.)
 
 ### v0.16
 - `convert --to dzi` — DeepZoom pyramid output (OpenSeadragon-compatible). Defaults: 256×256 tiles, 1px overlap, JPEG Q=85.
@@ -268,7 +268,7 @@ queued, deferred, or under consideration.
 - TilePrefix / TileBodyInto / SpliceJPEGTile adoption — only valuable if `tile-server` is built.
 
 ### Deferred from v0.17 (added 2026-05-26)
-- **Parallel raw-tile fetch + decode for `convert --to svs|tiff|ome-tiff --codec X` on striped sources.** v0.17's ScaledStrips wiring speeds up DZI/SZI rendering but doesn't help TIFF-family re-encode because those targets keep L0 dimensions intact (no scaling). A separate parallel-decode path on the existing `internal/pipeline` worker pool would help striped→TIFF re-encode where opentile-go's per-tile synthesis is the bottleneck. Quantify the gap first — measure striped→TIFF re-encode runtime against a tiled source baseline.
+- **Parallel raw-tile fetch + decode for `convert --to svs|tiff|ome-tiff --codec X` on stripped sources.** v0.17's ScaledStrips wiring speeds up DZI/SZI rendering but doesn't help TIFF-family re-encode because those targets keep L0 dimensions intact (no scaling). A separate parallel-decode path on the existing `internal/pipeline` worker pool would help stripped→TIFF re-encode where opentile-go's per-tile synthesis is the bottleneck. Quantify the gap first — measure stripped→TIFF re-encode runtime against a tiled source baseline.
 
 ### Deferred from v0.20 (audit complete 2026-05-29; outcomes below)
 - ✅ **DZI cascade kernel** — audited. wsitools `convert --to dzi|szi` uses 2×2 box averaging; libvips dzsave does too (`--region-shrink=mean` default). Decoded pixels were bit-identical across three sample levels of CMU-1-Small-Region.svs. No change. Findings: `docs/notes/2026-05-29-dzi-kernel-audit.md`.

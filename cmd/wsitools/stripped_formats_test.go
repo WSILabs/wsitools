@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func stripedBinary(t *testing.T) string {
+func strippedBinary(t *testing.T) string {
 	t.Helper()
 	for _, candidate := range []string{"./bin/wsitools", "../../bin/wsitools"} {
 		if abs, err := filepath.Abs(candidate); err == nil {
@@ -21,7 +21,7 @@ func stripedBinary(t *testing.T) string {
 	return ""
 }
 
-func stripedSample(t *testing.T, rel string) string {
+func strippedSample(t *testing.T, rel string) string {
 	t.Helper()
 	dir := os.Getenv("WSI_TOOLS_TESTDIR")
 	if dir == "" {
@@ -34,10 +34,10 @@ func stripedSample(t *testing.T, rel string) string {
 	return path
 }
 
-// TestStripedFormatsInfo: `wsitools info` works on NDPI / SCN /
+// TestStrippedFormatsInfo: `wsitools info` works on NDPI / SCN /
 // OME-OneFrame. Verifies exit 0 + non-empty output.
-func TestStripedFormatsInfo(t *testing.T) {
-	bin := stripedBinary(t)
+func TestStrippedFormatsInfo(t *testing.T) {
+	bin := strippedBinary(t)
 	cases := []struct {
 		name string
 		rel  string
@@ -48,7 +48,7 @@ func TestStripedFormatsInfo(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sample := stripedSample(t, c.rel)
+			sample := strippedSample(t, c.rel)
 			out, err := exec.Command(bin, "info", sample).CombinedOutput()
 			if err != nil {
 				t.Fatalf("info %s: %v\n%s", c.rel, err, out)
@@ -64,11 +64,11 @@ func TestStripedFormatsInfo(t *testing.T) {
 	}
 }
 
-// TestStripedFormatsConvertSVS: `wsitools convert --codec jpeg --to svs`
+// TestStrippedFormatsConvertSVS: `wsitools convert --codec jpeg --to svs`
 // on each format produces a non-empty file. (Ported off the removed
 // `transcode` command; `--container svs` → `--to svs`.)
-func TestStripedFormatsConvertSVS(t *testing.T) {
-	bin := stripedBinary(t)
+func TestStrippedFormatsConvertSVS(t *testing.T) {
+	bin := strippedBinary(t)
 	cases := []struct {
 		name string
 		rel  string
@@ -79,7 +79,7 @@ func TestStripedFormatsConvertSVS(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sample := stripedSample(t, c.rel)
+			sample := strippedSample(t, c.rel)
 			out := filepath.Join(t.TempDir(), "out.svs")
 			cmdOut, err := exec.Command(bin,
 				"convert",
@@ -106,10 +106,10 @@ func TestStripedFormatsConvertSVS(t *testing.T) {
 	}
 }
 
-// TestStripedFormatsHashPixel: `wsitools hash --mode pixel` produces
+// TestStrippedFormatsHashPixel: `wsitools hash --mode pixel` produces
 // a deterministic pixel-hash on each format.
-func TestStripedFormatsHashPixel(t *testing.T) {
-	bin := stripedBinary(t)
+func TestStrippedFormatsHashPixel(t *testing.T) {
+	bin := strippedBinary(t)
 	cases := []struct {
 		name string
 		rel  string
@@ -120,7 +120,7 @@ func TestStripedFormatsHashPixel(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sample := stripedSample(t, c.rel)
+			sample := strippedSample(t, c.rel)
 			out, err := exec.Command(bin, "hash", "--mode", "pixel", sample).CombinedOutput()
 			if err != nil {
 				t.Fatalf("hash %s: %v\n%s", c.rel, err, out)
@@ -133,15 +133,15 @@ func TestStripedFormatsHashPixel(t *testing.T) {
 	}
 }
 
-// TestStripedFormatsConvert: `wsitools convert --to cog-wsi` on each
+// TestStrippedFormatsConvert: `wsitools convert --to cog-wsi` on each
 // format produces a non-empty COG-WSI file.
 //
 // Note: bit-exact tile-copy from NDPI / OME-OneFrame is NOT promised
 // (those sources don't have tile bytes; opentile-go synthesizes
 // JPEG tiles). Test only checks that the COG-WSI output exists and
 // is non-empty.
-func TestStripedFormatsConvert(t *testing.T) {
-	bin := stripedBinary(t)
+func TestStrippedFormatsConvert(t *testing.T) {
+	bin := strippedBinary(t)
 	cases := []struct {
 		name string
 		rel  string
@@ -152,7 +152,7 @@ func TestStripedFormatsConvert(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sample := stripedSample(t, c.rel)
+			sample := strippedSample(t, c.rel)
 			out := filepath.Join(t.TempDir(), "out.tiff")
 			cmdOut, err := exec.Command(bin,
 				"convert",

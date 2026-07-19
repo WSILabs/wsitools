@@ -30,8 +30,8 @@ func dumpIFD0Raw(t *testing.T, bin, file string) string {
 // emits ImageDepth=1 and YCbCrSubSampling=[1,1] matching the tiles'
 // actual 4:4:4 encoding (parsed from the real tile via LumaSampling).
 func TestConvertSVSAperioTagsJPEG(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1-Small-Region.svs")
 	out := filepath.Join(t.TempDir(), "out.svs")
 
 	if o, err := exec.Command(bin, "convert", "--to", "svs", "-f", "-o", out, src).CombinedOutput(); err != nil {
@@ -55,8 +55,8 @@ func TestConvertSVSAperioTagsJPEG(t *testing.T) {
 // (withSourceSubsampling), and CMU-1-Small-Region's tiles are RGB/4:4:4, the
 // re-encoded tiles stay 4:4:4 -> [1,1] (the tag describes the bytes we write).
 func TestConvertSVSAperioTagsReencodeJPEG(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1-Small-Region.svs")
 	out := filepath.Join(t.TempDir(), "out.svs")
 
 	if o, err := exec.Command(bin, "convert", "--to", "svs", "--codec", "jpeg", "-f", "-o", out, src).CombinedOutput(); err != nil {
@@ -76,8 +76,8 @@ func TestConvertSVSAperioTagsReencodeJPEG(t *testing.T) {
 // emit neither ImageDepth nor YCbCrSubSampling. Uses CMU-1-Small-Region.svs
 // (in the CI fixture set) so the gate is exercised in CI, not just locally.
 func TestConvertNonSVSContainerOmitsAperioTags(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1-Small-Region.svs")
 	out := filepath.Join(t.TempDir(), "out.tiff")
 
 	if o, err := exec.Command(bin, "convert", "--to", "tiff", "-f", "-o", out, src).CombinedOutput(); err != nil {

@@ -471,7 +471,7 @@ over the library.
 - ✅ **Convert subsumes transcode** — shipped v0.16. The standalone
   `transcode` command was removed; `convert --to <target> --codec <c>`
   covers the lossy paths.
-- ✅ **NDPI source support** — shipped v0.15. Striped sources produce
+- ✅ **NDPI source support** — shipped v0.15. Stripped sources produce
   reproducible but synthesized JPEG tiles (bit-exact tile-copy applies
   only to natively-tiled sources).
 

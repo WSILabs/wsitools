@@ -10,7 +10,7 @@ import (
 // cog-wsi tile-copy must preserve source pixels (pixel-hash equality) and
 // key metadata (MPP, magnification) on a DICOM source.
 func TestDICOMConvertCogWSIFidelity(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	dir := filepath.Join(testDir(t), "dicom", "Leica-4")
 	if _, err := os.Stat(dir); err != nil {
 		t.Skipf("no DICOM fixture at %s", dir)

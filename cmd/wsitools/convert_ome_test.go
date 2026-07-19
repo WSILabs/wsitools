@@ -11,8 +11,8 @@ import (
 // multi-level source converted to ome-tiff must read back with the SAME number
 // of pyramid levels (sub-resolutions stored as SubIFDs), not 1.
 func TestConvertOMEPyramidRoundTrips(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1.svs")
 	out := filepath.Join(t.TempDir(), "out.ome.tiff")
 
 	if o, err := exec.Command(bin, "convert", "--to", "ome-tiff", "-f", "-o", out, src).CombinedOutput(); err != nil {
@@ -42,8 +42,8 @@ func TestConvertOMEPyramidRoundTrips(t *testing.T) {
 // TestConvertOMEStructure: L0 carries SubIFDs (330) + SampleFormat (339), and
 // associated images are surfaced by the reader.
 func TestConvertOMEStructure(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1.svs")
 	out := filepath.Join(t.TempDir(), "out.ome.tiff")
 
 	if o, err := exec.Command(bin, "convert", "--to", "ome-tiff", "-f", "-o", out, src).CombinedOutput(); err != nil {
@@ -67,8 +67,8 @@ func TestConvertOMEStructure(t *testing.T) {
 // still valid — L0 carries SampleFormat but NO SubIFDs tag (no sub-resolutions
 // to reference), and the reader sees exactly one pyramid level.
 func TestConvertOMESingleLevel(t *testing.T) {
-	bin := stripedBinary(t)
-	src := stripedSample(t, "svs/CMU-1-Small-Region.svs")
+	bin := strippedBinary(t)
+	src := strippedSample(t, "svs/CMU-1-Small-Region.svs")
 	out := filepath.Join(t.TempDir(), "out.ome.tiff")
 
 	if o, err := exec.Command(bin, "convert", "--to", "ome-tiff", "-f", "-o", out, src).CombinedOutput(); err != nil {

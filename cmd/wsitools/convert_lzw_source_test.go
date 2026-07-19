@@ -15,7 +15,7 @@ import (
 // codec-of-bytes decode covers only JPEG / JP2K).
 
 func TestConvertReencodeDecodesLZWAndUncompressedSource(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	for _, fx := range []struct{ name, file string }{
 		{"lzw", "590_crop_lzw_imagescope.tif"},
 		{"uncompressed", "590_crop_none_imagescope.tif"},
@@ -49,7 +49,7 @@ func TestConvertReencodeDecodesLZWAndUncompressedSource(t *testing.T) {
 }
 
 func TestDownsampleDecodesLZWSource(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "590_crop_lzw_imagescope.tif")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)

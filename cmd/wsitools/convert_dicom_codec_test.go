@@ -15,7 +15,7 @@ import (
 // TIFF family's --codec semantics.
 
 func TestConvertDICOMReencodesExoticCodecWithJPEG(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	for _, fx := range []string{"590_crop_lzw_imagescope.tif", "590_crop_none_imagescope.tif"} {
 		t.Run(fx, func(t *testing.T) {
 			src := filepath.Join(testDir(t), "svs", fx)
@@ -43,7 +43,7 @@ func TestConvertDICOMReencodesExoticCodecWithJPEG(t *testing.T) {
 }
 
 func TestConvertDICOMRejectsExoticCodecWithoutFlag(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "590_crop_lzw_imagescope.tif")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -62,7 +62,7 @@ func TestConvertDICOMRejectsExoticCodecWithoutFlag(t *testing.T) {
 // re-encoding the pyramid through the engine, matching what --factor already did.
 // Regression: the plain path used to hardcode "only 'jpeg'" and reject them.
 func TestConvertDICOMReencodesJP2KAndHTJ2K(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -87,7 +87,7 @@ func TestConvertDICOMReencodesJP2KAndHTJ2K(t *testing.T) {
 // avif / png have no DICOM transfer syntax and are still rejected (at the
 // capability gate), with a clear error naming the supported codecs.
 func TestConvertDICOMRejectsCodecWithoutTransferSyntax(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)

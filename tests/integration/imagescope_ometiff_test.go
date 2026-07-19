@@ -38,7 +38,7 @@ func TestImageScope_TiledLZWDecodes(t *testing.T) {
 // SVS associated images in a non-JPEG codec (ImageScope re-exports thumbnail/
 // label/overview to match the pyramid codec) now decode. An uncompressed
 // thumbnail used to error "Could not determine subsampling — corrupt input"
-// in the striped-JPEG reassembler; extract now dispatches by Compression tag.
+// in the stripped-JPEG reassembler; extract now dispatches by Compression tag.
 func TestImageScope_NonJPEGAssociatedDecodes(t *testing.T) {
 	bin := buildOnce(t)
 	src := svsFixture(t, "590_crop_none_imagescope.tif")

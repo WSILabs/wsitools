@@ -13,7 +13,7 @@ import (
 // (decoder/jpeg: scale=16). With the codec-agnostic fallback it must succeed
 // AND actually reduce L0 by 16× (not silently no-op / mis-scale).
 func TestDownsampleFactor16JPEG(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -32,7 +32,7 @@ func TestDownsampleFactor16JPEG(t *testing.T) {
 // JPEG fast-scale path (factors 2/4/8) is unchanged and must reduce L0 by the
 // requested factor.
 func TestDownsampleJPEGFastScaleStillWorks(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "CMU-1-Small-Region.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
@@ -54,7 +54,7 @@ func TestDownsampleJPEGFastScaleStillWorks(t *testing.T) {
 // from the old box path by design; assert it reduces L0 4× AND preserves the
 // source JP2K codec (single-axis transform must not silently transcode to jpeg).
 func TestDownsampleJP2KSource(t *testing.T) {
-	bin := stripedBinary(t)
+	bin := strippedBinary(t)
 	src := filepath.Join(testDir(t), "svs", "JP2K-33003-1.svs")
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("fixture absent: %v", err)
