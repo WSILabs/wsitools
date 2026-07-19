@@ -68,8 +68,10 @@ jobs:
           | macOS Intel  | `wsitools-darwin-amd64.tar.gz` |
           | Windows x86-64 | `wsitools-windows-amd64.zip` |
 
-          Verify with `sha256sum -c SHA256SUMS`. macOS binaries are signed + notarized; an
-          unsigned (dry-run) build instead needs `xattr -d com.apple.quarantine wsitools`.
+          Verify with `sha256sum -c SHA256SUMS`. macOS binaries are not yet signed or
+          notarized — on first run, clear the quarantine flag with
+          `xattr -d com.apple.quarantine wsitools` (or allow the binary in System
+          Settings → Privacy & Security).
           EOF
 
           # actions/checkout fetches the tag as a lightweight ref, so
