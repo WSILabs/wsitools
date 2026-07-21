@@ -111,9 +111,12 @@ queued, deferred, or under consideration.
     workflows that need full OME metadata fidelity.
   - Additional deferred items (independent of the above): **SVS thumbnail/macro/
     overview `replace`** (Aperio-conformant abbreviated JPEG — entropy-only strips
-    + shared `JPEGTables` + APP14); `--rotate {90,180,270}` for label orientation
-    correction; `--if-exists {remove,skip,error}` for idempotent scripted remove;
-    DICOM-WSI associated-instance drop/swap (separate DICOM series logic).
+    + shared `JPEGTables` + APP14); **label geometric edits** — `--rotate
+    {90,180,270}` and `--flip {h,v}` (horizontal/vertical mirror) for orientation
+    correction, reusing the `label replace` decode→transform→re-encode path so the
+    pyramid is untouched (cheap; one small image); `--if-exists
+    {remove,skip,error}` for idempotent scripted remove; DICOM-WSI
+    associated-instance drop/swap (separate DICOM series logic).
 - **`tagset`** — in-place TIFF tag edit (e.g. ImageDescription, Software). Useful for fixing one bad slide in a pool without full re-encode.
 - **`inventory`** — walk a directory; dump CSV/JSON of slide metadata for pool-management UIs.
 - **`verify`** — open every IFD, decode every tile, report errors. "fsck for WSI."
@@ -121,6 +124,7 @@ queued, deferred, or under consideration.
 
 ### Larger items
 - **`tile-server`** — HTTP DZI/IIIF tile server; analog of openslide-python `deepzoom_server.py`. Activates opentile-go v0.13's splice-prefix optimization (TilePrefix / TileBodyInto / SpliceJPEGTile).
+- **Whole-slide geometric transforms (`rotate` / `flip`)** — rotate the pyramid 90/180/270° or mirror it horizontally/vertically, preserving the source container (like `crop`/`downsample`). Heavier than the label edit above: 90°/270° transpose every tile *and* the tile grid across every level, swap width/height and the MPP axes, and update any orientation metadata; 180° and axis flips can keep tile boundaries but still rewrite the whole file. Natural fit for the streaming retile engine as a geometric variant of the descent; for a DICOM target, also set `ImageOrientationSlide`. Scope: large. No re-encode-free fast path for 90°/270° (tiles must be transposed); a lossless 180°/flip tile-transform path may be possible for baseline JPEG later.
 - **`convert --to dicom`** (DICOM-WSI writer) — emit a DICOM VL Whole Slide
   Microscopy Image set (Sup. 145). Analog of `wsi2dcm` / `wsidicomizer`.
   **Approach decided (2026-06-03):** pure-Go on `suyashkumar/dicom`, **porting**
