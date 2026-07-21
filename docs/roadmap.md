@@ -116,6 +116,11 @@ queued, deferred, or under consideration.
     (like `label remove`/`replace`) that decode→rotate→re-encodes only the single
     label, pyramid untouched (cheap). *Rotation only — no flip/mirror for labels:*
     a label is a barcode/text card, so a mirror never corresponds to a real scan.
+    *Bounded to the editable allowlist (SVS, generic-TIFF, COG-WSI, OME-TIFF),
+    where the label is a standalone IFD (90/270 just swaps its W/H).* Formats that
+    embed the label in a macro/overview instead of a separate image — e.g. **NDPI**
+    and **BIF** — are out of scope, same as all editing (`ErrUnsupportedAssoc`);
+    `convert --to {svs,tiff}` first.
     `--if-exists {remove,skip,error}` for idempotent scripted remove; DICOM-WSI
     associated-instance drop/swap (separate DICOM series logic).
 - **`tagset`** — in-place TIFF tag edit (e.g. ImageDescription, Software). Useful for fixing one bad slide in a pool without full re-encode.
