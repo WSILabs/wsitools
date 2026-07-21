@@ -109,20 +109,32 @@ queued, deferred, or under consideration.
     metadata verbatim. This is a substantial undertaking; [Bio-Formats](https://www.openmicroscopy.org/bio-formats/)
     (`bioformats2raw` + `raw2ometiff`) is the recommended interim answer for
     workflows that need full OME metadata fidelity.
-  - Additional deferred items (independent of the above): **SVS thumbnail/macro/
-    overview `replace`** (Aperio-conformant abbreviated JPEG — entropy-only strips
-    + shared `JPEGTables` + APP14); **`label rotate {90,180,270}`** — rotate the
-    label image in place for orientation correction, a standalone label operation
-    (like `label remove`/`replace`) that decode→rotate→re-encodes only the single
-    label, pyramid untouched (cheap). *Rotation only — no flip/mirror for labels:*
-    a label is a barcode/text card, so a mirror never corresponds to a real scan.
-    *Bounded to the editable allowlist (SVS, generic-TIFF, COG-WSI, OME-TIFF),
-    where the label is a standalone IFD (90/270 just swaps its W/H).* Formats that
-    embed the label in a macro/overview instead of a separate image — e.g. **NDPI**
-    and **BIF** — are out of scope, same as all editing (`ErrUnsupportedAssoc`);
-    `convert --to {svs,tiff}` first.
-    `--if-exists {remove,skip,error}` for idempotent scripted remove; DICOM-WSI
-    associated-instance drop/swap (separate DICOM series logic).
+  - Additional deferred items (independent of the above):
+    - **Associated-image editing for DICOM and IFE.** We *write* both
+      (`convert --to dicom` / `convert --to ife`) and both carry associated images,
+      so `remove`/`replace`/`rotate` should extend to them — the "we don't write it"
+      exclusion applies to NDPI/Philips/Leica (no writer) and BIF (writer exists,
+      but the label is embedded in the whole-slide overview, not a standalone image),
+      NOT to these two. **DICOM** is the simplest editing target of any format: its
+      associated images are separate `<type>.dcm` instances in the series dir, so
+      `remove` = drop the instance, `replace`/`rotate` = regenerate one via the
+      existing dicomwriter associated-instance path — no TIFF splice, no full
+      rebuild (preserve the shared Series/FrameOfReference UIDs + SlideLabel module).
+      **IFE** rebuilds through the IFE writer (like the COG-WSI/OME-TIFF path) but
+      can be **lossless**: 256px JPEG/AVIF tiles copy verbatim and the writer carries
+      full metadata (MPP/mag/ICC/attributes), unlike the lossy OME-TIFF rebuild.
+      Grows the editable set to SVS, generic-TIFF, COG-WSI, OME-TIFF, **DICOM, IFE**.
+    - **`label rotate {90,180,270}`** — rotate the label in place for orientation
+      correction, a standalone label op (like `label remove`/`replace`) that
+      decode→rotate→re-encodes only the single label, pyramid untouched (cheap).
+      *Rotation only — no flip/mirror:* a label is a barcode/text card, so a mirror
+      never matches a real scan. Follows the editable-format set above (an
+      independent-label IFD or DICOM instance; 90/270 swaps its W/H). Formats that
+      embed the label in a macro/overview — **NDPI**, **BIF** — stay out of scope
+      (no independent label to rotate); `convert --to {svs,tiff}` first.
+    - **SVS thumbnail/macro/overview `replace`** — Aperio-conformant abbreviated
+      JPEG (entropy-only strips + shared `JPEGTables` + APP14).
+    - **`--if-exists {remove,skip,error}`** — idempotent scripted remove.
 - **`tagset`** — in-place TIFF tag edit (e.g. ImageDescription, Software). Useful for fixing one bad slide in a pool without full re-encode.
 - **`inventory`** — walk a directory; dump CSV/JSON of slide metadata for pool-management UIs.
 - **`verify`** — open every IFD, decode every tile, report errors. "fsck for WSI."
