@@ -118,15 +118,23 @@ type cropEmitParams struct {
 
 // rasterEncodeKnobs builds the codec knobs for the lossless-crop reduced-level
 // raster encoder: the resolved crop knobs (quality + any codec-specific knobs,
-// e.g. jpeg2000 reversible) plus — for a JPEG encoder only — the source chroma
-// subsampling so the raster levels match the verbatim L0's YCbCrSubSampling tag.
+// e.g. jpeg2000 reversible) plus the source chroma subsampling so the re-encoded
+// raster levels match the verbatim L0's chroma — keeping the pyramid uniform
+// (JPEG: YCbCrSubSampling tag; JPEG 2000: 4:2:2 stays 4:2:2 / tag 33003, wsitools#28).
 func rasterEncodeKnobs(p cropEmitParams) map[string]string {
 	k := make(map[string]string, len(p.knobs)+1)
 	for kk, vv := range p.knobs {
 		k[kk] = vv
 	}
-	if p.fac != nil && p.fac.Name() == "jpeg" {
-		if ss := sourceJPEGSubsampling(p.src); ss != "" {
+	if p.fac != nil {
+		var ss string
+		switch p.fac.Name() {
+		case "jpeg":
+			ss = sourceJPEGSubsampling(p.src)
+		case "jpeg2000":
+			ss = sourceJP2KSubsampling(p.src)
+		}
+		if ss != "" {
 			k["subsampling"] = ss
 		}
 	}
