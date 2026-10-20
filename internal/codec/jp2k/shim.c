@@ -89,18 +89,35 @@ static int clamp_resolutions(int w, int h) {
 // reversible != 0  -> lossless 5/3 wavelet (quality ignored).
 // reversible == 0  -> lossy 9/7 wavelet at a quality-derived compression ratio.
 // On success returns 0 and sets *outbuf (caller frees) / *outsize.
+// wsi_jp2k_encode encodes a width*height interleaved RGB888 tile.
+// subX/subY are the chroma subsampling factors (1,1 = 4:4:4). When both are 1,
+// the output is RGB + MCT (sRGB) as before. When either is >1, the shim converts
+// RGB->YCbCr (JFIF/BT.601 full-range), subsamples Cb/Cr by subX horizontally and
+// subY vertically (block-averaged), turns MCT off (MCT requires equal component
+// sizes), and emits a SYCC codestream — so a subsampled Aperio-style JP2K pyramid
+// stays chroma-uniform. opentile-go reads this back (dims + YCbCr->RGB); see
+// wsitools#28.
 int wsi_jp2k_encode(const unsigned char *rgb, int width, int height,
-                    int quality, int reversible,
+                    int quality, int reversible, int subX, int subY,
                     unsigned char **outbuf, size_t *outsize) {
 	if (!rgb || width <= 0 || height <= 0) {
 		return 1;
 	}
+	if (subX != 1 && subX != 2) subX = 1;
+	if (subY != 1 && subY != 2) subY = 1;
+	int subsampled = (subX > 1 || subY > 1);
+	int cw = (width + subX - 1) / subX;  // chroma plane width
+	int ch = (height + subY - 1) / subY; // chroma plane height
+
 	opj_cparameters_t params;
 	opj_set_default_encoder_parameters(&params);
 	params.tcp_numlayers = 1;
 	params.cp_disto_alloc = 1;
 	params.numresolution = clamp_resolutions(width, height);
-	params.tcp_mct = 1; // RGB multi-component (color decorrelating) transform
+	// MCT is OpenJPEG's RGB decorrelating transform; it requires equal-sized
+	// components, so it's only valid for 4:4:4. Subsampled output does RGB->YCbCr
+	// here instead and leaves MCT off.
+	params.tcp_mct = subsampled ? 0 : 1;
 	if (reversible) {
 		params.irreversible = 0;     // reversible 5/3
 		params.tcp_rates[0] = 0.0f;  // 0 => lossless (no rate cap)
@@ -120,12 +137,19 @@ int wsi_jp2k_encode(const unsigned char *rgb, int width, int height,
 		cmpt[c].prec = 8;
 		cmpt[c].bpp = 8;
 		cmpt[c].sgnd = 0;
-		cmpt[c].dx = 1;
-		cmpt[c].dy = 1;
-		cmpt[c].w = (OPJ_UINT32)width;
-		cmpt[c].h = (OPJ_UINT32)height;
+		if (c == 0 || !subsampled) {
+			cmpt[c].dx = 1;
+			cmpt[c].dy = 1;
+			cmpt[c].w = (OPJ_UINT32)width;
+			cmpt[c].h = (OPJ_UINT32)height;
+		} else {
+			cmpt[c].dx = (OPJ_UINT32)subX;
+			cmpt[c].dy = (OPJ_UINT32)subY;
+			cmpt[c].w = (OPJ_UINT32)cw;
+			cmpt[c].h = (OPJ_UINT32)ch;
+		}
 	}
-	opj_image_t *image = opj_image_create(3, cmpt, OPJ_CLRSPC_SRGB);
+	opj_image_t *image = opj_image_create(3, cmpt, subsampled ? OPJ_CLRSPC_SYCC : OPJ_CLRSPC_SRGB);
 	if (!image) {
 		return 2;
 	}
@@ -133,11 +157,43 @@ int wsi_jp2k_encode(const unsigned char *rgb, int width, int height,
 	image->y0 = 0;
 	image->x1 = (OPJ_UINT32)width;
 	image->y1 = (OPJ_UINT32)height;
-	int npix = width * height;
-	for (int i = 0; i < npix; i++) {
-		image->comps[0].data[i] = rgb[i * 3 + 0];
-		image->comps[1].data[i] = rgb[i * 3 + 1];
-		image->comps[2].data[i] = rgb[i * 3 + 2];
+	if (!subsampled) {
+		int npix = width * height;
+		for (int i = 0; i < npix; i++) {
+			image->comps[0].data[i] = rgb[i * 3 + 0];
+			image->comps[1].data[i] = rgb[i * 3 + 1];
+			image->comps[2].data[i] = rgb[i * 3 + 2];
+		}
+	} else {
+		// Y at full res; Cb/Cr block-averaged over each subX×subY cell (JFIF/
+		// BT.601 full-range RGB->YCbCr).
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				const unsigned char *p = rgb + (y * width + x) * 3;
+				double Y = 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+				image->comps[0].data[y * width + x] = (int)(Y + 0.5);
+			}
+		}
+		for (int yc = 0; yc < ch; yc++) {
+			for (int xc = 0; xc < cw; xc++) {
+				double sumCb = 0, sumCr = 0;
+				int n = 0;
+				for (int dy = 0; dy < subY; dy++) {
+					int sy = yc * subY + dy;
+					if (sy >= height) sy = height - 1;
+					for (int dx = 0; dx < subX; dx++) {
+						int sx = xc * subX + dx;
+						if (sx >= width) sx = width - 1;
+						const unsigned char *p = rgb + (sy * width + sx) * 3;
+						sumCb += 128.0 - 0.168736 * p[0] - 0.331264 * p[1] + 0.5 * p[2];
+						sumCr += 128.0 + 0.5 * p[0] - 0.418688 * p[1] - 0.081312 * p[2];
+						n++;
+					}
+				}
+				image->comps[1].data[yc * cw + xc] = (int)(sumCb / n + 0.5);
+				image->comps[2].data[yc * cw + xc] = (int)(sumCr / n + 0.5);
+			}
+		}
 	}
 
 	opj_codec_t *codec = opj_create_compress(OPJ_CODEC_J2K);

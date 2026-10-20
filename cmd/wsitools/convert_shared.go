@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	opentile "github.com/wsilabs/opentile-go"
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
 	"github.com/wsilabs/wsitools/cmd/wsitools/quality"
 	qualityjpeg "github.com/wsilabs/wsitools/cmd/wsitools/quality/jpeg"
 	"github.com/wsilabs/wsitools/internal/codec"
@@ -154,6 +155,45 @@ func sourceJPEGSubsampling(slide *opentile.Slide) string {
 		return "420"
 	}
 	return ""
+}
+
+// sourceJP2KSubsampling returns the chroma-subsampling knob ("444"/"422"/"440"/
+// "420") matching the source L0's JPEG 2000 tiles, or "" if the source isn't
+// JPEG 2000 or can't be inspected. It reads the codestream's SIZ component
+// subsampling via opentile-go's CodestreamInspector — the same signal `info`
+// reports — so a JP2K re-encode (e.g. a lossless crop's reduced levels) can match
+// the source's subsampling instead of defaulting to 4:4:4. 4:4:4 (or unknown)
+// returns "" so the default RGB+MCT path is used.
+func sourceJP2KSubsampling(slide *opentile.Slide) string {
+	lvls := slide.Pyramid(0).Levels
+	if len(lvls) == 0 {
+		return ""
+	}
+	b, err := lvls[0].Tile(0, 0)
+	if err != nil {
+		return ""
+	}
+	fac, ok := otdecoder.Get("jpeg2000")
+	if !ok {
+		return ""
+	}
+	insp, ok := fac.(otdecoder.CodestreamInspector)
+	if !ok {
+		return ""
+	}
+	ci, err := insp.Inspect(b)
+	if err != nil {
+		return ""
+	}
+	switch ci.ChromaSubsampling {
+	case otdecoder.Subsampling422:
+		return "422"
+	case otdecoder.Subsampling420:
+		return "420"
+	case otdecoder.Subsampling440:
+		return "440"
+	}
+	return "" // 4:4:4 / none / unknown → default RGB+MCT (33005)
 }
 
 // withSourceSubsampling returns knobs (a copy) with the "subsampling" knob set

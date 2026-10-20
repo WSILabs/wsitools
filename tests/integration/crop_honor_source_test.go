@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	opentile "github.com/wsilabs/opentile-go"
+	otdecoder "github.com/wsilabs/opentile-go/decoder"
+	_ "github.com/wsilabs/opentile-go/decoder/all" // register the jpeg2000 codestream inspector
 	_ "github.com/wsilabs/opentile-go/formats/all"
 	"github.com/wsilabs/wsitools/cmd/wsitools/quality"
 	qualityjpeg "github.com/wsilabs/wsitools/cmd/wsitools/quality/jpeg"
@@ -96,6 +98,75 @@ func TestCropLosslessUniformCodec(t *testing.T) {
 	for i, l := range lv {
 		if l.Compression != opentile.CompressionJP2K {
 			t.Errorf("level %d codec = %v, want JP2K (uniform with the verbatim L0, not a mixed pyramid)", i, l.Compression)
+		}
+	}
+}
+
+// TestCropLosslessUniformChromaJP2K guards wsitools#28 (chroma residual): lossless
+// crop of a 4:2:2 JPEG 2000 source used to re-encode the reduced levels at the
+// JP2K encoder default (4:4:4), leaving a chroma-non-uniform pyramid (L0 4:2:2
+// verbatim, lowers 4:4:4). The reduced levels must now match the source's chroma
+// subsampling. Reads each level's chroma from the codestream via the same
+// inspector `info` uses.
+func TestCropLosslessUniformChromaJP2K(t *testing.T) {
+	src := filepath.Join(testdir(t), "svs", "JP2K-33003-1.svs")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture missing: %v", err)
+	}
+	bin := buildOnce(t)
+
+	// Read each level's chroma from the J2K codestream via opentile's
+	// CodestreamInspector — the SAME signal sourceJP2KSubsampling uses (the
+	// wsitools quality inspector leaves ChromaSubsampling empty for JP2K).
+	jp2kInsp := func() otdecoder.CodestreamInspector {
+		fac, ok := otdecoder.Get("jpeg2000")
+		if !ok {
+			t.Skip("jpeg2000 decoder not registered")
+		}
+		insp, ok := fac.(otdecoder.CodestreamInspector)
+		if !ok {
+			t.Skip("jpeg2000 decoder has no CodestreamInspector")
+		}
+		return insp
+	}()
+	chromaOf := func(path string) []string {
+		sl, err := opentile.OpenFile(path)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		defer sl.Close()
+		var out []string
+		for i, l := range sl.Levels() {
+			b, err := l.Tile(0, 0)
+			if err != nil {
+				t.Fatalf("level %d tile: %v", i, err)
+			}
+			ci, err := jp2kInsp.Inspect(b)
+			if err != nil {
+				t.Fatalf("level %d inspect: %v", i, err)
+			}
+			out = append(out, ci.ChromaSubsampling.String())
+		}
+		return out
+	}
+
+	// Confirm the source is actually subsampled (otherwise the test is vacuous).
+	srcChroma := chromaOf(src)
+	if len(srcChroma) == 0 || srcChroma[0] != "4:2:2" {
+		t.Skipf("source L0 chroma = %v, want 4:2:2 (fixture changed)", srcChroma)
+	}
+
+	out := filepath.Join(t.TempDir(), "crop.svs")
+	if o, err := runCLI(bin, "crop", "--lossless", "--x", "0", "--y", "0", "--w", "4096", "--h", "4096", "-f", "-o", out, src); err != nil {
+		t.Fatalf("lossless crop: %v\n%s", err, o)
+	}
+	got := chromaOf(out)
+	if len(got) < 2 {
+		t.Fatalf("expected a multi-level pyramid, got %d levels", len(got))
+	}
+	for i, c := range got {
+		if c != "4:2:2" {
+			t.Errorf("level %d chroma = %q, want 4:2:2 (uniform with the 4:2:2 verbatim L0)", i, c)
 		}
 	}
 }

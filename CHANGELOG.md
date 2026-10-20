@@ -4,6 +4,21 @@ All notable changes to wsi-tools will be documented here. The format is loosely 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`crop --lossless` of a JPEG 2000 source now produces a chroma-uniform pyramid**
+  (wsitools#28). The verbatim L0 keeps the source's 4:2:2 chroma, but the
+  re-encoded reduced levels defaulted to the JP2K encoder's 4:4:4 (RGB+MCT,
+  tagged 33005) — a pyramid whose L0 was 4:2:2/33003 and whose lowers were
+  4:4:4/33005. The JP2K encoder gained an optional chroma-subsampling mode
+  (`--quality subsampling=422|420|440`): when subsampling it emits YCbCr/SYCC
+  (MCT off) and tags the Aperio YCbCr code 33003 (vs 33005 for the default
+  RGB+MCT); `crop`'s reduced-level encoder now matches the source's subsampling,
+  so every level is 4:2:2/33003 like the verbatim L0. Non-subsampled (4:4:4)
+  sources are unchanged (RGB+MCT/33005, #44-correct). Verified round-trip through
+  opentile-go's reader (no read-side change needed) and L0-vs-reduced colour
+  parity within ±1/channel.
+
 ## [0.26.12] - 2026-07-17
 
 ### Fixed
